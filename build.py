@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import glob
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -113,13 +114,41 @@ def get_git_commit_hash() -> str:
     return result.stdout.strip()[:7]
 
 
-def cargo_env_for_target(target: str) -> dict[str, str]:
+def cargo_context_for_target(target: str) -> tuple[dict[str, str], str]:
     env = os.environ.copy()
-    if "BORINGSSL_BUILD_DIR" not in env:
-        boring_dir = BORINGSSL_BUILD_DIRS.get(target)
-        if boring_dir and boring_dir.exists():
-            env["BORINGSSL_BUILD_DIR"] = os.fspath(boring_dir)
-    return env
+    configured_dir = env.get("BORINGSSL_BUILD_DIR")
+    if configured_dir:
+        build_dir = Path(configured_dir).expanduser()
+        if not build_dir.is_absolute():
+            build_dir = REPO_ROOT / build_dir
+    else:
+        build_dir = BORINGSSL_BUILD_DIRS.get(target)
+        if build_dir is None:
+            raise ValueError(f"No default BoringSSL build directory for target {target}")
+
+    build_dir = build_dir.resolve()
+    source_dir = build_dir.parent
+    bssl_sys_dir = source_dir / "rust" / "bssl-sys"
+    required_paths = (
+        bssl_sys_dir / "Cargo.toml",
+        build_dir / "libcrypto.a",
+        build_dir / "libssl.a",
+        build_dir / "rust" / "bssl-sys" / "librust_wrapper.a",
+        build_dir / "rust" / "bssl-sys" / f"wrapper_{target}.rs",
+    )
+    missing = [path for path in required_paths if not path.is_file()]
+    if missing:
+        missing_text = ", ".join(os.fspath(path) for path in missing)
+        raise FileNotFoundError(
+            f"BoringSSL is not built for {target}; missing: {missing_text}. "
+            f"Build it with -DRUST_BINDINGS={target}, or set BORINGSSL_BUILD_DIR "
+            "to the matching build directory."
+        )
+
+    env["BORINGSSL_BUILD_DIR"] = os.fspath(build_dir)
+    bssl_sys_path = json.dumps(bssl_sys_dir.as_posix())
+    cargo_patch = f"patch.crates-io.bssl-sys.path={bssl_sys_path}"
+    return env, cargo_patch
 
 
 def build_binary(
@@ -133,7 +162,8 @@ def build_binary(
     build_type = "release" if release else "debug"
     print(f"Building {bin_name} for {abi} ({target}, {build_type})...")
 
-    cmd = ["cargo", "build", "--target", target]
+    env, cargo_patch = cargo_context_for_target(target)
+    cmd = ["cargo", "--config", cargo_patch, "build", "--target", target]
     if package:
         cmd.extend(["-p", package, "--bin", bin_name])
     else:
@@ -141,7 +171,7 @@ def build_binary(
     if release:
         cmd.append("--release")
 
-    run(cmd, env=cargo_env_for_target(target))
+    run(cmd, env=env)
 
     binary_path = TARGET_ROOT / target / build_type / bin_name
     if not binary_path.exists():

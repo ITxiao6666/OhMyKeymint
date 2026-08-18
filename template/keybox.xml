@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <AndroidAttestation>
-<NumberOfKeyboxes>2</NumberOfKeyboxes>
+<NumberOfKeyboxes>1</NumberOfKeyboxes>
 <Keybox DeviceID="sw">
 <Key algorithm="ecdsa">
 <PrivateKey format="pem">

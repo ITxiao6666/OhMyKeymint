@@ -1607,6 +1607,57 @@ mod tests {
     }
 
     #[test]
+    fn signature_algorithm_follows_signing_key_not_subject_key() {
+        let spki_der = hex::decode("3012300d06092a864886f70d0101010500030100").unwrap();
+        let cases = [
+            (
+                KeyMaterial::Ec(
+                    keymint::EcCurve::P256,
+                    crypto::CurveType::Nist,
+                    crypto::ec::Key::P256(crypto::ec::NistKey(Vec::new())).into(),
+                ),
+                keymint::Algorithm::Rsa,
+                crypto::ec::ECDSA_SHA256_SIGNATURE_OID,
+                false,
+            ),
+            (
+                KeyMaterial::Rsa(crypto::rsa::Key(Vec::new()).into()),
+                keymint::Algorithm::Ec,
+                crypto::rsa::SHA256_PKCS1_SIGNATURE_OID,
+                true,
+            ),
+        ];
+
+        for (signing_key, subject_algorithm, expected_oid, expect_parameters) in cases {
+            let params = [
+                KeyParam::Algorithm(subject_algorithm),
+                KeyParam::CertificateNotBefore(DateTime { ms_since_epoch: 0 }),
+                KeyParam::CertificateNotAfter(DateTime { ms_since_epoch: 0 }),
+            ];
+            let info = Some(SigningInfo {
+                attestation_info: None,
+                signing_key,
+                issuer_subject: tag::get_cert_subject(&params).unwrap().to_vec(),
+                chain: Vec::new(),
+            });
+            let tbs_cert =
+                tbs_certificate(&info, &spki_der, &[], None, None, &[], &params).unwrap();
+            assert_eq!(tbs_cert.signature.oid, x509_oid(expected_oid).unwrap());
+            assert_eq!(tbs_cert.signature.parameters.is_some(), expect_parameters);
+
+            let cert = certificate(tbs_cert, &[]).unwrap();
+            assert_eq!(
+                cert.signature_algorithm.oid,
+                x509_oid(expected_oid).unwrap()
+            );
+            assert_eq!(
+                cert.signature_algorithm.parameters.is_some(),
+                expect_parameters
+            );
+        }
+    }
+
+    #[test]
     fn test_negative_validity_time_stays_generalized() {
         let validity = Validity {
             not_before: validity_time_from_datetime(DateTime { ms_since_epoch: -1 }).unwrap(),

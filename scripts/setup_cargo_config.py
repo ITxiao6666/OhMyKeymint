@@ -121,6 +121,7 @@ def render_config(ndk_root: Path, host_tag: str, api_level: int) -> str:
             'rustflags = ["-C", "link-arg=-lc++abi"]',
             "",
             "[env]",
+            f"ANDROID_NDK_ROOT = {{ value = {toml_string(str(ndk_root))}, force = true }}",
             'BORINGSSL_RUST_CPPLIB = { value = "c++_static", force = true }',
             f"CC_aarch64_linux_android = {toml_string(str(aarch64_clang))}",
             f"CXX_aarch64_linux_android = {toml_string(str(aarch64_clangxx))}",

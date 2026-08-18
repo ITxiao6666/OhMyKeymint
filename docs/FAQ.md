@@ -213,10 +213,15 @@ keybox that you use.
 
 ### What makes a keybox valid?
 
-OMK requires one complete RSA entry and one complete EC entry. For both
-entries, the private key must match its certificate chain. The file must also
-be clean XML, without watermarks, comments inserted into key data, invisible
-characters, or other extra content.
+OMK requires at least one complete RSA or EC entry. Every private key present
+must match its certificate chain. A keybox containing both algorithms uses the
+signer that matches the attested key when available. A keybox containing only
+one algorithm uses its sole key to sign all attestation leaf certificates,
+including leaves whose public key uses the other algorithm.
+
+RKP-extracted keyboxes are legitimately EC-only and do not need an added RSA
+entry. The file must also be clean XML, without watermarks, comments inserted
+into key data, invisible characters, or other extra content.
 
 A file working in another module does not prove that it is valid. Some other
 tools accept damaged or incomplete XML that OMK correctly rejects.

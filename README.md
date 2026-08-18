@@ -20,7 +20,10 @@ In theory, this would make it harder for detectors to identify behavior inconsis
 
 3. Replace template keybox.xml (if you need)
 
-The keybox file should be a **valid** XML file with both EC and RSA chain, which means there should be no extra content in it like watermark or invisible characters.
+The keybox file must contain at least one complete RSA or EC entry, and every
+private key present must match its certificate chain. A keybox may contain both
+algorithms or only one; RKP-extracted keyboxes are legitimately EC-only. Keep
+the XML free of extra content such as watermarks or invisible characters.
 
 The active files are `/data/misc/keystore/omk/config.toml` and
 `/data/misc/keystore/omk/injector.toml`. Read the

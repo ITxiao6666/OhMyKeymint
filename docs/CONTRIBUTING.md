@@ -80,9 +80,29 @@ State in the pull request what behavior remains unchanged.
 The [CI workflow](../.github/workflows/ci.yml) is the source of truth for the
 current toolchain and Android build environment. Use Rust nightly, the
 `aarch64-linux-android` target, an Android NDK version matching CI, and the
-CMake, Ninja, and bindgen tools required to build BoringSSL.
+CMake, Ninja, bindgen, and protobuf compiler tools required by the build.
 
-Generate the local Cargo configuration and build with the existing scripts:
+Build BoringSSL for Android with Rust bindings. Keep the checkout at
+`~/.cargo/boringssl`, or set `BORINGSSL_BUILD_DIR` to its matching build
+directory. The build must contain `libcrypto.a`, `libssl.a`,
+`rust/bssl-sys/librust_wrapper.a`, and the binding for the selected Rust target.
+
+```sh
+git clone https://boringssl.googlesource.com/boringssl ~/.cargo/boringssl
+cmake -GNinja -S ~/.cargo/boringssl -B ~/.cargo/boringssl/build \
+  -DRUST_BINDINGS=aarch64-linux-android \
+  -DCMAKE_SYSROOT=<ANDROID_NDK_SYSROOT> \
+  -DCMAKE_TOOLCHAIN_FILE=<ANDROID_NDK_ROOT>/build/cmake/android.toolchain.cmake \
+  -DANDROID_ABI=arm64-v8a \
+  -DANDROID_PLATFORM=android-21 \
+  -DANDROID_STL=c++_shared
+BINDGEN_EXTRA_CLANG_ARGS="--target=aarch64-none-linux-android21 \
+  --sysroot=<ANDROID_NDK_SYSROOT> \
+  -I<ANDROID_NDK_SYSROOT>/usr/include/aarch64-linux-android" \
+  cmake --build ~/.cargo/boringssl/build --parallel
+```
+
+Generate the local Cargo configuration and build the package:
 
 ```sh
 python scripts/setup_cargo_config.py --ndk-root <ANDROID_NDK_ROOT> --force

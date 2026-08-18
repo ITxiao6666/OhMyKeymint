@@ -1187,12 +1187,14 @@ mod tests {
         let mut token = valid_auth_token();
         token.authenticatorType = HardwareAuthenticatorType(4);
 
-        assert!(localize_auth_token_for_source(Some(&caller), &token, |token| {
-            token.to_km()?;
-            Ok(token.clone())
-        })
-        .expect("unknown mirror auth type should preserve System success")
-        .is_none());
+        assert!(
+            localize_auth_token_for_source(Some(&caller), &token, |token| {
+                token.to_km()?;
+                Ok(token.clone())
+            })
+            .expect("unknown mirror auth type should preserve System success")
+            .is_none()
+        );
 
         let token = valid_auth_token();
         assert!(localize_auth_token_for_source(Some(&caller), &token, |_| {
@@ -1204,10 +1206,12 @@ mod tests {
 
     #[test]
     fn direct_localization_failures_are_propagated() {
-        assert!(localize_auth_token_for_source(None, &valid_auth_token(), |_| {
-            Err(anyhow::anyhow!("auth-token HMAC key is not initialized"))
-        })
-        .is_err());
+        assert!(
+            localize_auth_token_for_source(None, &valid_auth_token(), |_| {
+                Err(anyhow::anyhow!("auth-token HMAC key is not initialized"))
+            })
+            .is_err()
+        );
     }
 
     #[test]
