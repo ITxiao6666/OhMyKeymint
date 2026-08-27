@@ -207,13 +207,11 @@ fn full_mirror_queue_rejects_only_the_new_fail_closed_mutation() {
         .expect("reserved event should queue");
     }
 
-    assert!(
-        reserve_mirror_update(
-            MirrorStateKind::Authorization,
-            MirrorFailurePolicy::FailClosed,
-        )
-        .is_err()
-    );
+    assert!(reserve_mirror_update(
+        MirrorStateKind::Authorization,
+        MirrorFailurePolicy::FailClosed,
+    )
+    .is_err());
     assert!(
         !MIRROR_RECOVERY_STATE
             .lock()

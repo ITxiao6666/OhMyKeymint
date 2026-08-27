@@ -7,9 +7,6 @@ use der::{
 };
 use kmr_common::crypto::Sha256;
 use kmr_crypto_boring::sha256::BoringSha256;
-use serde::Deserialize;
-
-pub const APEX_INFO_LIST_PATH: &str = "/apex/apex-info-list.xml";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModuleInfoSource {
@@ -74,29 +71,13 @@ impl ModuleInfoBundle {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct ApexInfoListXml {
-    #[serde(rename = "apex-info", default)]
-    apex_infos: Vec<ApexInfoXml>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ApexInfoXml {
-    #[serde(rename = "@moduleName")]
-    module_name: String,
-    #[serde(rename = "@versionCode")]
-    version_code: String,
-    #[serde(rename = "@isActive")]
-    is_active: bool,
-}
-
 pub fn resolve_module_info_bundle() -> Result<ModuleInfoBundle> {
-    match load_apex_info_list(APEX_INFO_LIST_PATH) {
+    match load_apex_info_list(kmr_common::apex::APEX_INFO_LIST_PATH) {
         Ok(modules) => ModuleInfoBundle::from_modules(modules, ModuleInfoSource::ApexInfoList),
         Err(file_error) => {
             log::warn!(
                 "Failed to read active APEX modules from {}: {file_error:#}; falling back to apexservice",
-                APEX_INFO_LIST_PATH
+                kmr_common::apex::APEX_INFO_LIST_PATH
             );
             let modules = crate::plat::utils::get_apex_module_info()
                 .context("failed to resolve active APEX modules from apexservice")?;
@@ -113,12 +94,11 @@ pub fn load_apex_info_list<P: AsRef<Path>>(path: P) -> Result<Vec<ApexModuleInfo
 }
 
 pub fn parse_active_modules_xml(xml: &str) -> Result<Vec<ApexModuleInfo>> {
-    let parsed: ApexInfoListXml =
-        quick_xml::de::from_str(xml).context("failed to deserialize apex-info-list XML")?;
+    let parsed = kmr_common::apex::parse_apex_info_list_xml(xml)?;
 
     let mut seen_names = BTreeSet::new();
     let mut modules = Vec::new();
-    for apex_info in parsed.apex_infos {
+    for apex_info in parsed {
         if !apex_info.is_active {
             continue;
         }

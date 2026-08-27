@@ -814,7 +814,7 @@ impl crate::KeyMintTa {
                 },
             };
 
-        fn upgrade(v: &mut u32, curr: u32, name: &str) -> Result<bool, Error> {
+        fn upgrade(v: &mut u32, curr: u32, _name: &str) -> Result<bool, Error> {
             match (*v).cmp(&curr) {
                 Ordering::Less => {
                     *v = curr;
