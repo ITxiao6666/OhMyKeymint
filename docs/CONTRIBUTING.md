@@ -6,6 +6,14 @@ Thank you for improving OhMyKeymint. Before submitting a change, read the
 invariants in [AGENTS.md](../AGENTS.md). Discuss substantial features or behavior
 changes in an issue first.
 
+## AI-assisted contributions
+
+Before submitting any contribution, read and follow the
+[AI-Assisted Contributions Policy](AI-Policy.md). You must disclose every AI
+tool and model used (or state that none was used), understand every submitted
+change, personally review the complete final diff, and retain full human
+responsibility for the contribution.
+
 ## Scope and compatibility
 
 - Keep each pull request focused on one problem. Do not include unrelated

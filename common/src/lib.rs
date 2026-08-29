@@ -25,6 +25,7 @@ use std::{borrow::Cow, vec::Vec};
 pub use kmr_wire as wire;
 
 pub mod android_version;
+pub mod apex;
 pub mod consts;
 pub mod crypto;
 pub mod keyblob;
