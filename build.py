@@ -264,12 +264,19 @@ def configure_template_for_abi(stage_dir: Path, abi: str) -> None:
     print(f"Updated customize.sh supported ABI to {supported_arch}")
 
 
-def modify_module_prop(stage_dir: Path, version: str, git_count: str, git_hash: str) -> None:
+def modify_module_prop(
+    stage_dir: Path,
+    version: str,
+    git_count: str,
+    git_hash: str,
+    release: bool,
+) -> None:
     module_prop_path = stage_dir / "module.prop"
     if not module_prop_path.exists():
         raise FileNotFoundError(f"module.prop not found at {module_prop_path}")
 
-    version_name = f"{version}-{git_hash}"
+    build_type = "release" if release else "debug"
+    version_name = f"{version} ({git_count}-{git_hash}-{build_type})"
     content = module_prop_path.read_text(encoding="utf-8")
     content = content.replace("${versionName}", version_name)
     content = content.replace("${versionCode}", git_count)
@@ -313,12 +320,29 @@ def generate_webroot_manifest(stage_dir: Path) -> None:
     print(f"Created WebUI manifest with {len(assets)} asset(s)")
 
 
-def delete_old_zips(release: bool, selected_abis: list[str]) -> None:
+def delete_old_zips(release: bool, selected_abis: list[str], version: str) -> None:
     build_type = "release" if release else "debug"
-    old_zips: list[str] = []
+    old_zips: set[str] = set()
     for abi in selected_abis:
-        pattern = TARGET_ROOT / f"OhMyKeymint-{build_type}-{abi}-*.zip"
-        old_zips.extend(glob.glob(os.fspath(pattern)))
+        # Remove packages produced by the previous naming scheme as well as
+        # packages for this version produced by an earlier build.  The latter
+        # is useful when the working tree hash changes between builds.
+        old_pattern = TARGET_ROOT / f"OhMyKeymint-{build_type}-{abi}-*.zip"
+        old_zips.update(glob.glob(os.fspath(old_pattern)))
+
+        if abi == "arm64-v8a":
+            new_pattern = TARGET_ROOT / f"OhMyKeymint-{version}-*-{build_type}.zip"
+            new_candidates = glob.glob(os.fspath(new_pattern))
+            # The arm64 package intentionally omits its ABI in the filename;
+            # retain a separately built x86_64 package with the same version.
+            old_zips.update(
+                path
+                for path in new_candidates
+                if not path.endswith(f"-x86_64-{build_type}.zip")
+            )
+        else:
+            new_pattern = TARGET_ROOT / f"OhMyKeymint-{version}-*-{abi}-{build_type}.zip"
+            old_zips.update(glob.glob(os.fspath(new_pattern)))
     if not old_zips:
         print(f"No old zip files found for build type {build_type} and ABIs {selected_abis}")
         return
@@ -333,12 +357,19 @@ def create_zip_package(
     *,
     stage_dir: Path,
     version: str,
+    git_count: str,
     git_hash: str,
     abi: str,
     release: bool,
 ) -> Path:
     build_type = "release" if release else "debug"
-    zip_path = TARGET_ROOT / f"OhMyKeymint-{build_type}-{abi}-{version}-{git_hash}.zip"
+    # The default arm64 package follows the same version identity order as
+    # Trickystore: version, commit count, short commit hash, build type.  An
+    # explicit x86_64 build gets an ABI discriminator so separate ABI builds
+    # cannot overwrite one another.
+    abi_suffix = f"-{abi}" if abi != "arm64-v8a" else ""
+    zip_name = f"OhMyKeymint-{version}-{git_count}-{git_hash}{abi_suffix}-{build_type}.zip"
+    zip_path = TARGET_ROOT / zip_name
     print(f"Creating zip package: {zip_path}")
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -391,13 +422,14 @@ def build_package_for_abi(
                 stage_dir,
             )
 
-        modify_module_prop(stage_dir, version, git_count, git_hash)
+        modify_module_prop(stage_dir, version, git_count, git_hash, release)
         normalize_module_text_files(stage_dir)
         generate_webroot_manifest(stage_dir)
         generate_hash_files(stage_dir)
         return create_zip_package(
             stage_dir=stage_dir,
             version=version,
+            git_count=git_count,
             git_hash=git_hash,
             abi=abi,
             release=release,
@@ -438,7 +470,7 @@ def main() -> None:
     print(f"Build mode: {'Release' if args.release else 'Debug'}")
     print(f"Target ABIs: {', '.join(selected_abis)}")
 
-    delete_old_zips(args.release, selected_abis)
+    delete_old_zips(args.release, selected_abis, version)
     built_packages = []
     for abi in selected_abis:
         built_packages.append(

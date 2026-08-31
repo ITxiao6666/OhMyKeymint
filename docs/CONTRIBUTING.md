@@ -117,6 +117,8 @@ python scripts/setup_cargo_config.py --ndk-root <ANDROID_NDK_ROOT> --force
 python build.py --debug
 ```
 
+Release packages use the identity order `OhMyKeymint-<version>-<commit count>-<short commit hash>-release.zip` for the default arm64 build; the packaged `module.prop` shows the same identity in parentheses. A `-dirty` suffix is included when the source worktree has uncommitted changes.
+
 Rust changes must pass:
 
 ```sh

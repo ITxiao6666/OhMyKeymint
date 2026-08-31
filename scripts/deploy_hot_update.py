@@ -151,7 +151,18 @@ def build_binaries(abi: str, platform: int, release: bool) -> None:
 
 def latest_full_package(abi: str, release: bool) -> Path:
     build_type = "release" if release else DEFAULT_PROFILE
-    candidates = list(TARGET_ROOT.glob(f"OhMyKeymint-{build_type}-{abi}-*.zip"))
+    # Accept both the current Trickystore-style identity and packages made by
+    # older OhMyKeymint builders while users transition between releases.
+    candidates: list[Path] = []
+    if abi == DEFAULT_ABI:
+        candidates.extend(
+            path
+            for path in TARGET_ROOT.glob(f"OhMyKeymint-*-{build_type}.zip")
+            if not path.name.endswith(f"-x86_64-{build_type}.zip")
+        )
+    else:
+        candidates.extend(TARGET_ROOT.glob(f"OhMyKeymint-*-{abi}-{build_type}.zip"))
+    candidates.extend(TARGET_ROOT.glob(f"OhMyKeymint-{build_type}-{abi}-*.zip"))
     if not candidates:
         raise FileNotFoundError(f"full package not found for {build_type} {abi}")
     return max(candidates, key=lambda path: path.stat().st_mtime)
