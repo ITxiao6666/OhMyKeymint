@@ -1,0 +1,1 @@
+This guy did not read CONTRIBUTING.md carefully, so this pr should be ignore.

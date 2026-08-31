@@ -122,6 +122,40 @@ get_supplementary_attestation_info = true
 }
 
 #[test]
+fn parses_tricky_store_style_scoop_lines() {
+    let parsed = parse_config(
+        r#"
+version = 1
+scoop = [
+  # One package per line, like TrickyStore target.txt.
+  com.example.app
+    com.other.app # trailing comments are accepted
+  com.example.app,
+
+]
+"#,
+    )
+    .expect("line-based scoop entries should parse");
+
+    assert_eq!(
+        parsed.scoop,
+        vec!["com.example.app".to_string(), "com.other.app".to_string()]
+    );
+}
+
+#[test]
+fn parses_tricky_store_style_scoop_lines_with_crlf() {
+    let parsed =
+        parse_config("version = 1\r\nscoop = [\r\n  com.example.app\r\n  com.other.app\r\n]\r\n")
+            .expect("CRLF line-based scoop entries should parse");
+
+    assert_eq!(
+        parsed.scoop,
+        vec!["com.example.app".to_string(), "com.other.app".to_string()]
+    );
+}
+
+#[test]
 fn legacy_config_syntax_is_rejected() {
     let error = parse_config(
         r#"
@@ -145,7 +179,7 @@ allow_packages = ["com.legacy.app"]
 }
 
 #[test]
-fn rendered_config_uses_new_scoop_format() {
+fn rendered_config_uses_tricky_store_style_scoop_format() {
     let mut config = InjectorConfig {
         scoop: vec!["com.example.app".to_string()],
         ..Default::default()
@@ -157,11 +191,112 @@ fn rendered_config_uses_new_scoop_format() {
         .insert("com.example.app".to_string(), table);
 
     let rendered = render_config(&config).expect("config should render");
-    assert!(rendered.contains("scoop = ["));
+    assert!(rendered.contains("scoop = [\n  com.example.app\n]\n"));
+    assert!(!rendered.contains("  \"com.example.app\""));
+    assert!(!rendered.contains("  com.example.app,"));
     assert!(rendered.contains("[scoop.com.example.app]"));
     assert!(!rendered.contains("[[scope]]"));
     let reparsed = parse_config(&rendered).expect("rendered config should parse");
     assert_eq!(reparsed.scoop_details, config.scoop_details);
+}
+
+#[test]
+fn webui_scoop_update_preserves_routing_configuration() {
+    let path = temp_config_path("webui-update");
+    let original = r#"version = 1
+scoop = [
+  com.old.app
+]
+
+[main]
+enabled = false
+log_level = "info"
+
+[filter]
+enabled = true
+deny_packages = ["com.denied.app"]
+block_android_package = true
+allow_unknown_package = false
+
+[intercept]
+get_security_level = false
+get_key_entry = true
+update_subcomponent = true
+list_entries = true
+delete_key = true
+grant = true
+ungrant = true
+get_number_of_entries = true
+list_entries_batched = true
+get_supplementary_attestation_info = true
+
+[scoop.com.old.app]
+mode = "strict"
+"#;
+    fs::write(&*path, original).unwrap();
+
+    replace_scoop_at_path(
+        &path,
+        vec![
+            " com.new.app ".to_string(),
+            "com.new.app".to_string(),
+            "com.second.app".to_string(),
+        ],
+    )
+    .expect("WebUI scoop update should succeed");
+
+    let written = fs::read_to_string(&*path).unwrap();
+    let parsed = parse_config(&written).expect("updated config should remain valid");
+    assert_eq!(
+        parsed.scoop,
+        vec!["com.new.app".to_string(), "com.second.app".to_string()]
+    );
+    assert!(!parsed.main.enabled);
+    assert_eq!(parsed.main.log_level, "info");
+    assert_eq!(parsed.filter.deny_packages, ["com.denied.app"]);
+    assert!(!parsed.intercept.get_security_level);
+    assert_eq!(
+        parsed
+            .scoop_details
+            .get("com.old.app")
+            .and_then(|table| table.get("mode"))
+            .and_then(toml::Value::as_str),
+        Some("strict")
+    );
+    assert_eq!(
+        read_scoop_from_path(&path).unwrap(),
+        ["com.new.app", "com.second.app"]
+    );
+}
+
+#[test]
+fn webui_scoop_update_rejects_bad_input_without_overwriting() {
+    let path = temp_config_path("webui-invalid-config");
+    let invalid = "version = 1\n[main\nbroken";
+    fs::write(&*path, invalid).unwrap();
+
+    assert!(replace_scoop_at_path(&path, vec!["com.example.app".to_string()]).is_err());
+    assert_eq!(fs::read_to_string(&*path).unwrap(), invalid);
+
+    let path = temp_config_path("webui-invalid-package");
+    let original = "version = 1\nscoop = [com.example.app]\n";
+    fs::write(&*path, original).unwrap();
+
+    for invalid_package in [
+        "com.example.app!",
+        "com.example.app?",
+        "bad package",
+        "*",
+        "/system/bin",
+        "com..example",
+        "com.example\0app",
+        "com.example-app",
+        "com.ex\u{e9}mple.app",
+        &"a".repeat(256),
+    ] {
+        assert!(replace_scoop_at_path(&path, vec![invalid_package.to_string()]).is_err());
+        assert_eq!(fs::read_to_string(&*path).unwrap(), original);
+    }
 }
 
 #[test]
@@ -217,12 +352,34 @@ fn v0_config_migrates_through_public_scoop_syntax_and_preserves_mode() {
 }
 
 #[test]
+fn v0_migration_finds_version_after_line_based_scoop() {
+    let v0 = "scoop = [\n  com.example.app\n]\nversion = 0\n";
+    let (_, migrated) = parse_versioned_config(v0, true).expect("config should migrate");
+
+    assert_eq!(
+        migrated.as_deref(),
+        Some("scoop = [\n  com.example.app\n]\nversion = 1\n")
+    );
+}
+
+#[test]
 fn explicit_v0_migration_only_replaces_the_version_value() {
     let v0 = "# keep this comment\nversion = 0 # and this one\nscoop = [\"com.example.app\"]\n";
     let (_, migrated) = parse_versioned_config(v0, true).expect("v0 config should migrate");
     assert_eq!(
         migrated.as_deref(),
         Some("# keep this comment\nversion = 1 # and this one\nscoop = [\"com.example.app\"]\n")
+    );
+}
+
+#[test]
+fn quoted_version_key_migrates_without_changing_other_text() {
+    let v0 = "\"version\" = 0 # keep this comment\nscoop = [\n  com.example.app\n]\n";
+    let (_, migrated) = parse_versioned_config(v0, true).expect("v0 config should migrate");
+
+    assert_eq!(
+        migrated.as_deref(),
+        Some("\"version\" = 1 # keep this comment\nscoop = [\n  com.example.app\n]\n")
     );
 }
 

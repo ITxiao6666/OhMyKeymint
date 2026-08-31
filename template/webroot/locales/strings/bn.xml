@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">সিস্টেম পূর্ব-নির্ধারিত</string>
+    <string name="search_bar_search_placeholder">খুঁজুন</string>
+    <string name="functional_button_save">সেভ করুন</string>
+    <string name="functional_button_cancel">ক্যানসেল করুন</string>
+    <string name="menu_add_system_app">সিস্টেম অ্যাপ যোগ করুন</string>
+    <string name="prompt_save_error">কনফিগ সেভ করতে ব্যর্থ</string>
+    <string name="add_system_app_title">সিস্টেম অ্যাপ যোগ করুন</string>
+</resources>

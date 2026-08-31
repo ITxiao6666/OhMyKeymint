@@ -160,8 +160,6 @@ struct ConfigVersion {
 
 #[derive(Serialize)]
 struct WritableConfig<'a> {
-    version: u32,
-    scoop: &'a [String],
     main: &'a MainConfig,
     filter: &'a FilterConfig,
     intercept: &'a InterceptConfig,
@@ -332,10 +330,63 @@ fn write_config(path: &Path, config: &InjectorConfig) -> io::Result<()> {
         .lock()
         .map_err(|_| io::Error::other("config file write lock poisoned"))?;
     let contents = render_config(config)?;
+    write_config_contents(path, &contents)
+}
+
+fn write_config_contents(path: &Path, contents: &str) -> io::Result<()> {
     let (default_uid, default_gid) = default_owner(path);
     atomic_replace_preserving_metadata(path, contents.as_bytes(), 0o600, default_uid, default_gid)?;
     log::info!("wrote config to {}", path.display());
     Ok(())
+}
+
+pub fn read_scoop_for_webui() -> Result<Vec<String>, String> {
+    read_scoop_from_path(&config_path())
+}
+
+pub fn replace_scoop_for_webui(packages: Vec<String>) -> Result<(), String> {
+    replace_scoop_at_path(&config_path(), packages)
+}
+
+fn read_scoop_from_path(path: &Path) -> Result<Vec<String>, String> {
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let (config, _) = parse_versioned_config(&contents, false)?;
+    Ok(config.scoop)
+}
+
+fn replace_scoop_at_path(path: &Path, packages: Vec<String>) -> Result<(), String> {
+    let _write_guard = CONFIG_FILE_WRITE_LOCK
+        .lock()
+        .map_err(|_| "config file write lock poisoned".to_string())?;
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let (mut config, _) = parse_versioned_config(&contents, false)?;
+    let packages = normalize_packages(packages);
+    if let Some(package) = packages
+        .iter()
+        .find(|package| !is_valid_exact_package_name(package))
+    {
+        return Err(format!("invalid exact package name in scoop: {package}"));
+    }
+    config.scoop = packages;
+    let rendered = render_config(&config)
+        .map_err(|error| format!("failed to render {}: {error}", path.display()))?;
+    parse_versioned_config(&rendered, false)
+        .map_err(|error| format!("refusing to write invalid {}: {error}", path.display()))?;
+    write_config_contents(path, &rendered)
+        .map_err(|error| format!("failed to update {}: {error}", path.display()))
+}
+
+fn is_valid_exact_package_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value.split('.').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        })
 }
 
 fn default_owner(path: &Path) -> (u32, u32) {
@@ -352,9 +403,28 @@ fn render_config(config: &InjectorConfig) -> io::Result<String> {
          # sharing that UID is listed in `scoop`.\n\
          # Filter deny settings still apply to every package resolved for the UID.\n\n",
     );
+    contents.push_str(&format!("version = {}\n\n", config.version));
+    contents.push_str(
+        "# Add one exact package name per line. Blank lines and lines whose first non-space character is # are ignored.\n",
+    );
+    // Keep the package list easy to edit: bare one-package-per-line entries
+    // are accepted by preprocess_config and intentionally omit TOML punctuation.
+    contents.push_str("scoop = [\n");
+    for package in &config.scoop {
+        let package = package.trim();
+        contents.push_str("  ");
+        if is_bare_scoop_package(package) {
+            contents.push_str(package);
+        } else {
+            contents.push('"');
+            contents.push_str(&escape_toml_basic_string(package));
+            contents.push_str("\",");
+        }
+        contents.push('\n');
+    }
+    contents.push_str("]\n\n");
+
     let base = toml::to_string_pretty(&WritableConfig {
-        version: config.version,
-        scoop: &config.scoop,
         main: &config.main,
         filter: &config.filter,
         intercept: &config.intercept,
@@ -401,12 +471,7 @@ fn parse_versioned_config(
             Some(insert_config_version(contents, bom_len))
         }
         Some(version) => match *version.get_ref() {
-            0 if allow_migration => {
-                let span = version.span();
-                let mut migrated = contents.to_string();
-                migrated.replace_range(span.start + bom_len..span.end + bom_len, "1");
-                Some(migrated)
-            }
+            0 if allow_migration => Some(replace_config_version(contents, bom_len)?),
             0 => {
                 return Err(
                     "injector config version 0 requires an injector restart to migrate".into(),
@@ -445,17 +510,225 @@ fn insert_config_version(contents: &str, bom_len: usize) -> String {
     migrated
 }
 
+fn replace_config_version(contents: &str, bom_len: usize) -> Result<String, String> {
+    // Bare scoop entries are expanded before TOML parsing, so a span from the
+    // preprocessed text cannot safely be applied to the original file.
+    let without_bom = &contents[bom_len..];
+    let mut line_offset = 0;
+
+    for line in without_bom.split_inclusive('\n') {
+        let line_body = line.strip_suffix('\n').unwrap_or(line);
+        let line_body = line_body.strip_suffix('\r').unwrap_or(line_body);
+        let trimmed = line_body.trim_start();
+        let Some(after_name) = version_key_suffix(trimmed) else {
+            line_offset += line.len();
+            continue;
+        };
+        let Some(after_equals) = after_name.trim_start().strip_prefix('=') else {
+            line_offset += line.len();
+            continue;
+        };
+        let value = after_equals.trim_start();
+        let token_end = value
+            .find(|character: char| character.is_whitespace() || character == '#')
+            .unwrap_or(value.len());
+        if token_end == 0 {
+            line_offset += line.len();
+            continue;
+        }
+
+        let value_offset = line_body.len() - value.len();
+        let start = bom_len + line_offset + value_offset;
+        let end = start + token_end;
+        let mut migrated = contents.to_string();
+        migrated.replace_range(start..end, "1");
+        return Ok(migrated);
+    }
+
+    Err("config version 0 was parsed but its source value could not be located".to_string())
+}
+
+fn version_key_suffix(line: &str) -> Option<&str> {
+    if let Some(after_name) = line.strip_prefix("version") {
+        if after_name.chars().next().is_some_and(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+        }) {
+            return None;
+        }
+        return Some(after_name);
+    }
+
+    let quote = line
+        .chars()
+        .next()
+        .filter(|character| *character == '"' || *character == '\'')?;
+    let close = if quote == '"' {
+        let mut escaped = false;
+        line.char_indices().skip(1).find_map(|(index, character)| {
+            if escaped {
+                escaped = false;
+                None
+            } else if character == '\\' {
+                escaped = true;
+                None
+            } else if character == quote {
+                Some(index)
+            } else {
+                None
+            }
+        })?
+    } else {
+        line.char_indices()
+            .skip(1)
+            .find_map(|(index, character)| (character == quote).then_some(index))?
+    };
+    let key_fragment = &line[..=close];
+    let parsed = toml::from_str::<toml::Value>(&format!("key = {key_fragment}")).ok()?;
+    let key = parsed.get("key").and_then(toml::Value::as_str)?;
+    (key == "version").then(|| &line[close + quote.len_utf8()..])
+}
+
 fn preprocess_config(contents: &str) -> Result<String, String> {
     let mut rewritten = String::with_capacity(contents.len());
+    let mut scoop_array_depth = 0i32;
+
     for (line_no, line) in contents.split_inclusive('\n').enumerate() {
-        let (body, ending) = match line.strip_suffix('\n') {
+        let (line_body, ending) = match line.strip_suffix('\n') {
             Some(body) => (body, "\n"),
             None => (line, ""),
         };
-        rewritten.push_str(&rewrite_scoop_header(body, line_no + 1)?);
+        let (line_body, has_carriage_return) = match line_body.strip_suffix('\r') {
+            Some(body) => (body, true),
+            None => (line_body, false),
+        };
+        let mut body = line_body.to_string();
+
+        if scoop_array_depth > 0 {
+            body = rewrite_scoop_array_entry(&body);
+            scoop_array_depth = (scoop_array_depth + scoop_bracket_delta(&body)).max(0);
+        } else if let Some(open_index) = scoop_array_open_index(&body) {
+            scoop_array_depth = scoop_bracket_delta(&body[open_index..]).max(0);
+        }
+
+        let body = rewrite_scoop_header(&body, line_no + 1)?;
+        rewritten.push_str(&body);
+        if has_carriage_return {
+            rewritten.push('\r');
+        }
         rewritten.push_str(ending);
     }
     Ok(rewritten)
+}
+
+fn scoop_array_open_index(line: &str) -> Option<usize> {
+    let trimmed = line.trim_start();
+    let after_name = trimmed.strip_prefix("scoop")?;
+    if after_name
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return None;
+    }
+    let after_equals = after_name.trim_start().strip_prefix('=')?.trim_start();
+    after_equals
+        .starts_with('[')
+        .then(|| line.len() - after_equals.len())
+}
+
+fn scoop_bracket_delta(text: &str) -> i32 {
+    let mut delta = 0;
+    let mut quote = None;
+    let mut escaped = false;
+
+    for character in text.chars() {
+        if let Some(active_quote) = quote {
+            match active_quote {
+                '"' => {
+                    if escaped {
+                        escaped = false;
+                    } else if character == '\\' {
+                        escaped = true;
+                    } else if character == '"' {
+                        quote = None;
+                    }
+                }
+                '\'' if character == '\'' => quote = None,
+                _ => {}
+            }
+            continue;
+        }
+
+        match character {
+            '"' | '\'' => quote = Some(character),
+            '#' => break,
+            '[' => delta += 1,
+            ']' => delta -= 1,
+            _ => {}
+        }
+    }
+
+    delta
+}
+
+fn rewrite_scoop_array_entry(line: &str) -> String {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty()
+        || trimmed.starts_with('#')
+        || matches!(trimmed.as_bytes().first(), Some(b'"' | b'\'' | b']'))
+    {
+        return line.to_string();
+    }
+
+    let (value, comment) = match trimmed.find('#') {
+        Some(index) => (&trimmed[..index], Some(&trimmed[index..])),
+        None => (trimmed, None),
+    };
+    let mut value = value.trim_end();
+    if let Some(without_comma) = value.strip_suffix(',') {
+        value = without_comma.trim_end();
+    }
+    if !is_bare_scoop_package(value) {
+        return line.to_string();
+    }
+
+    let leading = &line[..line.len() - trimmed.len()];
+    let mut rewritten = String::with_capacity(line.len() + 4);
+    rewritten.push_str(leading);
+    rewritten.push('"');
+    rewritten.push_str(&escape_toml_basic_string(value));
+    rewritten.push_str("\",");
+    if let Some(comment) = comment {
+        rewritten.push(' ');
+        rewritten.push_str(comment.trim_start());
+    }
+    rewritten
+}
+
+fn is_bare_scoop_package(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|character| {
+            !character.is_whitespace()
+                && !matches!(
+                    character,
+                    '"' | '\'' | '[' | ']' | '{' | '}' | '=' | ',' | '#'
+                )
+        })
+}
+
+fn escape_toml_basic_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 fn rewrite_scoop_header(line: &str, line_no: usize) -> Result<String, String> {

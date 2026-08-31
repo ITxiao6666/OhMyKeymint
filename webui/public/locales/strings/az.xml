@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">Sistem Varsayılanı</string>
+    <string name="search_bar_search_placeholder">Axtar</string>
+    <string name="functional_button_save">Yadda saxla</string>
+    <string name="functional_button_cancel">İmtina et</string>
+    <string name="menu_add_system_app">Sistem Tətbiqi Əlavə et</string>
+    <string name="prompt_save_error">Konfiqurasiyanı yadda saxlamaq mümkün olmadı</string>
+    <string name="add_system_app_title">Sistem Tətbiqi Əlavə et</string>
+</resources>

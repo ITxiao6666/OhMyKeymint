@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="search_bar_search_placeholder">ค้นหา</string>
+    <string name="functional_button_save">บันทึก</string>
+    <string name="functional_button_close">ปิด</string>
+    <string name="functional_button_cancel">ยกเลิก</string>
+    <string name="menu_add_system_app">เพิ่มแอประบบ (System App)</string>
+    <string name="menu_language">ภาษา</string>
+    <string name="prompt_save_error">บันทึกการตั้งค่าไม่สำเร็จ</string>
+    <string name="add_system_app_title">เพิ่มแอประบบ</string>
+</resources>

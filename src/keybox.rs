@@ -1,7 +1,7 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
+    fs,
     path::{Path, PathBuf},
+    str,
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex, OnceLock, RwLock,
@@ -12,7 +12,9 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use der::Encode;
 use kmr_common::{
+    consts::{KEYSTORE_GID, KEYSTORE_UID},
     crypto::{ec, rsa, KeyMaterial, Sha256},
+    runtime::fs::atomic_replace_preserving_metadata,
     Error,
 };
 use kmr_crypto_boring::{ec::BoringEc, mldsa::BoringMlDsa, rsa::BoringRsa, sha256::BoringSha256};
@@ -26,6 +28,7 @@ use x509_cert::der as x509_der;
 use x509_cert::Certificate;
 
 pub const KEYBOX_PATH: &str = "/data/misc/keystore/omk/keybox.xml";
+pub const MAX_KEYBOX_XML_BYTES: usize = 64 * 1024;
 
 const BUNDLED_KEYBOX_XML: &str = include_str!("../template/keybox.xml");
 
@@ -454,59 +457,31 @@ fn encode_pem_block(label: &str, der: &[u8]) -> String {
     pem
 }
 
-fn temp_keybox_path(path: &str) -> PathBuf {
-    let target = Path::new(path);
-    let file_name = target
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("keybox.xml");
-    let temp_name = format!(".{file_name}.tmp-{}", std::process::id());
-    target
-        .parent()
-        .map(|parent| parent.join(&temp_name))
-        .unwrap_or_else(|| PathBuf::from(temp_name))
+fn write_keybox_xml(path: &str, xml: &str) -> Result<()> {
+    atomic_replace_preserving_metadata(
+        Path::new(path),
+        xml.as_bytes(),
+        0o600,
+        KEYSTORE_UID,
+        KEYSTORE_GID,
+    )
+    .with_context(|| format!("failed to atomically replace keybox.xml at {path}"))
 }
 
-fn write_keybox_xml(path: &str, xml: &str) -> Result<()> {
-    if let Some(parent) = Path::new(path).parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create keybox directory {}", parent.display()))?;
+fn validate_keybox_xml(contents: &[u8]) -> Result<()> {
+    if contents.len() > MAX_KEYBOX_XML_BYTES {
+        bail!("keybox.xml exceeds the {} byte limit", MAX_KEYBOX_XML_BYTES);
     }
-    let temp_path = temp_keybox_path(path);
-    {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&temp_path)
-            .with_context(|| {
-                format!(
-                    "failed to open temporary keybox.xml {}",
-                    temp_path.display()
-                )
-            })?;
-        file.write_all(xml.as_bytes()).with_context(|| {
-            format!(
-                "failed to write temporary keybox.xml {}",
-                temp_path.display()
-            )
-        })?;
-        file.sync_all().with_context(|| {
-            format!(
-                "failed to sync temporary keybox.xml {}",
-                temp_path.display()
-            )
-        })?;
-    }
+    let xml = str::from_utf8(contents).context("keybox.xml is not valid UTF-8")?;
+    KeyBox::from_xml_str(xml).context("keybox.xml validation failed")?;
+    Ok(())
+}
 
-    #[cfg(windows)]
-    if Path::new(path).exists() {
-        fs::remove_file(path)
-            .with_context(|| format!("failed to replace keybox.xml at {path} on Windows"))?;
-    }
-
-    fs::rename(&temp_path, path)
-        .with_context(|| format!("failed to atomically replace keybox.xml at {path}"))
+pub fn install_keybox_xml(contents: &[u8]) -> Result<()> {
+    validate_keybox_xml(contents)?;
+    let xml = str::from_utf8(contents).expect("validated keybox.xml is UTF-8");
+    let _io_guard = KEYBOX_IO_LOCK.lock().unwrap();
+    write_keybox_xml(KEYBOX_PATH, xml)
 }
 
 fn write_bundled_keybox(path: &str) -> Result<()> {
@@ -732,6 +707,24 @@ mod tests {
     #[test]
     fn rejects_invalid_xml() {
         assert!(KeyBox::from_xml_str("<AndroidAttestation/>").is_err());
+    }
+
+    #[test]
+    fn webui_import_accepts_bundled_keybox() {
+        validate_keybox_xml(BUNDLED_KEYBOX_XML.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn webui_import_rejects_invalid_utf8() {
+        let error = validate_keybox_xml(&[0xff]).unwrap_err();
+        assert!(error.to_string().contains("not valid UTF-8"));
+    }
+
+    #[test]
+    fn webui_import_rejects_oversized_xml_before_parsing() {
+        let oversized = vec![b' '; MAX_KEYBOX_XML_BYTES + 1];
+        let error = validate_keybox_xml(&oversized).unwrap_err();
+        assert!(error.to_string().contains("exceeds"));
     }
 
     #[test]

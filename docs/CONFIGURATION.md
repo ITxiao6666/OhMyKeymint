@@ -23,8 +23,9 @@ Before making a change:
 
 1. Make a private backup of both active files.
 2. Edit the files under `/data/misc/keystore/omk/`, not copies in the module ZIP.
-3. Keep strings inside quotes, booleans as `true` or `false`, and package names
-   inside the `scoop = [...]` array.
+3. Keep ordinary strings inside quotes and booleans as `true` or `false`. Keep
+   the `scoop = [` and `]` lines, then add one bare package name per line;
+   those entries omit both quotes and commas.
 4. Change one thing at a time, save the complete file, and check the matching
    log after the change.
 
@@ -57,6 +58,41 @@ After changing app routing, close and reopen the affected app to avoid mixing
 an already-open operation with the new route. If a process restart is needed
 for a clean boundary, restart the injector only. An injector-only setting
 change does not require a keymint restart.
+
+## Embedded WebUI
+
+The module includes an offline WebUI for selecting packages in `scoop` and
+installing a local keybox. Open it from the Oh My Keymint module page in
+KernelSU. With Magisk, run the module action after installing either
+KSUWebUIStandalone or WebUI X; the action does not download or install either
+host.
+
+The WebUI can read and replace the `scoop` package list and can install a local
+keybox selected through Android's standard file picker. It does not read or
+write `config.toml`, `[trust]`, `[crypto]`, device identity fields, system
+properties, or module update state. All WebUI assets are bundled in the module,
+and the WebUI does not make network requests.
+
+The WebUI does not parse or rewrite `injector.toml` itself. It sends the package
+list to the native `inject` helper. The helper first parses the current complete
+file, normalizes duplicate and surrounding whitespace, rejects invalid package
+names and TrickyStore-style `!` or `?` suffixes, then renders and atomically
+replaces the complete file while preserving its ownership and mode. A read,
+parse, validation, or write failure is returned to the WebUI and leaves the
+existing file unchanged. Saving remains disabled when the current list could
+not be loaded.
+
+A successful save triggers the same injector hot-reload path as a valid manual
+edit. It applies to new requests without restarting keymint. Close and reopen
+the affected app when a clean routing boundary is required.
+
+For a keybox installation, the native `keymint` helper enforces the input size
+limit, decodes the selected file as UTF-8, and runs the complete in-memory
+`KeyBox` validation, including private-key and certificate-chain matching. Only
+then does it atomically replace the canonical lowercase
+`/data/misc/keystore/omk/keybox.xml`. A read, size, UTF-8, validation, or write
+failure leaves the active keybox unchanged. The keybox watcher loads a
+successful replacement automatically, so a restart is normally unnecessary.
 
 ## `config.toml`
 
@@ -422,13 +458,14 @@ empty value is valid. Its absence does not invalidate an available IMEI.
 # Configuration format. Keep this at 1.
 version = 1
 
-# Exact package names allowed to use OMK; no wildcards are supported.
+# Add one exact package name per line. Blank lines and lines whose first non-space character is # are ignored.
+# Bare entries omit quotes and commas; keep the surrounding scoop = [ ... ] lines.
 scoop = [
-  "io.github.vvb2060.keyattestation",
-  "com.google.android.gsf",
-  "com.google.android.gms",
-  "com.android.vending",
-  "com.eltavine.duckdetector",
+  io.github.vvb2060.keyattestation
+  com.google.android.gsf
+  com.google.android.gms
+  com.android.vending
+  com.eltavine.duckdetector
 ]
 
 [main]
@@ -480,10 +517,20 @@ add names that are not described in this guide.
 
 #### `scoop`
 
-This array contains exact Android package names that may use OMK. It does not
-accept app labels, partial names, or wildcards. Empty entries are removed,
-surrounding spaces are trimmed, and duplicate entries are reduced to one when
-the file is loaded.
+This array contains exact Android package names that may use OMK. Keep the
+surrounding `scoop = [` and `]` lines and add one bare package name per line,
+matching the line-oriented package list used by TrickyStore. Bare entries omit
+both quotes and commas. Empty lines and lines whose first non-space character
+is `#` are ignored, and surrounding spaces are trimmed. The traditional
+quoted, comma-separated TOML array form is also accepted. Empty entries are
+removed and duplicate entries are reduced to one when the file is loaded. App
+labels, partial names, and wildcards are not accepted. TrickyStore's `!`
+generate suffix is not interpreted; enter the exact package name only.
+
+The embedded WebUI presents installed package names and saves the selected
+ones through the native helper described above. A WebUI save replaces only the
+normalized `scoop` list; `[main]`, `[filter]`, `[intercept]`, and preserved
+per-package tables retain their current values.
 
 Android can assign several packages the same identity. In that case, listing
 any one of those packages allows the shared identity, unless a filter rule
@@ -554,8 +601,9 @@ when a selected package shares its Android identity with another package that
 must stay on System. If any package resolved for the identity is denied, the
 entire identity is rejected even when another package is listed in `scoop`.
 
-An empty array, `[]`, is the default. The list uses the same quoted,
-comma-separated TOML format as `scoop`.
+An empty array, `[]`, is the default. This list uses the standard quoted,
+comma-separated TOML array format; the line-based shorthand is specific to
+`scoop`.
 
 #### `block_android_package`
 
@@ -654,3 +702,8 @@ boundary after a route change. A syntax error, an unknown field, or an
 unsupported future `version` leaves the last valid runtime configuration
 active; if present at injector startup, it leaves OMK request routing disabled
 until the file is corrected.
+
+The embedded WebUI can change `scoop` and install a locally selected keybox. Its
+native save paths validate the complete candidate before writing and use atomic
+replacement, so a failed save does not replace the corresponding active file.
+Successful saves enter the applicable watcher hot-reload path.

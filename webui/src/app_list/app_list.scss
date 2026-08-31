@@ -1,0 +1,127 @@
+@scope (.app-list) {
+  :scope {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: calc(100% - 32px);
+    max-width: 900px;
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .card-box {
+    width: 100%;
+  }
+
+  .card {
+    border-radius: 4px;
+    width: 100%;
+    padding: 16px;
+    box-sizing: border-box;
+    background-color: var(--md-sys-color-surface-container);
+    position: relative;
+    overflow: hidden;
+    transition: border-radius 0.2s ease, background-color 0.1s ease;
+
+    &:active {
+      border-radius: 20px;
+    }
+
+    &.selected {
+      background-color: var(--md-sys-color-tonal-surface);
+    }
+  }
+
+  .content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    gap: 8px;
+  }
+
+  .checkbox {
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    user-select: none;
+    pointer-events: none;
+  }
+
+  .app-info {
+    text-align: initial;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .app-icon-container {
+    flex-shrink: 0;
+    height: 40px;
+    width: 40px;
+    position: relative;
+    pointer-events: none;
+  }
+
+  .app-name,
+  .package-name {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .app-name {
+    color: var(--md-sys-color-on-surface);
+    font-size: 1.1em;
+  }
+
+  .package-name {
+    color: var(--md-sys-color-outline);
+    font-size: 0.9em;
+  }
+
+  .loader {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, var(--md-sys-color-surface-container), var(--md-sys-color-surface-container-high), var(--md-sys-color-surface-container));
+    background-size: 200% 100%;
+    animation: shimmer 1.2s infinite linear;
+    border-radius: 6px;
+  }
+
+  .app-icon {
+    height: 100%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .app-icon-fallback {
+    display: none;
+    width: 100%;
+    height: 100%;
+    border-radius: 8px;
+    background-color: var(--md-sys-color-secondary-container);
+    justify-content: center;
+    align-items: center;
+
+    &.visible {
+      display: flex;
+    }
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

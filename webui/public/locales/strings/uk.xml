@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">System Default</string>
+    <string name="search_bar_search_placeholder">Пошук</string>
+    <string name="functional_button_save">Зберегти</string>
+    <string name="functional_button_close">Закрити</string>
+    <string name="functional_button_cancel">Скасувати</string>
+    <string name="menu_add_system_app">Додати системний застосунок</string>
+    <string name="menu_language">Мова</string>
+    <string name="prompt_save_error">Не вдалося зберегти конфігурацію</string>
+    <string name="add_system_app_title">Додати системний застосунок</string>
+</resources>

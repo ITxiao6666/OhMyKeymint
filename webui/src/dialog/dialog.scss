@@ -1,0 +1,126 @@
+@scope (.dialog-content) {
+  #keybox-dialog {
+    max-width: min(420px, calc(100vw - 32px));
+
+    .keybox-dialog-content {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .keybox-selected-file {
+      overflow-wrap: anywhere;
+      font-weight: 500;
+    }
+  }
+
+  #system-app-dialog {
+    [slot='headline'] {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 16px;
+      width: 100%;
+    }
+
+    #system-app-search {
+      width: 100%;
+    }
+
+    #system-app-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      border-radius: 20px;
+      overflow: hidden;
+
+      .card {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background-color: var(--md-sys-color-surface-container);
+        padding: 8px 0;
+        border-radius: 2px;
+        width: 100%;
+        box-sizing: border-box;
+
+        &:active {
+          border-radius: 20px;
+        }
+      }
+
+      .name {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .app-icon-container {
+        width: 40px;
+        height: 40px;
+        margin-inline-start: 12px;
+        position: relative;
+        flex-shrink: 0;
+      }
+
+      .loader {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, var(--md-sys-color-surface-container), var(--md-sys-color-surface-container-high), var(--md-sys-color-surface-container));
+        background-size: 200% 100%;
+        animation: shimmer 1.2s infinite linear;
+        border-radius: 6px;
+      }
+
+      .app-icon {
+        height: 100%;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .app-icon-fallback {
+        display: none;
+        width: 100%;
+        height: 100%;
+        border-radius: 8px;
+        background-color: var(--md-sys-color-secondary-container);
+        justify-content: center;
+        align-items: center;
+
+        &.visible {
+          display: flex;
+        }
+      }
+
+      .app-info {
+        min-width: 0;
+      }
+
+      .app-name,
+      .package-name {
+        overflow-wrap: anywhere;
+        user-select: none;
+      }
+
+      .app-name {
+        font-weight: 500;
+      }
+
+      .package-name {
+        font-size: 0.85em;
+        color: var(--md-sys-color-outline);
+      }
+
+      .checkbox {
+        flex-shrink: 0;
+      }
+    }
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

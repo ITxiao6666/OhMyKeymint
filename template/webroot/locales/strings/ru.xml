@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">Системный по умолчанию</string>
+    <string name="search_bar_search_placeholder">Поиск</string>
+    <string name="functional_button_save">Сохранить</string>
+    <string name="functional_button_close">Закрыть</string>
+    <string name="functional_button_cancel">Отмена</string>
+    <string name="menu_add_system_app">Добавить системное приложение</string>
+    <string name="menu_language">Язык</string>
+    <string name="prompt_save_error">Не удалось сохранить конфигурацию</string>
+    <string name="add_system_app_title">Добавить системное приложение</string>
+</resources>

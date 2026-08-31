@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">システムのデフォルト</string>
+    <string name="search_bar_search_placeholder">検索</string>
+    <string name="functional_button_save">保存</string>
+    <string name="functional_button_cancel">キャンセル</string>
+    <string name="menu_add_system_app">システムアプリを追加</string>
+    <string name="prompt_save_error">設定の保存に失敗しました。</string>
+    <string name="add_system_app_title">システムアプリを追加</string>
+</resources>

@@ -2,6 +2,7 @@
 #![feature(once_cell_try)]
 
 use anyhow::{Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use std::panic;
 use std::sync::Arc;
 use std::{ffi::CString, os::unix::fs::PermissionsExt, path::Path};
@@ -228,7 +229,69 @@ fn install_module_info_bundle_if_available() -> Result<()> {
     Ok(())
 }
 
+const WEBUI_KEYBOX_CHUNK_BYTES: usize = 48 * 1024;
+const WEBUI_KEYBOX_MAX_CHUNKS: usize = 4;
+
+fn decode_webui_keybox_payload(chunks: Vec<String>) -> Result<Vec<u8>, String> {
+    if chunks.is_empty() {
+        return Err("--webui-install-keybox requires a base64 payload".to_string());
+    }
+    if chunks.len() > WEBUI_KEYBOX_MAX_CHUNKS {
+        return Err("keybox payload contains too many chunks".to_string());
+    }
+    if chunks
+        .iter()
+        .any(|chunk| chunk.is_empty() || chunk.len() > WEBUI_KEYBOX_CHUNK_BYTES)
+    {
+        return Err("keybox payload contains an invalid chunk".to_string());
+    }
+
+    let max_encoded_bytes = keybox::MAX_KEYBOX_XML_BYTES.div_ceil(3) * 4;
+    let encoded_len = chunks.iter().map(String::len).sum::<usize>();
+    if encoded_len > max_encoded_bytes {
+        return Err(format!(
+            "keybox payload exceeds the {} byte limit",
+            keybox::MAX_KEYBOX_XML_BYTES
+        ));
+    }
+
+    let mut encoded = String::with_capacity(encoded_len);
+    for chunk in chunks {
+        encoded.push_str(&chunk);
+    }
+    BASE64_STANDARD
+        .decode(encoded.as_bytes())
+        .map_err(|error| format!("invalid keybox payload encoding: {error}"))
+}
+
+fn handle_webui_keybox_command() -> Option<Result<&'static str, String>> {
+    let mut args = std::env::args();
+    let _program = args.next();
+    if args.next()?.as_str() != "--webui-install-keybox" {
+        return None;
+    }
+
+    Some(
+        decode_webui_keybox_payload(args.collect())
+            .and_then(|contents| {
+                keybox::install_keybox_xml(&contents).map_err(|e| format!("{e:#}"))
+            })
+            .map(|()| "ok"),
+    )
+}
+
 fn main() {
+    if let Some(result) = handle_webui_keybox_command() {
+        match result {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
     logging::init_logger();
     prepare_android_storage();
     panic::set_hook(Box::new(|panic_info| {
@@ -345,4 +408,26 @@ fn run() -> Result<()> {
     info!("serving OMK RPC socket={}", rpc::SOCKET);
     server.run().context("OMK RPC server stopped")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webui_keybox_payload_decodes_multiple_chunks() {
+        let decoded = decode_webui_keybox_payload(vec!["YWJj".into(), "ZA==".into()]).unwrap();
+        assert_eq!(decoded, b"abcd");
+    }
+
+    #[test]
+    fn webui_keybox_payload_rejects_invalid_base64() {
+        assert!(decode_webui_keybox_payload(vec!["not-base64".into()]).is_err());
+    }
+
+    #[test]
+    fn webui_keybox_payload_rejects_too_many_chunks() {
+        let chunks = vec!["YQ==".to_string(); WEBUI_KEYBOX_MAX_CHUNKS + 1];
+        assert!(decode_webui_keybox_payload(chunks).is_err());
+    }
 }

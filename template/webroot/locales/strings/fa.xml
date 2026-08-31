@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">پیش فرض سیستم</string>
+    <string name="search_bar_search_placeholder">جُستجو</string>
+    <string name="functional_button_save">ذخیره</string>
+    <string name="functional_button_cancel">لغو</string>
+    <string name="menu_add_system_app">افزودن برنامه سیستمی</string>
+    <string name="prompt_save_error">ذخیره پیکربندی ناموفق بود</string>
+    <string name="add_system_app_title">افزودن برنامه سیستمی</string>
+</resources>

@@ -1,5 +1,6 @@
 use std::ffi::c_void;
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use log::{error, info, warn, LevelFilter};
 use nix::unistd::Pid;
 
@@ -30,7 +31,60 @@ fn log_runtime_identity(role: &str) {
     );
 }
 
+fn handle_webui_config_command() -> Option<Result<String, String>> {
+    let mut args = std::env::args();
+    let _program = args.next();
+    let command = args.next()?;
+
+    match command.as_str() {
+        "--webui-get-scoop" => {
+            if args.next().is_some() {
+                return Some(Err(
+                    "--webui-get-scoop does not accept arguments".to_string()
+                ));
+            }
+            Some(
+                config::read_scoop_for_webui().and_then(|packages| {
+                    serde_json::to_string(&packages).map_err(|e| e.to_string())
+                }),
+            )
+        }
+        "--webui-set-scoop" => {
+            let Some(encoded) = args.next() else {
+                return Some(Err(
+                    "--webui-set-scoop requires a base64-encoded JSON array".to_string(),
+                ));
+            };
+            if args.next().is_some() {
+                return Some(Err("--webui-set-scoop accepts one argument".to_string()));
+            }
+            let result = BASE64_STANDARD
+                .decode(encoded)
+                .map_err(|error| format!("invalid scoop payload encoding: {error}"))
+                .and_then(|payload| {
+                    serde_json::from_slice::<Vec<String>>(&payload)
+                        .map_err(|error| format!("invalid scoop payload: {error}"))
+                })
+                .and_then(config::replace_scoop_for_webui)
+                .map(|()| "ok".to_string());
+            Some(result)
+        }
+        _ => None,
+    }
+}
+
 fn main() {
+    if let Some(result) = handle_webui_config_command() {
+        match result {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
     logging::init_logger_fallback(LevelFilter::Debug);
     let config = config::get();
     if config::parse_level_filter(&config.main.log_level).is_none() {

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">Προεπιλογή Συστήματος</string>
+    <string name="search_bar_search_placeholder">Αναζήτηση</string>
+    <string name="functional_button_save">Αποθήκευση</string>
+    <string name="functional_button_cancel">Άκυρο</string>
+    <string name="menu_add_system_app">Πρόσθεσε Εφαρμογή Συστήματος</string>
+    <string name="prompt_save_error">Αποτυχία αποθήκευσης ρύθμισης</string>
+    <string name="add_system_app_title">Πρόσθεσε Εφαρμογή Συστήματος</string>
+</resources>

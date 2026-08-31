@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">Systemstandard</string>
+    <string name="search_bar_search_placeholder">Suchen</string>
+    <string name="functional_button_save">Speichern</string>
+    <string name="functional_button_close">Schließen</string>
+    <string name="functional_button_cancel">Abbrechen</string>
+    <string name="menu_add_system_app">System App hinzufügen</string>
+    <string name="menu_language">Sprache</string>
+    <string name="prompt_save_error">Fehler beim Speichern der Konfiguration</string>
+    <string name="add_system_app_title">System App hinzufügen</string>
+</resources>

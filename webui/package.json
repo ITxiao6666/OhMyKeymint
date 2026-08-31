@@ -1,0 +1,20 @@
+{
+  "name": "webui",
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.15.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "sass": "^1.102.0",
+    "typescript": "~7.0.2",
+    "vite": "^8.2.0"
+  },
+  "dependencies": {
+    "@material/web": "^2.5.0",
+    "kernelsu-alt": "^3.1.2"
+  }
+}

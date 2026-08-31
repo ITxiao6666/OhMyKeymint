@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">시스템 기본</string>
+    <string name="search_bar_search_placeholder">검색</string>
+    <string name="functional_button_save">저장</string>
+    <string name="functional_button_close">닫기</string>
+    <string name="functional_button_cancel">취소</string>
+    <string name="menu_add_system_app">시스템 앱 추가</string>
+    <string name="menu_language">언어</string>
+    <string name="prompt_save_error">설정 저장에 실패했습니다.</string>
+    <string name="add_system_app_title">시스템 앱 추가</string>
+</resources>

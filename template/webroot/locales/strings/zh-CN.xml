@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">系统默认</string>
+    <string name="search_bar_search_placeholder">搜索</string>
+    <string name="functional_button_save">保存</string>
+    <string name="functional_button_close">关闭</string>
+    <string name="functional_button_cancel">取消</string>
+    <string name="functional_button_replace">替换</string>
+    <string name="menu_add_system_app">添加系统应用</string>
+    <string name="menu_replace_keybox">替换 keybox.xml</string>
+    <string name="menu_language">语言</string>
+    <string name="menu_more_options">更多选项</string>
+    <string name="menu_select_all">全选</string>
+    <string name="menu_deselect_all">取消全选</string>
+    <string name="menu_refresh">刷新</string>
+    <string name="prompt_saved_target">配置已保存</string>
+    <string name="prompt_save_error">保存配置失败</string>
+    <string name="prompt_load_error">无法读取 OMK 应用列表，保存功能已禁用。</string>
+    <string name="prompt_keybox_xml_required">请选择 XML 文件。</string>
+    <string name="prompt_keybox_too_large">文件不能超过 64 KiB。</string>
+    <string name="prompt_keybox_replaced">keybox.xml 已替换，将自动加载。</string>
+    <string name="prompt_keybox_replace_error">替换 keybox.xml 失败：%s</string>
+    <string name="add_system_app_title">添加系统应用</string>
+    <string name="replace_keybox_title">替换 keybox.xml</string>
+    <string name="replace_keybox_selected_file">已选择：%s</string>
+</resources>

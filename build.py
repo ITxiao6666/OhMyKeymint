@@ -46,6 +46,7 @@ BINARY_SPECS = (
 )
 
 REQUIRED_TEMPLATE_FILES = (
+    "action.sh",
     "customize.sh",
     "daemon",
     "daemon-injector",
@@ -54,11 +55,16 @@ REQUIRED_TEMPLATE_FILES = (
     "post-fs-data.sh",
     "service.sh",
     "verify.sh",
+    "webroot",
 )
 
 MODULE_TEXT_FILES = (
     "AOSP.Apache-license-2.0.txt",
+    "LICENSE-2",
+    "LICENSE.md",
     "README.md",
+    "THIRD_PARTY_LICENSES/Tricky-Addon-Update-Target-List.txt",
+    "action.sh",
     "customize.sh",
     "daemon",
     "daemon-injector",
@@ -111,7 +117,16 @@ def get_git_commit_hash() -> str:
     )
     if result.returncode != 0:
         raise RuntimeError("Failed to get git commit hash")
-    return result.stdout.strip()[:7]
+    git_hash = result.stdout.strip()[:7]
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=normal"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if status.returncode != 0:
+        raise RuntimeError("Failed to inspect git worktree state")
+    return f"{git_hash}-dirty" if status.stdout.strip() else git_hash
 
 
 def cargo_context_for_target(target: str) -> tuple[dict[str, str], str]:
@@ -205,6 +220,23 @@ def copy_template_files(stage_dir: Path) -> None:
             shutil.copy2(item, dst)
 
 
+def copy_project_documents(stage_dir: Path) -> None:
+    documents = (
+        (REPO_ROOT / "README.md", stage_dir / "README.md"),
+        (REPO_ROOT / "LICENSE.md", stage_dir / "LICENSE.md"),
+        (REPO_ROOT / "LICENSE-2", stage_dir / "LICENSE-2"),
+        (
+            REPO_ROOT / "webui" / "LICENSE.upstream",
+            stage_dir / "THIRD_PARTY_LICENSES" / "Tricky-Addon-Update-Target-List.txt",
+        ),
+    )
+    for source, destination in documents:
+        if not source.is_file():
+            raise FileNotFoundError(f"Required license file not found: {source}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+
 def write_text_lf(path: Path, content: str) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as fh:
         fh.write(content)
@@ -261,6 +293,24 @@ def generate_hash_files(stage_dir: Path) -> None:
     for item in stage_dir.rglob("*"):
         if item.is_file() and not item.name.endswith(".sha256"):
             generate_hash_for_file(item)
+
+
+def generate_webroot_manifest(stage_dir: Path) -> None:
+    webroot = stage_dir / "webroot"
+    required = (webroot / "index.html", webroot / "config.json")
+    missing = [path.relative_to(stage_dir).as_posix() for path in required if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"WebUI build is incomplete; missing: {', '.join(missing)}")
+
+    assets = sorted(
+        path.relative_to(stage_dir).as_posix()
+        for path in webroot.rglob("*")
+        if path.is_file() and not path.name.endswith(".sha256")
+    )
+    if not assets:
+        raise FileNotFoundError("WebUI build did not produce any files")
+    write_text_lf(stage_dir / "webroot.manifest", "\n".join(assets) + "\n")
+    print(f"Created WebUI manifest with {len(assets)} asset(s)")
 
 
 def delete_old_zips(release: bool, selected_abis: list[str]) -> None:
@@ -330,6 +380,7 @@ def build_package_for_abi(
             )
 
         copy_template_files(stage_dir)
+        copy_project_documents(stage_dir)
         normalize_module_text_files(stage_dir)
         configure_template_for_abi(stage_dir, abi)
         for spec in BINARY_SPECS:
@@ -342,6 +393,7 @@ def build_package_for_abi(
 
         modify_module_prop(stage_dir, version, git_count, git_hash)
         normalize_module_text_files(stage_dir)
+        generate_webroot_manifest(stage_dir)
         generate_hash_files(stage_dir)
         return create_zip_package(
             stage_dir=stage_dir,

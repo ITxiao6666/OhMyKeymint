@@ -4,12 +4,13 @@
 
 version = 1
 
+
 scoop = [
-  "io.github.vvb2060.keyattestation",
-  "com.google.android.gsf",
-  "com.google.android.gms",
-  "com.android.vending",
-  "com.eltavine.duckdetector",
+  io.github.vvb2060.keyattestation
+  com.google.android.gsf
+  com.google.android.gms
+  com.android.vending
+  com.eltavine.duckdetector
 ]
 
 [main]

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">Sistem Varsayılanı</string>
+    <string name="search_bar_search_placeholder">Ara</string>
+    <string name="functional_button_save">Kaydet</string>
+    <string name="functional_button_close">Kapat</string>
+    <string name="functional_button_cancel">İptal</string>
+    <string name="menu_add_system_app">Sistem Uygulaması Ekle</string>
+    <string name="menu_language">Dil</string>
+    <string name="prompt_save_error">Yapılandırma kaydedilemedi</string>
+    <string name="add_system_app_title">Sistem Uygulaması Ekle</string>
+</resources>

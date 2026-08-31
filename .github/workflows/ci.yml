@@ -97,6 +97,34 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.15.1
+        run_install: false
+
+    - name: Install Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: 22.14.0
+        cache: pnpm
+        cache-dependency-path: webui/pnpm-lock.yaml
+
+    - name: Build WebUI
+      run: |
+        pnpm --dir webui install --frozen-lockfile
+        pnpm --dir webui build
+
+    - name: Verify committed WebUI build
+      run: |
+        webroot_status="$(git status --porcelain=v1 --untracked-files=all -- template/webroot)"
+        if ! git diff --exit-code -- template/webroot || [ -n "$webroot_status" ]; then
+          git status --short --untracked-files=all -- template/webroot
+          git diff -- template/webroot
+          echo "template/webroot does not match the reproducible WebUI build" >&2
+          exit 1
+        fi
+
     - name: Install Rust toolchain
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">Mặc định hệ thống</string>
+    <string name="search_bar_search_placeholder">Tìm kiếm</string>
+    <string name="functional_button_save">Lưu</string>
+    <string name="functional_button_close">Đóng</string>
+    <string name="functional_button_cancel">Huỷ</string>
+    <string name="menu_add_system_app">Thêm ứng dụng hệ thống</string>
+    <string name="menu_language">Ngôn ngữ</string>
+    <string name="prompt_saved_target">Cấu hình đã được lưu</string>
+    <string name="prompt_save_error">Lưu cấu hình thất bại!</string>
+    <string name="add_system_app_title">Thêm ứng dụng hệ thống</string>
+</resources>

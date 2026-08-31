@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">Predefinito di sistema</string>
+    <string name="search_bar_search_placeholder">Ricerca</string>
+    <string name="functional_button_save">Salva</string>
+    <string name="functional_button_close">Chiudi</string>
+    <string name="functional_button_cancel">Annulla</string>
+    <string name="menu_add_system_app">Aggiungi App di Sistema</string>
+    <string name="menu_language">Lingua</string>
+    <string name="prompt_saved_target">Configurazione salvata</string>
+    <string name="prompt_save_error">Impossibile salvare la configurazione</string>
+    <string name="add_system_app_title">Aggiungi app di sistema</string>
+</resources>

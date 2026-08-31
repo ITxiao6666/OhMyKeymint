@@ -23,12 +23,47 @@ In theory, this would make it harder for detectors to identify behavior inconsis
 The keybox file must contain at least one complete RSA or EC entry, and every
 private key present must match its certificate chain. A keybox may contain both
 algorithms or only one; RKP-extracted keyboxes are legitimately EC-only. Keep
-the XML free of extra content such as watermarks or invisible characters.
+the XML free of extra content such as watermarks or invisible characters. The
+embedded WebUI can install a replacement through Android's standard file
+picker.
 
 The active files are `/data/misc/keystore/omk/config.toml` and
 `/data/misc/keystore/omk/injector.toml`. Read the
 [Configuration Guide](docs/CONFIGURATION.md) for complete annotated examples,
 field-by-field explanations, safety notes, and restart requirements.
+
+In `injector.toml`, keep the `scoop = [` and closing `]` lines, then add each
+exact package name on its own line. Bare entries omit both quotes and commas;
+blank lines and lines beginning with `#` are ignored. The traditional quoted,
+comma-separated TOML form remains accepted.
+
+## Embedded WebUI
+
+The module includes an offline WebUI for choosing the exact packages in `scoop`
+and installing a local keybox:
+
+- In KernelSU, open Oh My Keymint from the module list and select its WebUI.
+- In Magisk, run the module action. This requires KSUWebUIStandalone or WebUI X
+  to be installed already. The action does not download or install a WebUI
+  host.
+
+The WebUI uses bundled assets and does not access the network. It can read and
+replace `scoop`, and it can select a local XML file through Android's standard
+file picker to replace the active keybox. It cannot read or change
+`config.toml`, trust settings, system properties, or module updates.
+
+Saving `scoop` is delegated to the native `inject` helper, which validates the
+current configuration and package names before atomically replacing
+`injector.toml`. Installing a keybox is delegated to the native `keymint`
+helper. That helper checks the size, decodes UTF-8, and performs the complete
+in-memory `KeyBox` validation before atomically replacing the canonical
+lowercase `/data/misc/keystore/omk/keybox.xml`. A failed read, size, UTF-8,
+validation, or write leaves the corresponding active file unchanged. The
+appropriate watcher loads a successful change automatically, so a restart is
+normally unnecessary.
+
+Third-party source and licensing details for the adapted WebUI are listed in
+[Third-Party Software](docs/THIRD_PARTY.md).
 
 ## Restarting keymint and injector
 

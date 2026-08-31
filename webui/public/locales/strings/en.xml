@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">System Default</string>
+    <string name="search_bar_search_placeholder">Search</string>
+    <string name="functional_button_save">Save</string>
+    <string name="functional_button_close">Close</string>
+    <string name="functional_button_cancel">Cancel</string>
+    <string name="functional_button_replace">Replace</string>
+    <string name="menu_add_system_app">Add System App</string>
+    <string name="menu_replace_keybox">Replace keybox.xml</string>
+    <string name="menu_language">Language</string>
+    <string name="menu_more_options">More options</string>
+    <string name="menu_select_all">Select all</string>
+    <string name="menu_deselect_all">Deselect all</string>
+    <string name="menu_refresh">Refresh</string>
+    <string name="prompt_saved_target">Config saved</string>
+    <string name="prompt_save_error">Failed to save config</string>
+    <string name="prompt_load_error">Failed to load the OMK app list. Saving is disabled.</string>
+    <string name="prompt_keybox_xml_required">Select an XML file.</string>
+    <string name="prompt_keybox_too_large">The file must not exceed 64 KiB.</string>
+    <string name="prompt_keybox_replaced">keybox.xml was replaced and will reload automatically.</string>
+    <string name="prompt_keybox_replace_error">Failed to replace keybox.xml: %s</string>
+    <string name="add_system_app_title">Add System App</string>
+    <string name="replace_keybox_title">Replace keybox.xml</string>
+    <string name="replace_keybox_selected_file">Selected file: %s</string>
+</resources>

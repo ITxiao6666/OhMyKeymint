@@ -101,6 +101,37 @@ Deleting it can permanently remove keys that apps still need.
 
 ## Choosing apps and changing settings
 
+### How do I open the WebUI?
+
+In KernelSU, open Oh My Keymint from the module list and select its WebUI.
+
+In Magisk, run the Oh My Keymint module action. KSUWebUIStandalone or WebUI X
+must already be installed. The action does not download or install either app.
+If no compatible host is installed, install one and run the action again.
+
+### Does the WebUI use the network, and what can it change?
+
+Its application code, icons, and language files are bundled with OMK. The
+WebUI does not download target lists, keyboxes, translations, or updates.
+
+The WebUI supports two local operations: it reads and replaces `scoop`, and it
+can install a local XML file selected through Android's standard file picker as
+the active keybox. It does not read or write `config.toml`, trust or crypto
+values, device identity settings, system properties, or module update state.
+Continue to manage those settings through the documented active files.
+
+### What happens when the WebUI saves the app list?
+
+The WebUI passes the selected package names to the native `inject` helper. The
+helper validates the existing complete `injector.toml` and every exact package
+name, removes duplicates, and atomically replaces the file while preserving
+its ownership and permissions. The injector then hot-reloads the valid file
+for new requests.
+
+If loading, parsing, validation, or writing fails, the WebUI reports the error
+and the existing file is not replaced. Saving is unavailable when the current
+list could not be loaded.
+
 ### Where are the active settings?
 
 The active files are:
@@ -111,7 +142,9 @@ The active files are:
 Edit the active files, not the copies inside the module ZIP. Make a backup
 first and use a root-capable editor that preserves the files correctly.
 The [Configuration Guide](CONFIGURATION.md) explains every field and when each
-kind of change takes effect.
+kind of change takes effect. The embedded WebUI is an optional editor for
+`scoop` and an installer for a locally selected keybox; it does not expose the
+other settings.
 
 ### What is `scoop`?
 
@@ -121,6 +154,14 @@ entered exactly.
 
 You can often find the package name at the end of the app's Play Store URL,
 after `id=`. Add only apps that you actually want OMK to handle.
+
+Keep the `scoop = [` and closing `]` lines in `injector.toml`, and put one
+package name on each line between them. Bare entries do not need quotes or
+commas (the quoted, comma-separated TOML form is still accepted).
+
+The embedded WebUI lists installed packages and updates this same `scoop`
+value. It accepts exact package names only and does not support `!`, `?`,
+wildcards, labels, or partial names.
 
 ### Why is an app affected even though I did not add it?
 
@@ -176,6 +217,10 @@ needed for a clean boundary, restart the injector only; an injector-only
 setting change does not require a keymint restart. After installing or updating
 the whole module, reboot the device.
 
+A successful WebUI save follows the injector hot-reload path and needs no
+keymint restart. Close and reopen the selected app when you need a clean
+routing boundary.
+
 If you changed `vb_key` or `vb_hash` from `"random"` back to `"auto"`, a full
 reboot is required. The automatic value cannot return until the next boot.
 
@@ -228,14 +273,16 @@ tools accept damaged or incomplete XML that OMK correctly rejects.
 
 ### How should I replace `keybox.xml`?
 
-Replace the complete active file at
-`/data/misc/keystore/omk/keybox.xml`. Do not open it and save it piece by piece.
-Use a root file manager to copy the complete replacement under a temporary
-name in the same folder, then rename it to `keybox.xml` in one step.
+In the WebUI, choose the keybox replacement action and select the XML through
+Android's standard file picker. The native `keymint` helper checks the input
+size, decodes it as UTF-8, and performs the complete in-memory `KeyBox`
+validation, including private-key and certificate-chain matching. It atomically
+replaces the canonical lowercase
+`/data/misc/keystore/omk/keybox.xml` only after every check succeeds. A read,
+size, UTF-8, validation, or write failure leaves the current keybox unchanged.
 
-OMK normally reloads it automatically. Check `keymint.log` afterward. If the
-file is missing or invalid, OMK records the reason and restores the bundled
-template, which can look as if your replacement was undone.
+The keybox watcher loads a successful replacement automatically, so a restart
+is normally unnecessary. Check `keymint.log` afterward.
 
 ### Why does a detector say that the certificate is expired or revoked?
 
@@ -243,16 +290,6 @@ That is a keybox problem, not a security-patch setting. Changing
 patch-level settings cannot extend a certificate's lifetime or remove a
 revocation. Use a currently valid, complete keybox and do not alter certificate
 dates.
-
-### Why did apps sign out after I changed the keybox?
-
-Some apps bind their login or encryption keys to the attestation identity that
-was active when the keys were created. After a keybox change, those apps may
-require sign-in, identity verification, or device registration again. This
-cannot always be avoided.
-
-Change a keybox only when you have time to re-register important apps. Back up
-first, but do not delete the whole OMK data directory.
 
 ### Should I delete `/data/misc/keystore/omk/data/`?
 

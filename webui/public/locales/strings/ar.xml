@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">النظام الافتراضي</string>
+    <string name="search_bar_search_placeholder">بحث</string>
+    <string name="functional_button_save">حفظ</string>
+    <string name="functional_button_close">غلق</string>
+    <string name="functional_button_cancel">إلغاء</string>
+    <string name="menu_add_system_app">إضافة تطبيق نظام</string>
+    <string name="menu_language">اللغة</string>
+    <string name="prompt_saved_target">تم حفظ الإعدادات</string>
+    <string name="prompt_save_error">فشل في حفظ التكوين</string>
+    <string name="add_system_app_title">إضافة تطبيق نظام</string>
+</resources>

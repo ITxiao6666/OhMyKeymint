@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_default">Default Sistem</string>
+    <string name="search_bar_search_placeholder">Cari</string>
+    <string name="functional_button_save">Simpan</string>
+    <string name="functional_button_cancel">Batal</string>
+    <string name="menu_add_system_app">Tambahkan Aplikasi Sistem</string>
+    <string name="prompt_save_error">Gagal menyimpan konfigurasi</string>
+    <string name="add_system_app_title">Tambah Aplikasi Sistem</string>
+</resources>
