@@ -24,6 +24,14 @@ export class MainMenu {
           <md-icon slot="start">upload_file</md-icon>
           <div slot="headline"></div>
         </md-menu-item>
+        <md-menu-item id="sync-security-patch">
+          <md-icon slot="start">security_update</md-icon>
+          <div slot="headline"></div>
+        </md-menu-item>
+        <md-menu-item id="restore-default-security-patch">
+          <md-icon slot="start">settings_backup_restore</md-icon>
+          <div slot="headline"></div>
+        </md-menu-item>
         <md-divider role="separator" tabindex="-1"></md-divider>
         <md-sub-menu hover-close-delay="0">
           <md-menu-item slot="item" class="sub-menu-entry">
@@ -43,6 +51,8 @@ export class MainMenu {
 
     this.#setHeadline(fragment, '#add-system-app', i18n.t('menu_add_system_app'))
     this.#setHeadline(fragment, '#install-keybox', i18n.t('menu_replace_keybox'))
+    this.#setHeadline(fragment, '#sync-security-patch', i18n.t('menu_sync_security_patch'))
+    this.#setHeadline(fragment, '#restore-default-security-patch', i18n.t('menu_restore_default_security_patch'))
     this.#setHeadline(fragment, '.sub-menu-entry', i18n.t('menu_language'))
 
     const actions: Array<[string, string, string]> = [
@@ -51,6 +61,8 @@ export class MainMenu {
       ['refresh', 'menu-refresh', i18n.t('menu_refresh')],
       ['add-system-app', 'menu-add-system-app', i18n.t('menu_add_system_app')],
       ['install-keybox', 'menu-install-keybox', i18n.t('menu_replace_keybox')],
+      ['sync-security-patch', 'menu-sync-security-patch', i18n.t('menu_sync_security_patch')],
+      ['restore-default-security-patch', 'menu-restore-default-security-patch', i18n.t('menu_restore_default_security_patch')],
     ]
     for (const [id, event, label] of actions) {
       const item = fragment.querySelector<HTMLElement>(`#${id}`)!

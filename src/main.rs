@@ -280,7 +280,47 @@ fn handle_webui_keybox_command() -> Option<Result<&'static str, String>> {
     )
 }
 
+fn handle_webui_security_patch_command() -> Option<Result<String, String>> {
+    let mut args = std::env::args();
+    let _program = args.next();
+    if args.next()?.as_str() != "--webui-sync-security-patch" {
+        return None;
+    }
+
+    let value = match args.next() {
+        Some(value) => value,
+        None => {
+            return Some(Err(
+                "--webui-sync-security-patch requires exactly one value: auto or YYYY-MM-DD"
+                    .to_string(),
+            ))
+        }
+    };
+    if args.next().is_some() {
+        return Some(Err(
+            "--webui-sync-security-patch accepts exactly one value: auto or YYYY-MM-DD".to_string(),
+        ));
+    }
+
+    Some(
+        crate::config::sync_security_patch(&value)
+            .map(|()| value)
+            .map_err(|error| format!("{error:#}")),
+    )
+}
+
 fn main() {
+    if let Some(result) = handle_webui_security_patch_command() {
+        match result {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
     if let Some(result) = handle_webui_keybox_command() {
         match result {
             Ok(output) => println!("{output}"),

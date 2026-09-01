@@ -24,7 +24,9 @@ import { i18n } from './i18n'
 import { Keybind } from './keybind'
 import { MainMenu } from './main_menu/main_menu'
 import { SearchBar } from './search_bar/search_bar'
+import { fetchLatestSecurityPatch } from './security_patch'
 import { Snackbar } from './snackbar/snackbar'
+import { isDev } from './utils/dev'
 import './style.scss'
 
 await i18n.init()
@@ -149,6 +151,44 @@ const keyboxDialog = new KeyboxDialog(cli, snackbar)
 dialogContent.appendChild(keyboxDialog.getElement())
 keyboxDialog.initAnimation()
 mainMenu.on('menu-install-keybox', () => keyboxDialog.choose())
+
+let securityPatchBusy = false
+async function syncSecurityPatch(): Promise<void> {
+  if (securityPatchBusy) return
+  securityPatchBusy = true
+  try {
+    if (isDev()) {
+      snackbar.show(i18n.t('prompt_security_patch_synced'))
+      return
+    }
+    const date = await fetchLatestSecurityPatch(() => cli.fetchSecurityBulletin())
+    await cli.syncSecurityPatch(date)
+    snackbar.show(i18n.t('prompt_security_patch_synced_date', date))
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    console.error('Unable to sync the security patch:', error)
+    snackbar.show(i18n.t('prompt_security_patch_sync_error', detail), false, 6000)
+  } finally {
+    securityPatchBusy = false
+  }
+}
+mainMenu.on('menu-sync-security-patch', () => void syncSecurityPatch())
+
+async function restoreDefaultSecurityPatch(): Promise<void> {
+  if (securityPatchBusy) return
+  securityPatchBusy = true
+  try {
+    if (!isDev()) await cli.restoreDefaultSecurityPatch()
+    snackbar.show(i18n.t('prompt_security_patch_restored_default'))
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    console.error('Unable to restore the default security patch:', error)
+    snackbar.show(i18n.t('prompt_security_patch_restore_error', detail), false, 6000)
+  } finally {
+    securityPatchBusy = false
+  }
+}
+mainMenu.on('menu-restore-default-security-patch', () => void restoreDefaultSecurityPatch())
 
 dialogContent.querySelectorAll<MdDialog>('md-dialog').forEach((dialog, index) => {
   const id = dialog.id || `md-dialog-${index}`

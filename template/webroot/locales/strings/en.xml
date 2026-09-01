@@ -8,6 +8,8 @@
     <string name="functional_button_replace">Replace</string>
     <string name="menu_add_system_app">Add System App</string>
     <string name="menu_replace_keybox">Replace keybox.xml</string>
+    <string name="menu_sync_security_patch">Sync security patch</string>
+    <string name="menu_restore_default_security_patch">Restore default security patch</string>
     <string name="menu_language">Language</string>
     <string name="menu_more_options">More options</string>
     <string name="menu_select_all">Select all</string>
@@ -20,6 +22,11 @@
     <string name="prompt_keybox_too_large">The file must not exceed 64 KiB.</string>
     <string name="prompt_keybox_replaced">keybox.xml was replaced and will reload automatically.</string>
     <string name="prompt_keybox_replace_error">Failed to replace keybox.xml: %s</string>
+    <string name="prompt_security_patch_synced">Security patch synchronized.</string>
+    <string name="prompt_security_patch_synced_date">Security patch synchronized to %s.</string>
+    <string name="prompt_security_patch_sync_error">Failed to synchronize security patch: %s</string>
+    <string name="prompt_security_patch_restored_default">Default security patch restored.</string>
+    <string name="prompt_security_patch_restore_error">Failed to restore default security patch: %s</string>
     <string name="add_system_app_title">Add System App</string>
     <string name="replace_keybox_title">Replace keybox.xml</string>
     <string name="replace_keybox_selected_file">Selected file: %s</string>

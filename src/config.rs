@@ -4,7 +4,7 @@ use std::{
     sync::{Mutex, OnceLock, RwLock},
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use kmr_common::{
     consts::{KEYSTORE_GID, KEYSTORE_UID},
     crypto::Rng,
@@ -98,6 +98,116 @@ pub fn load_config_file() -> Result<ConfigFile> {
 
 pub fn persist_config_file(config_file: &ConfigFile) -> Result<()> {
     persist_config_file_to_path(Path::new(CONFIG_PATH), config_file)
+}
+
+/// Replace only the four trust patch-level fields with a validated value.
+///
+/// This is intentionally separate from [`persist_config_file`]. The WebUI
+/// receives values from an external bulletin or requests the `auto` defaults
+/// but must not be able to overwrite generated secrets, device identity, or
+/// any unknown config data.
+pub fn sync_security_patch(value: &str) -> Result<()> {
+    sync_security_patch_to_path(Path::new(CONFIG_PATH), value)
+}
+
+fn sync_security_patch_to_path(path: &Path, value: &str) -> Result<()> {
+    validate_security_patch_sync_value(value)?;
+
+    let _write_guard = CONFIG_FILE_WRITE_LOCK
+        .lock()
+        .map_err(|_| anyhow!("config file write lock poisoned"))?;
+    let existing = fs::read_to_string(path)
+        .with_context(|| format!("failed to read config file {}", path.display()))?;
+    let mut table: toml::Table =
+        toml::from_str(&existing).context("refusing to overwrite invalid existing config.toml")?;
+    parse_config_file(&existing, false)
+        .context("refusing to overwrite config.toml that is not a current valid config")?;
+
+    let trust = table
+        .get_mut("trust")
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| anyhow!("config is missing a valid [trust] table"))?;
+    for field in [
+        "security_patch",
+        "os_patchlevel",
+        "vendor_patchlevel",
+        "boot_patchlevel",
+    ] {
+        trust.insert(field.to_string(), toml::Value::String(value.to_string()));
+    }
+
+    let serialized = toml::to_string_pretty(&table).context("failed to serialize config.toml")?;
+    parse_config_file(&serialized, false)
+        .context("refusing to write an invalid synchronized config.toml")?;
+    if existing == serialized {
+        return Ok(());
+    }
+    persist_config_contents_unlocked(path, &serialized)
+}
+
+fn validate_security_patch_sync_value(value: &str) -> Result<()> {
+    if value == "auto" {
+        return Ok(());
+    }
+    validate_security_patch_sync_date(value)
+}
+
+fn validate_security_patch_sync_date(date: &str) -> Result<()> {
+    if !is_security_patch_date(date) {
+        bail!("security patch value must be `auto` or an exact YYYY-MM-DD date");
+    }
+
+    let year = date[0..4]
+        .parse::<i32>()
+        .map_err(|_| anyhow!("security patch year is invalid"))?;
+    let month = date[5..7]
+        .parse::<u32>()
+        .map_err(|_| anyhow!("security patch month is invalid"))?;
+    let day = date[8..10]
+        .parse::<u32>()
+        .map_err(|_| anyhow!("security patch day is invalid"))?;
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 400 == 0 || (year % 4 == 0 && year % 100 != 0) => 29,
+        2 => 28,
+        _ => unreachable!("is_security_patch_date validates the month"),
+    };
+    if day > days_in_month {
+        bail!("security patch date is not a valid calendar date");
+    }
+
+    let (current_year, current_month, current_day) = current_local_date()?;
+    if (year, month, day) > (current_year, current_month, current_day) {
+        bail!("security patch date cannot be in the future");
+    }
+    Ok(())
+}
+
+fn current_local_date() -> Result<(i32, u32, u32)> {
+    #[cfg(unix)]
+    unsafe {
+        let now = libc::time(std::ptr::null_mut());
+        if now < 0 {
+            bail!("libc::time returned a negative timestamp");
+        }
+        let mut local = std::mem::zeroed::<libc::tm>();
+        if libc::localtime_r(&now, &mut local).is_null() {
+            bail!("libc::localtime_r failed");
+        }
+        Ok((
+            local.tm_year + 1900,
+            (local.tm_mon + 1) as u32,
+            local.tm_mday as u32,
+        ))
+    }
+
+    #[cfg(not(unix))]
+    {
+        Err(anyhow!(
+            "current_local_date is unsupported on this platform"
+        ))
+    }
 }
 
 fn bootstrap_config_file_to_path(path: &Path) -> Result<ConfigFile> {
@@ -528,7 +638,11 @@ fn validate_patchlevel(field: &str, value: &str) -> Result<()> {
 }
 
 pub fn is_security_patch_date(value: &str) -> bool {
-    regex::Regex::new(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$")
+    // Keep this byte-oriented date format ASCII-only.  Rust's `\d` is
+    // Unicode-aware by default, which would allow non-ASCII decimal digits
+    // through this shape check even though the rest of the code slices the
+    // date at fixed byte offsets.
+    regex::Regex::new(r"^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$")
         .expect("security patch regex must compile")
         .is_match(value)
 }
@@ -1054,6 +1168,178 @@ mod tests {
         assert!(validate_patchlevel("security_patch", "yesterday").is_err());
         assert!(validate_patchlevel("security_patch", "").is_err());
         assert!(validate_patchlevel("security_patch", "20000000").is_err());
+    }
+
+    #[test]
+    fn sync_security_patch_updates_only_patch_fields_and_preserves_unknown_data() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("config.toml");
+        let mut table: toml::Table =
+            toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
+        table.insert(
+            "future_key".to_string(),
+            toml::Value::String("preserve-me".to_string()),
+        );
+        table
+            .get_mut("trust")
+            .and_then(toml::Value::as_table_mut)
+            .unwrap()
+            .insert(
+                "future_trust_key".to_string(),
+                toml::Value::String("preserve-me-too".to_string()),
+            );
+        let original_crypto = table.get("crypto").cloned();
+        fs::write(&path, toml::to_string_pretty(&table).unwrap()).unwrap();
+
+        sync_security_patch_to_path(&path, "2020-01-05").unwrap();
+
+        let persisted: toml::Table = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            persisted.get("future_key").and_then(toml::Value::as_str),
+            Some("preserve-me")
+        );
+        assert_eq!(
+            persisted
+                .get("trust")
+                .and_then(toml::Value::as_table)
+                .and_then(|trust| trust.get("future_trust_key"))
+                .and_then(toml::Value::as_str),
+            Some("preserve-me-too")
+        );
+        let trust = persisted
+            .get("trust")
+            .and_then(toml::Value::as_table)
+            .unwrap();
+        for field in [
+            "security_patch",
+            "os_patchlevel",
+            "vendor_patchlevel",
+            "boot_patchlevel",
+        ] {
+            assert_eq!(
+                trust.get(field).and_then(toml::Value::as_str),
+                Some("2020-01-05")
+            );
+        }
+        assert_eq!(persisted.get("crypto"), original_crypto.as_ref());
+    }
+
+    #[test]
+    fn sync_security_patch_auto_preserves_unknown_and_unrelated_config() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("config.toml");
+        let mut original: toml::Table =
+            toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
+        original.insert(
+            "future_key".to_string(),
+            toml::Value::String("preserve-me".to_string()),
+        );
+        let trust = original
+            .get_mut("trust")
+            .and_then(toml::Value::as_table_mut)
+            .unwrap();
+        trust.insert(
+            "future_trust_key".to_string(),
+            toml::Value::String("preserve-me-too".to_string()),
+        );
+        for field in [
+            "security_patch",
+            "os_patchlevel",
+            "vendor_patchlevel",
+            "boot_patchlevel",
+        ] {
+            trust.insert(
+                field.to_string(),
+                toml::Value::String("2020-01-05".to_string()),
+            );
+        }
+        fs::write(&path, toml::to_string_pretty(&original).unwrap()).unwrap();
+
+        let mut expected = original;
+        let expected_trust = expected
+            .get_mut("trust")
+            .and_then(toml::Value::as_table_mut)
+            .unwrap();
+        for field in [
+            "security_patch",
+            "os_patchlevel",
+            "vendor_patchlevel",
+            "boot_patchlevel",
+        ] {
+            expected_trust.insert(field.to_string(), toml::Value::String("auto".to_string()));
+        }
+
+        sync_security_patch_to_path(&path, "auto").unwrap();
+
+        let persisted: toml::Table = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(persisted, expected);
+        let trust = persisted
+            .get("trust")
+            .and_then(toml::Value::as_table)
+            .unwrap();
+        for field in [
+            "security_patch",
+            "os_patchlevel",
+            "vendor_patchlevel",
+            "boot_patchlevel",
+        ] {
+            assert_eq!(trust.get(field).and_then(toml::Value::as_str), Some("auto"));
+        }
+        assert_eq!(
+            persisted.get("future_key").and_then(toml::Value::as_str),
+            Some("preserve-me")
+        );
+        assert_eq!(
+            trust.get("future_trust_key").and_then(toml::Value::as_str),
+            Some("preserve-me-too")
+        );
+    }
+
+    #[test]
+    fn sync_security_patch_rejects_invalid_or_future_dates_without_overwriting() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("config.toml");
+        let original = toml::to_string_pretty(&ConfigFile::default()).unwrap();
+        fs::write(&path, &original).unwrap();
+
+        // Arabic-Indic digits must be rejected before the fixed-byte slices
+        // in `validate_security_patch_sync_date`; this also guards against a
+        // panic if the helper receives non-ASCII command-line input.
+        for date in [
+            "2020-02-30",
+            "2020-01-05 ",
+            "latest",
+            "AUTO",
+            "9999-12-31",
+            "\u{0662}\u{0660}\u{0662}\u{0666}-\u{0660}\u{0668}-\u{0660}\u{0665}",
+        ] {
+            assert!(
+                sync_security_patch_to_path(&path, date).is_err(),
+                "{date:?}"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        }
+    }
+
+    #[test]
+    fn sync_security_patch_rejects_future_version_and_damaged_config_without_overwriting() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("config.toml");
+        let mut future: toml::Table =
+            toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
+        future.insert(
+            "version".to_string(),
+            toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION) + 1),
+        );
+        let future_contents = toml::to_string_pretty(&future).unwrap();
+        fs::write(&path, &future_contents).unwrap();
+        assert!(sync_security_patch_to_path(&path, "2020-01-05").is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), future_contents);
+
+        let damaged = "version = 2\n[trust\n";
+        fs::write(&path, damaged).unwrap();
+        assert!(sync_security_patch_to_path(&path, "2020-01-05").is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), damaged);
     }
 
     #[test]

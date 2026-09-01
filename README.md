@@ -39,18 +39,27 @@ comma-separated TOML form remains accepted.
 
 ## Embedded WebUI
 
-The module includes an offline WebUI for choosing the exact packages in `scoop`
-and installing a local keybox:
+The module includes a WebUI for choosing the exact packages in `scoop`,
+installing a local keybox, and managing the Android security patch level:
 
 - In KernelSU, open Oh My Keymint from the module list and select its WebUI.
 - In Magisk, run the module action. This requires KSUWebUIStandalone or WebUI X
   to be installed already. The action does not download or install a WebUI
   host.
 
-The WebUI uses bundled assets and does not access the network. It can read and
-replace `scoop`, and it can select a local XML file through Android's standard
-file picker to replace the active keybox. It cannot read or change
-`config.toml`, trust settings, system properties, or module updates.
+The WebUI uses bundled assets for normal operation. **Sync security patch**
+uses the root WebUI bridge to download the Android Security Bulletin overview
+from Google's official `source.android.com` host (with its official Chinese
+mirror as a fallback), parses the newest published patch level, and sends that
+exact date to the native helper. The download is attempted only with the
+device's certificate-validating `curl` HTTPS client; redirects are accepted
+only when they end at the official bulletin page. **Restore default security
+patch** does not use the network; it sets `security_patch`, `os_patchlevel`,
+`vendor_patchlevel`, and `boot_patchlevel` to `auto`. Other than the explicit
+sync action, the WebUI does not access the network. It can also read and replace
+`scoop` and select a local XML file through Android's standard file picker to
+replace the active keybox. The two security-patch actions do not change
+secrets, identity fields, or other settings.
 
 Saving `scoop` is delegated to the native `inject` helper, which validates the
 current configuration and package names before atomically replacing

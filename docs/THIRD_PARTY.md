@@ -12,8 +12,10 @@ That source is licensed under the
 
 The adapted source supplies the offline package-selection portion of the Oh My
 Keymint WebUI. It reads and replaces the OMK `scoop` list through the native
-`inject` helper. The WebUI does not include network access, module self-update,
-property modification, trust editing, or automatic WebUI-host installation.
-Oh My Keymint's separate keybox action uses Android's standard file picker and
-its own native `keymint` helper to validate and atomically install a local XML
-file.
+`inject` helper. That adapted portion does not provide network access, module
+self-update, property modification, trust editing, or automatic WebUI-host
+installation. Oh My Keymint separately provides a keybox action that validates
+and atomically installs a local XML file, plus a security-patch action that
+downloads Google's official Android Security Bulletin and updates only the four
+`[trust]` patch-level fields. Its separate restore action resets those fields
+to `auto` without network access.

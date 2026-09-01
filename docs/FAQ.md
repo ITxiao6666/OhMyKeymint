@@ -111,13 +111,24 @@ If no compatible host is installed, install one and run the action again.
 
 ### Does the WebUI use the network, and what can it change?
 
-Its application code, icons, and language files are bundled with OMK. The
-WebUI does not download target lists, keyboxes, translations, or updates.
+Its application code, icons, and language files are bundled with OMK. Normal
+local operations do not use the network. **Sync security patch** is the one
+exception: it uses the root WebUI bridge to make an HTTPS request to Google's
+official `source.android.com` Android Security Bulletin overview, with the
+official Chinese mirror as a fallback. It extracts the newest published date
+and asks the native helper to update the four `[trust]` patch-level fields. A
+network, HTTP, parsing, or native-write failure leaves the existing
+configuration unchanged. The device must provide a certificate-validating
+`curl`; redirects are accepted only when the final URL remains the official
+bulletin page.
 
-The WebUI supports two local operations: it reads and replaces `scoop`, and it
-can install a local XML file selected through Android's standard file picker as
-the active keybox. It does not read or write `config.toml`, trust or crypto
-values, device identity settings, system properties, or module update state.
+**Restore default security patch** is local and makes no network request. It
+sets `security_patch`, `os_patchlevel`, `vendor_patchlevel`, and
+`boot_patchlevel` to `"auto"` while preserving all other configuration values.
+
+The WebUI also reads and replaces `scoop` and can install a local XML file
+selected through Android's standard file picker as the active keybox. It does
+not change `[crypto]`, device identity, or unrelated configuration settings.
 Continue to manage those settings through the documented active files.
 
 ### What happens when the WebUI saves the app list?
@@ -143,8 +154,9 @@ Edit the active files, not the copies inside the module ZIP. Make a backup
 first and use a root-capable editor that preserves the files correctly.
 The [Configuration Guide](CONFIGURATION.md) explains every field and when each
 kind of change takes effect. The embedded WebUI is an optional editor for
-`scoop` and an installer for a locally selected keybox; it does not expose the
-other settings.
+`scoop`, an installer for a locally selected keybox, and controls for syncing
+or restoring the four security-patch fields; it does not expose the other
+settings.
 
 ### What is `scoop`?
 

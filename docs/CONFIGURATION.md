@@ -61,17 +61,28 @@ change does not require a keymint restart.
 
 ## Embedded WebUI
 
-The module includes an offline WebUI for selecting packages in `scoop` and
-installing a local keybox. Open it from the Oh My Keymint module page in
+The module includes a WebUI for selecting packages in `scoop`, installing a
+local keybox, and managing the Android security patch level. Open it from the
+Oh My Keymint module page in
 KernelSU. With Magisk, run the module action after installing either
 KSUWebUIStandalone or WebUI X; the action does not download or install either
 host.
 
 The WebUI can read and replace the `scoop` package list and can install a local
-keybox selected through Android's standard file picker. It does not read or
-write `config.toml`, `[trust]`, `[crypto]`, device identity fields, system
-properties, or module update state. All WebUI assets are bundled in the module,
-and the WebUI does not make network requests.
+keybox selected through Android's standard file picker. Its **Sync security
+patch** action uses the root WebUI bridge to make an HTTPS request to the
+official `https://source.android.com/docs/security/bulletin/asb-overview` page,
+falling back to Google's official Chinese mirror when the primary host is
+unavailable. It extracts the newest published security-patch level and
+atomically updates only the four `[trust]` patch-level fields. A failed request,
+an unrecognized page, or an invalid date leaves the active configuration
+unchanged. The action requires a certificate-validating `curl` on the device;
+redirects are accepted only when the final URL remains the official bulletin
+page. **Restore default security patch** makes no network request and sets
+`security_patch`, `os_patchlevel`, `vendor_patchlevel`, and `boot_patchlevel`
+to `"auto"`; their normal automatic resolution and restart requirements then
+apply. All other WebUI assets are bundled and no network request is made for
+normal local operations.
 
 The WebUI does not parse or rewrite `injector.toml` itself. It sends the package
 list to the native `inject` helper. The helper first parses the current complete
@@ -275,6 +286,23 @@ This controls `ro.build.version.security_patch`. It accepts:
 - `"latest"`: use the fifth day of the current calendar month when the value
   is resolved; or
 - an actual date written as `"YYYY-MM-DD"`, including leading zeroes.
+
+The WebUI **Sync security patch** action is separate from the `"latest"` mode.
+It reads the main table on Google's Android Security Bulletin overview,
+selects the greatest published security-patch date that is not in the future,
+and writes that exact date to `security_patch`, `os_patchlevel`,
+`vendor_patchlevel`, and `boot_patchlevel`. For example, an August bulletin
+whose levels are `2026-08-01` and `2026-08-05` synchronizes `2026-08-05`.
+The action never guesses an unpublished current-month date. It requires
+network access to Google's official bulletin host or mirror; if access or
+parsing fails, no file is changed. The native helper validates the date again
+and preserves all other configuration values.
+
+The WebUI **Restore default security patch** action writes `"auto"` to
+`security_patch`, `os_patchlevel`, `vendor_patchlevel`, and `boot_patchlevel`
+without accessing the network. It preserves every other configuration value.
+Each field then follows the automatic resolution and restart behavior described
+below.
 
 `"auto"` first uses a nonempty runtime property, then the exact key from the
 standard `build.prop` locations, and finally `2025-06-05` if neither source is
@@ -703,7 +731,9 @@ unsupported future `version` leaves the last valid runtime configuration
 active; if present at injector startup, it leaves OMK request routing disabled
 until the file is corrected.
 
-The embedded WebUI can change `scoop` and install a locally selected keybox. Its
-native save paths validate the complete candidate before writing and use atomic
-replacement, so a failed save does not replace the corresponding active file.
-Successful saves enter the applicable watcher hot-reload path.
+The embedded WebUI can change `scoop`, install a locally selected keybox,
+synchronize the four `[trust]` patch-level fields from the official Android
+Security Bulletin, or restore those fields to `"auto"`. Its native save paths
+validate the complete candidate before writing and use atomic replacement, so
+a failed save does not replace the corresponding active file. Successful saves
+enter the applicable watcher hot-reload path.

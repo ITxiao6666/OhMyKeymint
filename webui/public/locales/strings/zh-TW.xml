@@ -8,6 +8,8 @@
     <string name="functional_button_replace">替換</string>
     <string name="menu_add_system_app">添加系統應用</string>
     <string name="menu_replace_keybox">替換 keybox.xml</string>
+    <string name="menu_sync_security_patch">同步安全性修補程式</string>
+    <string name="menu_restore_default_security_patch">還原預設安全性修補程式</string>
     <string name="menu_language">語言</string>
     <string name="prompt_saved_target">配置已儲存</string>
     <string name="prompt_save_error">保存配置失敗</string>
@@ -15,6 +17,11 @@
     <string name="prompt_keybox_too_large">檔案不能超過 64 KiB。</string>
     <string name="prompt_keybox_replaced">keybox.xml 已替換，將自動載入。</string>
     <string name="prompt_keybox_replace_error">替換 keybox.xml 失敗：%s</string>
+    <string name="prompt_security_patch_synced">安全性修補程式已同步。</string>
+    <string name="prompt_security_patch_synced_date">安全性修補程式已同步至 %s。</string>
+    <string name="prompt_security_patch_sync_error">同步安全性修補程式失敗：%s</string>
+    <string name="prompt_security_patch_restored_default">已還原預設安全性修補程式。</string>
+    <string name="prompt_security_patch_restore_error">還原預設安全性修補程式失敗：%s</string>
     <string name="add_system_app_title">添加系統應用</string>
     <string name="replace_keybox_title">替換 keybox.xml</string>
     <string name="replace_keybox_selected_file">已選擇：%s</string>
