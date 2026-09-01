@@ -154,9 +154,10 @@ export function parseLatestSecurityPatch(html: string, now = new Date()): string
 /**
  * Download and parse a bulletin supplied by the caller.
  *
- * The WebUI passes a root-bridge downloader from `Cli` here. Keeping the
- * downloader injectable makes the parser easy to test without granting this
- * module a second network implementation (and avoids WebView CORS failures).
+ * The WebUI passes the module's native HTTPS downloader from `Cli` here.
+ * Keeping the downloader injectable makes the parser easy to test without
+ * granting this module a second network implementation or relying on WebView
+ * cross-origin access.
  */
 export async function fetchLatestSecurityPatch(
   fetchText: () => Promise<string>,

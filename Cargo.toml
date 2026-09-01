@@ -44,6 +44,7 @@ base64 = "0.23.1"
 quick-xml = { version = "0.42.0", features = ["serialize"] }
 goblin = "0.10.7"
 ring = "0.17.14"
+ureq = { version = "3.4.0", default-features = false, features = ["rustls"] }
 android_logger = "0.15.1"
 multi_log = "0.1.2"
 

@@ -81,9 +81,10 @@ properties to
 `/data/misc/keystore/omk/data/security_patch_defaults.toml`. A later sync keeps
 the existing snapshot instead of replacing the saved defaults.
 
-The action requires a certificate-validating `curl` on the device; redirects
-are accepted only when the final URL remains the official bulletin page. A
-failed request, unrecognized page, invalid date, or snapshot write leaves the
+The action uses the module's native HTTPS client with embedded WebPKI roots;
+the device does not need to provide `curl` or `wget`. HTTPS redirects are
+accepted only when the final URL remains the official bulletin page. A failed
+request, unrecognized page, invalid date, or snapshot write leaves the
 configuration and properties unchanged. The native helper verifies both
 property writes and rolls them back when the paired update or subsequent
 configuration write fails. **Restore default security patch** makes no network

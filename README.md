@@ -48,12 +48,13 @@ installing a local keybox, and managing the Android security patch level:
   host.
 
 The WebUI uses bundled assets for normal operation. **Sync security patch**
-uses the root WebUI bridge to download the Android Security Bulletin overview
-from Google's official `source.android.com` host (with its official Chinese
-mirror as a fallback), parses the newest published patch level, and sends that
-exact date to the native helper. The download is attempted only with the
-device's certificate-validating `curl` HTTPS client; redirects are accepted
-only when they end at the official bulletin page. Before the first sync, the
+uses the module's native HTTPS client to download the Android Security Bulletin
+overview from Google's official `source.android.com` host (with its official
+Chinese mirror as a fallback), parses the newest published patch level, and
+sends that exact date to the native helper. It does not require `curl` or
+`wget` on the device. TLS uses the client's embedded WebPKI roots, and HTTPS
+redirects are accepted only when they end at the official bulletin page.
+Before the first sync, the
 helper records the current `ro.build.version.security_patch` and
 `ro.vendor.build.security_patch` values in
 `/data/misc/keystore/omk/data/security_patch_defaults.toml`. Later syncs keep

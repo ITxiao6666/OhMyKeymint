@@ -19,3 +19,15 @@ and atomically installs a local XML file, plus a security-patch action that
 downloads Google's official Android Security Bulletin and updates only the four
 `[trust]` patch-level fields. Its separate restore action resets those fields
 to `auto` without network access.
+
+## Native HTTPS bulletin client
+
+The security-patch WebUI action uses the Rust
+[ureq](https://github.com/algesten/ureq) HTTP client (version 3.4.0), licensed
+under the MIT or Apache License 2.0. Its HTTPS implementation uses
+[rustls](https://github.com/rustls/rustls) and
+[rustls-webpki](https://github.com/rustls/webpki), licensed under their
+Apache-2.0/ISC/MIT and ISC terms respectively, together with
+[webpki-roots](https://github.com/rustls/webpki-roots), licensed under
+CDLA-Permissive-2.0. These dependencies are built into the existing `keymint`
+helper; no device-provided `curl` or `wget` is used.

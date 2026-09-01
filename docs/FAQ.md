@@ -113,7 +113,7 @@ If no compatible host is installed, install one and run the action again.
 
 Its application code, icons, and language files are bundled with OMK. Normal
 local operations do not use the network. **Sync security patch** is the one
-exception: it uses the root WebUI bridge to make an HTTPS request to Google's
+exception: it invokes the module's native HTTPS client to request Google's
 official `source.android.com` Android Security Bulletin overview, with the
 official Chinese mirror as a fallback. It extracts the newest published date
 and asks the native helper to update the four `[trust]` patch-level fields. The
@@ -125,9 +125,9 @@ the existing defaults snapshot. While that snapshot remains valid and all four
 patch fields still hold one exact date, keymint reapplies the paired properties
 at startup. A manual exact-date configuration without the snapshot does not
 trigger that additional vendor-property write. A snapshot error skips this
-optional startup reapply without preventing keymint from starting. The device
-must provide a
-certificate-validating `curl`; redirects are accepted only when the final URL
+optional startup reapply without preventing keymint from starting. The native
+client validates TLS with embedded WebPKI roots, so the device does not need to
+provide `curl` or `wget`. HTTPS redirects are accepted only when the final URL
 remains the official bulletin page.
 
 **Restore default security patch** is local and makes no network request. It

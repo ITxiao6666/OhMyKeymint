@@ -311,7 +311,45 @@ fn handle_webui_security_patch_command() -> Option<Result<String, String>> {
     )
 }
 
+fn handle_webui_security_bulletin_command() -> Option<Result<String, String>> {
+    let mut args = std::env::args();
+    let _program = args.next();
+    if args.next()?.as_str() != "--webui-fetch-security-bulletin" {
+        return None;
+    }
+
+    let url = match args.next() {
+        Some(url) => url,
+        None => {
+            return Some(Err(
+                "--webui-fetch-security-bulletin requires exactly one official URL".to_string(),
+            ))
+        }
+    };
+    if args.next().is_some() {
+        return Some(Err(
+            "--webui-fetch-security-bulletin accepts exactly one official URL".to_string(),
+        ));
+    }
+
+    Some(
+        crate::security_patch::download_android_security_bulletin(&url)
+            .map_err(|error| format!("{error:#}")),
+    )
+}
+
 fn main() {
+    if let Some(result) = handle_webui_security_bulletin_command() {
+        match result {
+            Ok(output) => print!("{output}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
     if let Some(result) = handle_webui_security_patch_command() {
         match result {
             Ok(output) => println!("{output}"),
