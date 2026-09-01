@@ -53,12 +53,26 @@ from Google's official `source.android.com` host (with its official Chinese
 mirror as a fallback), parses the newest published patch level, and sends that
 exact date to the native helper. The download is attempted only with the
 device's certificate-validating `curl` HTTPS client; redirects are accepted
-only when they end at the official bulletin page. **Restore default security
-patch** does not use the network; it sets `security_patch`, `os_patchlevel`,
-`vendor_patchlevel`, and `boot_patchlevel` to `auto`. Other than the explicit
-sync action, the WebUI does not access the network. It can also read and replace
-`scoop` and select a local XML file through Android's standard file picker to
-replace the active keybox. The two security-patch actions do not change
+only when they end at the official bulletin page. Before the first sync, the
+helper records the current `ro.build.version.security_patch` and
+`ro.vendor.build.security_patch` values in
+`/data/misc/keystore/omk/data/security_patch_defaults.toml`. Later syncs keep
+that original snapshot. Each sync writes the published date to all four
+`[trust]` patch-level fields and applies it to both runtime properties with
+`resetprop`. While that valid snapshot remains, keymint reapplies the paired
+property values at startup. A manually configured exact date without the
+snapshot continues to use the normal configuration behavior.
+
+**Restore default security patch** does not use the network. It restores both
+runtime properties from the saved snapshot, sets `security_patch`,
+`os_patchlevel`, `vendor_patchlevel`, and `boot_patchlevel` to `auto`, and then
+deletes the snapshot. These runtime properties are global for the current boot,
+so other processes can observe the synchronized or restored values. A failed
+operation is reported, property writes are rolled back when a later step fails,
+and a snapshot needed for another restore attempt is retained. Other than the
+explicit sync action, the WebUI does not access the network. It can also read
+and replace `scoop` and select a local XML file through Android's standard file
+picker to replace the active keybox. The security-patch actions do not change
 secrets, identity fields, or other settings.
 
 Saving `scoop` is delegated to the native `inject` helper, which validates the

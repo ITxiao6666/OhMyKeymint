@@ -116,15 +116,34 @@ local operations do not use the network. **Sync security patch** is the one
 exception: it uses the root WebUI bridge to make an HTTPS request to Google's
 official `source.android.com` Android Security Bulletin overview, with the
 official Chinese mirror as a fallback. It extracts the newest published date
-and asks the native helper to update the four `[trust]` patch-level fields. A
-network, HTTP, parsing, or native-write failure leaves the existing
-configuration unchanged. The device must provide a certificate-validating
-`curl`; redirects are accepted only when the final URL remains the official
-bulletin page.
+and asks the native helper to update the four `[trust]` patch-level fields. The
+helper also sets `ro.build.version.security_patch` and
+`ro.vendor.build.security_patch` to that date with `resetprop`. Before the first
+sync, it saves both current property values in
+`/data/misc/keystore/omk/data/security_patch_defaults.toml`; repeated syncs keep
+the existing defaults snapshot. While that snapshot remains valid and all four
+patch fields still hold one exact date, keymint reapplies the paired properties
+at startup. A manual exact-date configuration without the snapshot does not
+trigger that additional vendor-property write. A snapshot error skips this
+optional startup reapply without preventing keymint from starting. The device
+must provide a
+certificate-validating `curl`; redirects are accepted only when the final URL
+remains the official bulletin page.
 
 **Restore default security patch** is local and makes no network request. It
-sets `security_patch`, `os_patchlevel`, `vendor_patchlevel`, and
-`boot_patchlevel` to `"auto"` while preserving all other configuration values.
+first restores both properties from that snapshot, then sets `security_patch`,
+`os_patchlevel`, `vendor_patchlevel`, and `boot_patchlevel` to `"auto"` while
+preserving all other configuration values. The snapshot is deleted only after
+the properties and configuration are restored successfully. These properties
+are global runtime state for the current boot, so other processes can observe
+their synchronized or restored values.
+
+A network, HTTP, or parsing failure occurs before anything is changed. Snapshot
+validation or creation failures also leave the properties and configuration
+unchanged. The native helper verifies paired property writes and rolls them back
+when an update cannot complete. If the configuration write fails, it attempts
+to restore the preceding property values. A failed restore keeps the snapshot
+available for another attempt and reports the error in the WebUI.
 
 The WebUI also reads and replaces `scoop` and can install a local XML file
 selected through Android's standard file picker as the active keybox. It does
@@ -155,8 +174,8 @@ first and use a root-capable editor that preserves the files correctly.
 The [Configuration Guide](CONFIGURATION.md) explains every field and when each
 kind of change takes effect. The embedded WebUI is an optional editor for
 `scoop`, an installer for a locally selected keybox, and controls for syncing
-or restoring the four security-patch fields; it does not expose the other
-settings.
+or restoring the four security-patch fields and the two corresponding runtime
+properties; it does not expose the other settings.
 
 ### What is `scoop`?
 

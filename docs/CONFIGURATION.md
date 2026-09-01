@@ -74,15 +74,27 @@ patch** action uses the root WebUI bridge to make an HTTPS request to the
 official `https://source.android.com/docs/security/bulletin/asb-overview` page,
 falling back to Google's official Chinese mirror when the primary host is
 unavailable. It extracts the newest published security-patch level and
-atomically updates only the four `[trust]` patch-level fields. A failed request,
-an unrecognized page, or an invalid date leaves the active configuration
-unchanged. The action requires a certificate-validating `curl` on the device;
-redirects are accepted only when the final URL remains the official bulletin
-page. **Restore default security patch** makes no network request and sets
-`security_patch`, `os_patchlevel`, `vendor_patchlevel`, and `boot_patchlevel`
-to `"auto"`; their normal automatic resolution and restart requirements then
-apply. All other WebUI assets are bundled and no network request is made for
-normal local operations.
+updates the four `[trust]` patch-level fields, and uses `resetprop` to set both
+`ro.build.version.security_patch` and `ro.vendor.build.security_patch` to that
+date. Before the first sync, the native helper saves the current values of both
+properties to
+`/data/misc/keystore/omk/data/security_patch_defaults.toml`. A later sync keeps
+the existing snapshot instead of replacing the saved defaults.
+
+The action requires a certificate-validating `curl` on the device; redirects
+are accepted only when the final URL remains the official bulletin page. A
+failed request, unrecognized page, invalid date, or snapshot write leaves the
+configuration and properties unchanged. The native helper verifies both
+property writes and rolls them back when the paired update or subsequent
+configuration write fails. **Restore default security patch** makes no network
+request. It first restores both properties from the snapshot, then sets
+`security_patch`, `os_patchlevel`, `vendor_patchlevel`, and `boot_patchlevel` to
+`"auto"`. It deletes the snapshot only after both property restores and the
+configuration update succeed; a failed restore retains it for another attempt.
+The two properties are global Android runtime state for the current boot, so
+every process that reads them can observe the synchronized or restored values.
+All other WebUI assets are bundled and no network request is made for normal
+local operations.
 
 The WebUI does not parse or rewrite `injector.toml` itself. It sends the package
 list to the native `inject` helper. The helper first parses the current complete
@@ -290,28 +302,53 @@ This controls `ro.build.version.security_patch`. It accepts:
 The WebUI **Sync security patch** action is separate from the `"latest"` mode.
 It reads the main table on Google's Android Security Bulletin overview,
 selects the greatest published security-patch date that is not in the future,
-and writes that exact date to `security_patch`, `os_patchlevel`,
-`vendor_patchlevel`, and `boot_patchlevel`. For example, an August bulletin
-whose levels are `2026-08-01` and `2026-08-05` synchronizes `2026-08-05`.
-The action never guesses an unpublished current-month date. It requires
-network access to Google's official bulletin host or mirror; if access or
-parsing fails, no file is changed. The native helper validates the date again
-and preserves all other configuration values.
+and sends that exact date to the native helper. For example, an August bulletin
+whose levels are `2026-08-01` and `2026-08-05` synchronizes `2026-08-05`. The
+action never guesses an unpublished current-month date. It requires network
+access to Google's official bulletin host or mirror; if access or parsing
+fails, no file or property is changed. The native helper validates the date
+again and preserves all unrelated configuration values.
 
-The WebUI **Restore default security patch** action writes `"auto"` to
-`security_patch`, `os_patchlevel`, `vendor_patchlevel`, and `boot_patchlevel`
-without accessing the network. It preserves every other configuration value.
-Each field then follows the automatic resolution and restart behavior described
-below.
+Before changing runtime properties for the first sync, the helper reads
+`ro.build.version.security_patch` and `ro.vendor.build.security_patch` and
+atomically saves both defaults to
+`/data/misc/keystore/omk/data/security_patch_defaults.toml`. An existing valid
+snapshot is retained across repeated syncs. The helper then sets both properties
+to the selected date with `resetprop` and verifies the results. After that, it
+writes the date to `security_patch`, `os_patchlevel`, `vendor_patchlevel`, and
+`boot_patchlevel`. These are global Android properties for the current boot,
+not values visible only to OMK.
+
+While a valid defaults snapshot exists and all four configuration fields still
+contain the same exact date, keymint reapplies that date to both properties at
+startup. The snapshot is the persistent marker for a WebUI synchronization: a
+manually authored exact-date configuration without a snapshot follows the
+normal patch-level path and does not cause an extra vendor-property write. If
+the optional snapshot cannot be read or validated during startup, keymint logs
+the error, skips this paired reapply, and continues its normal initialization.
+
+The WebUI **Restore default security patch** action uses the saved snapshot and
+does not access the network. If the snapshot is absent, the helper first
+reconstructs it from the current build's trusted property sources. It restores
+both properties first, writes `"auto"` to `security_patch`, `os_patchlevel`,
+`vendor_patchlevel`, and `boot_patchlevel`, and deletes the snapshot only when
+every step succeeds. It preserves every other configuration value. A malformed
+or unverifiable snapshot stops the operation before either property or the
+configuration changes. A failed paired property update is rolled back. If the
+configuration write fails, the helper attempts to roll back both properties;
+any incomplete restore retains the snapshot so the action can be retried. The
+helper serializes these actions with startup and live configuration reloads so
+an older pending reload cannot overwrite a completed restore.
 
 `"auto"` first uses a nonempty runtime property, then the exact key from the
 standard `build.prop` locations, and finally `2025-06-05` if neither source is
 available. A present runtime value is used as-is rather than replaced by a
 `build.prop` value. `"latest"` and an exact date intentionally overwrite an
 existing runtime property, but OMK never creates or deletes it. `"auto"` never
-writes the property. After an explicit or `"latest"` override, switching back
-to `"auto"` in the same boot keeps the current runtime value; reboot to restore
-the system-provided value.
+writes the property. After an explicit or `"latest"` override, manually
+switching back to `"auto"` in the same boot keeps the current runtime value;
+reboot to restore the system-provided value. The WebUI restore action instead
+restores the saved system and vendor runtime properties before writing `"auto"`.
 
 #### `os_patchlevel`
 
@@ -328,7 +365,9 @@ runtime `ro.vendor.build.security_patch`, then the exact key from the standard
 `os_patchlevel`. `"latest"` and an exact `"YYYY-MM-DD"` date are also accepted.
 The final value is parsed with the AOSP `YYYY-MM-DD` parser and encoded as
 `YYYYMMDD`. A present nonempty source is not replaced by a lower-priority source
-merely because parsing later fails. OMK does not write the vendor property.
+merely because parsing later fails. Normal patch-level resolution does not write
+the vendor property; the WebUI sync and restore actions explicitly update it as
+described above.
 
 #### `boot_patchlevel`
 
@@ -733,7 +772,8 @@ until the file is corrected.
 
 The embedded WebUI can change `scoop`, install a locally selected keybox,
 synchronize the four `[trust]` patch-level fields from the official Android
-Security Bulletin, or restore those fields to `"auto"`. Its native save paths
-validate the complete candidate before writing and use atomic replacement, so
-a failed save does not replace the corresponding active file. Successful saves
-enter the applicable watcher hot-reload path.
+Security Bulletin, or restore those fields to `"auto"`. Security-patch sync and
+restore also manage the two global runtime properties and the defaults snapshot
+described above. Its native save paths validate the complete candidate before
+writing and use atomic replacement. Successful saves enter the applicable
+watcher hot-reload path.

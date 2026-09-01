@@ -145,7 +145,7 @@ fn sync_security_patch_to_path(path: &Path, value: &str) -> Result<()> {
     persist_config_contents_unlocked(path, &serialized)
 }
 
-fn validate_security_patch_sync_value(value: &str) -> Result<()> {
+pub(crate) fn validate_security_patch_sync_value(value: &str) -> Result<()> {
     if value == "auto" {
         return Ok(());
     }
@@ -496,6 +496,15 @@ fn start_config_watcher() -> Result<()> {
 }
 
 fn reload_runtime_config(trigger: WatchTrigger) {
+    let _security_patch_lock = match crate::security_patch::acquire_operation_lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            log::error!(
+                "failed to lock security-patch operations for config reload: {error:#}; keeping current config"
+            );
+            return;
+        }
+    };
     let new_config_file = match load_config_file_with_retry(trigger) {
         Ok(loaded) => {
             if loaded.retries > 0 {

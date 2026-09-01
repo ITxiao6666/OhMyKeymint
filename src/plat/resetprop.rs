@@ -22,6 +22,15 @@ const TELEPHONY_CDMA_FEATURE: &str = "android.hardware.telephony.cdma";
 const GET_DEVICE_ID_FOR_PHONE_TRANSACTION: rsbinder::TransactionCode =
     rsbinder::FIRST_CALL_TRANSACTION + 3;
 
+pub(crate) const SYSTEM_SECURITY_PATCH_PROPERTY: &str = "ro.build.version.security_patch";
+pub(crate) const VENDOR_SECURITY_PATCH_PROPERTY: &str = "ro.vendor.build.security_patch";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SecurityPatchProperties {
+    pub system: String,
+    pub vendor: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TelephonyTransactions {
     get_imei_for_slot: rsbinder::TransactionCode,
@@ -58,6 +67,7 @@ const RESETPROP_FALLBACKS: &[(&str, Option<&str>)] = &[
     ("/system_ext/bin/resetprop", None),
     ("/system/bin/resetprop", None),
     ("/data/adb/ksu/bin/resetprop", None),
+    ("/data/adb/magisk/resetprop", None),
     ("/data/adb/ksud", Some("resetprop")),
 ];
 
@@ -188,11 +198,188 @@ pub fn direct_write_and_verify_property(property: &str, value: &str) -> Result<(
     execute_write_and_verify(&command, property, value)
 }
 
+pub(crate) fn direct_write_and_verify_security_patch_properties(
+    expected: &SecurityPatchProperties,
+    desired: &SecurityPatchProperties,
+) -> Result<()> {
+    let command = find_resetprop_command()?;
+    write_security_patch_properties_with_rollback(
+        |property, value| execute_write_and_verify(&command, property, value),
+        read_string_property,
+        expected,
+        desired,
+    )
+}
+
 pub fn read_string_property(name: &str) -> Option<String> {
     rsproperties::get::<String>(name)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+pub(crate) fn read_security_patch_properties() -> Result<SecurityPatchProperties> {
+    read_security_patch_properties_with(read_string_property)
+}
+
+fn read_security_patch_properties_with<R>(reader: R) -> Result<SecurityPatchProperties>
+where
+    R: Fn(&str) -> Option<String>,
+{
+    let vendor = reader(VENDOR_SECURITY_PATCH_PROPERTY)
+        .ok_or_else(|| anyhow!("property {VENDOR_SECURITY_PATCH_PROPERTY} is missing or empty"))?;
+    let system = reader(SYSTEM_SECURITY_PATCH_PROPERTY)
+        .ok_or_else(|| anyhow!("property {SYSTEM_SECURITY_PATCH_PROPERTY} is missing or empty"))?;
+    Ok(SecurityPatchProperties { system, vendor })
+}
+
+fn write_security_patch_properties_with_rollback<W, R>(
+    mut writer: W,
+    reader: R,
+    expected: &SecurityPatchProperties,
+    desired: &SecurityPatchProperties,
+) -> Result<()>
+where
+    W: FnMut(&str, &str) -> Result<()>,
+    R: Fn(&str) -> Option<String>,
+{
+    for (label, properties) in [("expected", expected), ("desired", desired)] {
+        for (property, value) in [
+            (VENDOR_SECURITY_PATCH_PROPERTY, properties.vendor.as_str()),
+            (SYSTEM_SECURITY_PATCH_PROPERTY, properties.system.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                bail!("refusing to use an empty {label} value for {property}");
+            }
+        }
+    }
+
+    let current = read_security_patch_properties_with(&reader)?;
+    if current != *expected {
+        bail!("security-patch properties changed before the paired update");
+    }
+    let updates = [
+        (
+            VENDOR_SECURITY_PATCH_PROPERTY,
+            desired.vendor.as_str(),
+            expected.vendor.as_str(),
+        ),
+        (
+            SYSTEM_SECURITY_PATCH_PROPERTY,
+            desired.system.as_str(),
+            expected.system.as_str(),
+        ),
+    ];
+
+    for (index, (property, value, _)) in updates.iter().enumerate() {
+        if let Err(write_error) =
+            write_and_confirm_security_patch_property(&mut writer, &reader, property, value)
+        {
+            let rollback = rollback_security_patch_properties(
+                &mut writer,
+                &reader,
+                &updates[..=index],
+                expected,
+            );
+            return match rollback {
+                Ok(()) => Err(write_error).with_context(|| {
+                    format!(
+                        "failed to update {property}; previous security patch properties restored"
+                    )
+                }),
+                Err(rollback_error) => Err(anyhow!(
+                    "failed to update {property}: {write_error:#}; security patch property rollback failed: {rollback_error:#}"
+                )),
+            };
+        }
+    }
+
+    let verification_error = match read_security_patch_properties_with(&reader) {
+        Ok(actual) if actual == *desired => return Ok(()),
+        Ok(_) => anyhow!("security-patch properties changed before final paired verification"),
+        Err(error) => error.context("failed final paired security-patch verification"),
+    };
+    match rollback_security_patch_properties(&mut writer, &reader, &updates, expected) {
+        Ok(()) => Err(verification_error)
+            .context("paired security-patch verification failed; previous values restored"),
+        Err(rollback_error) => Err(anyhow!(
+            "paired security-patch verification failed: {verification_error:#}; security patch property rollback failed: {rollback_error:#}"
+        )),
+    }
+}
+
+fn write_and_confirm_security_patch_property<W, R>(
+    writer: &mut W,
+    reader: &R,
+    property: &str,
+    value: &str,
+) -> Result<()>
+where
+    W: FnMut(&str, &str) -> Result<()>,
+    R: Fn(&str) -> Option<String>,
+{
+    let write_result = writer(property, value);
+    let actual = reader(property);
+    if actual.as_deref() == Some(value) {
+        if let Err(error) = write_result {
+            log::warn!(
+                "resetprop returned an error for {property}, but the requested value was verified: {error:#}"
+            );
+        }
+        return Ok(());
+    }
+
+    let actual = actual.as_deref().unwrap_or("<missing>");
+    match write_result {
+        Ok(()) => {
+            bail!("property verification failed for {property}: expected {value}, got {actual}")
+        }
+        Err(error) => Err(error).with_context(|| {
+            format!("property update failed for {property}: expected {value}, got {actual}")
+        }),
+    }
+}
+
+fn rollback_security_patch_properties<W, R>(
+    writer: &mut W,
+    reader: &R,
+    attempted: &[(&str, &str, &str)],
+    previous: &SecurityPatchProperties,
+) -> Result<()>
+where
+    W: FnMut(&str, &str) -> Result<()>,
+    R: Fn(&str) -> Option<String>,
+{
+    let mut failures = Vec::new();
+    for (property, attempted_value, previous_value) in attempted.iter().rev() {
+        match reader(property) {
+            Some(current) if current == *previous_value => continue,
+            Some(current) if current == *attempted_value => {
+                if let Err(error) = write_and_confirm_security_patch_property(
+                    writer,
+                    reader,
+                    property,
+                    previous_value,
+                ) {
+                    failures.push(format!("{property}: {error:#}"));
+                }
+            }
+            Some(current) => failures.push(format!(
+                "{property}: changed concurrently to {current}; rollback skipped"
+            )),
+            None => failures.push(format!("{property}: disappeared; rollback skipped")),
+        }
+    }
+
+    if !failures.is_empty() {
+        bail!(failures.join("; "));
+    }
+    let restored = read_security_patch_properties_with(reader)?;
+    if restored == *previous {
+        Ok(())
+    } else {
+        bail!("property values changed while rollback was in progress")
+    }
 }
 
 pub fn find_resetprop_command() -> Result<ResetpropCommand> {
@@ -561,6 +748,216 @@ fn parse_request(line: &str) -> Result<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, collections::HashMap};
+
+    fn patch_properties(system: &str, vendor: &str) -> SecurityPatchProperties {
+        SecurityPatchProperties {
+            system: system.to_string(),
+            vendor: vendor.to_string(),
+        }
+    }
+
+    fn property_map(values: &SecurityPatchProperties) -> HashMap<String, String> {
+        HashMap::from([
+            (
+                SYSTEM_SECURITY_PATCH_PROPERTY.to_string(),
+                values.system.clone(),
+            ),
+            (
+                VENDOR_SECURITY_PATCH_PROPERTY.to_string(),
+                values.vendor.clone(),
+            ),
+        ])
+    }
+
+    #[test]
+    fn reads_security_patch_properties_as_a_pair() {
+        let expected = patch_properties("2026-08-05", "2026-07-05");
+        let properties = property_map(&expected);
+
+        assert_eq!(
+            read_security_patch_properties_with(|property| properties.get(property).cloned())
+                .unwrap(),
+            expected
+        );
+        assert!(read_security_patch_properties_with(|property| {
+            (property == SYSTEM_SECURITY_PATCH_PROPERTY).then(|| "2026-08-05".to_string())
+        })
+        .unwrap_err()
+        .to_string()
+        .contains(VENDOR_SECURITY_PATCH_PROPERTY));
+    }
+
+    #[test]
+    fn writes_and_verifies_security_patch_properties_as_a_pair() {
+        let previous = patch_properties("2026-06-05", "2026-05-05");
+        let desired = patch_properties("2026-08-05", "2026-08-05");
+        let properties = RefCell::new(property_map(&previous));
+        let writes = RefCell::new(Vec::new());
+
+        write_security_patch_properties_with_rollback(
+            |property, value| {
+                writes
+                    .borrow_mut()
+                    .push((property.to_string(), value.to_string()));
+                properties
+                    .borrow_mut()
+                    .insert(property.to_string(), value.to_string());
+                Ok(())
+            },
+            |property| properties.borrow().get(property).cloned(),
+            &previous,
+            &desired,
+        )
+        .unwrap();
+
+        assert_eq!(*properties.borrow(), property_map(&desired));
+        assert_eq!(
+            *writes.borrow(),
+            vec![
+                (
+                    VENDOR_SECURITY_PATCH_PROPERTY.to_string(),
+                    desired.vendor.clone()
+                ),
+                (
+                    SYSTEM_SECURITY_PATCH_PROPERTY.to_string(),
+                    desired.system.clone()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn security_patch_pair_write_rejects_a_stale_expected_value() {
+        let expected = patch_properties("2026-06-05", "2026-05-05");
+        let current = patch_properties("2026-06-05", "2026-06-01");
+        let desired = patch_properties("2026-08-05", "2026-08-05");
+        let properties = RefCell::new(property_map(&current));
+        let writes = RefCell::new(0_u32);
+
+        let error = write_security_patch_properties_with_rollback(
+            |_, _| {
+                *writes.borrow_mut() += 1;
+                Ok(())
+            },
+            |property| properties.borrow().get(property).cloned(),
+            &expected,
+            &desired,
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("changed before the paired update"));
+        assert_eq!(*writes.borrow(), 0);
+        assert_eq!(*properties.borrow(), property_map(&current));
+    }
+
+    #[test]
+    fn second_security_patch_write_failure_rolls_back_the_first() {
+        let previous = patch_properties("2026-06-05", "2026-05-05");
+        let desired = patch_properties("2026-08-05", "2026-08-05");
+        let properties = RefCell::new(property_map(&previous));
+
+        let error = write_security_patch_properties_with_rollback(
+            |property, value| {
+                if property == SYSTEM_SECURITY_PATCH_PROPERTY && value == desired.system {
+                    bail!("injected system property write failure");
+                }
+                properties
+                    .borrow_mut()
+                    .insert(property.to_string(), value.to_string());
+                Ok(())
+            },
+            |property| properties.borrow().get(property).cloned(),
+            &previous,
+            &desired,
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("previous security patch properties restored"));
+        assert_eq!(*properties.borrow(), property_map(&previous));
+    }
+
+    #[test]
+    fn security_patch_write_reports_an_incomplete_rollback() {
+        let previous = patch_properties("2026-06-05", "2026-05-05");
+        let desired = patch_properties("2026-08-05", "2026-08-05");
+        let properties = RefCell::new(property_map(&previous));
+
+        let error = write_security_patch_properties_with_rollback(
+            |property, value| {
+                if property == SYSTEM_SECURITY_PATCH_PROPERTY && value == desired.system {
+                    bail!("injected system property write failure");
+                }
+                if property == VENDOR_SECURITY_PATCH_PROPERTY && value == previous.vendor {
+                    bail!("injected vendor property rollback failure");
+                }
+                properties
+                    .borrow_mut()
+                    .insert(property.to_string(), value.to_string());
+                Ok(())
+            },
+            |property| properties.borrow().get(property).cloned(),
+            &previous,
+            &desired,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("property rollback failed"));
+        assert_eq!(
+            properties
+                .borrow()
+                .get(VENDOR_SECURITY_PATCH_PROPERTY)
+                .map(String::as_str),
+            Some(desired.vendor.as_str())
+        );
+    }
+
+    #[test]
+    fn final_pair_verification_does_not_overwrite_a_concurrent_change() {
+        let previous = patch_properties("2026-06-05", "2026-05-05");
+        let desired = patch_properties("2026-08-05", "2026-08-05");
+        let concurrent_vendor = "2026-07-05";
+        let properties = RefCell::new(property_map(&previous));
+
+        let error = write_security_patch_properties_with_rollback(
+            |property, value| {
+                properties
+                    .borrow_mut()
+                    .insert(property.to_string(), value.to_string());
+                if property == SYSTEM_SECURITY_PATCH_PROPERTY && value == desired.system {
+                    properties.borrow_mut().insert(
+                        VENDOR_SECURITY_PATCH_PROPERTY.to_string(),
+                        concurrent_vendor.to_string(),
+                    );
+                }
+                Ok(())
+            },
+            |property| properties.borrow().get(property).cloned(),
+            &previous,
+            &desired,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("property rollback failed"));
+        assert_eq!(
+            properties
+                .borrow()
+                .get(VENDOR_SECURITY_PATCH_PROPERTY)
+                .map(String::as_str),
+            Some(concurrent_vendor)
+        );
+        assert_eq!(
+            properties
+                .borrow()
+                .get(SYSTEM_SECURITY_PATCH_PROPERTY)
+                .map(String::as_str),
+            Some(previous.system.as_str())
+        );
+    }
 
     #[test]
     fn telephony_transactions_match_android_12_through_17() {

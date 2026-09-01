@@ -33,6 +33,7 @@ pub mod logging;
 pub mod macros;
 pub mod plat;
 pub mod proto;
+pub mod security_patch;
 pub mod selinux;
 pub mod utils;
 pub mod watchdog;
@@ -302,8 +303,9 @@ fn handle_webui_security_patch_command() -> Option<Result<String, String>> {
         ));
     }
 
+    prepare_android_storage();
     Some(
-        crate::config::sync_security_patch(&value)
+        crate::security_patch::apply_webui_security_patch(&value)
             .map(|()| value)
             .map_err(|error| format!("{error:#}")),
     )
@@ -345,6 +347,15 @@ fn main() {
 }
 
 fn run() -> Result<()> {
+    crate::keymaster::permission::initialize_runtime_service_context();
+    prepare_android_storage();
+    plat::resetprop::bootstrap_privileged_helper()
+        .context("failed to bootstrap resetprop helper")?;
+
+    // Acquire this only after forking the long-lived helper so the child
+    // cannot inherit and retain the flock file description.
+    let security_patch_lock = security_patch::acquire_operation_lock()
+        .context("failed to lock security-patch operations during startup")?;
     let config_file = config::bootstrap_config_file().context("failed to bootstrap config")?;
     let level = config_file
         .main
@@ -355,11 +366,10 @@ fn run() -> Result<()> {
     log::set_max_level(level);
 
     info!("starting OhMyKeymint");
-    crate::keymaster::permission::initialize_runtime_service_context();
 
-    prepare_android_storage();
-    plat::resetprop::bootstrap_privileged_helper()
-        .context("failed to bootstrap resetprop helper")?;
+    if let Err(error) = security_patch::prepare_startup(&config_file, &security_patch_lock) {
+        warn!("failed to prepare synchronized security-patch properties; continuing startup: {error:#}");
+    }
 
     info!("initial process state");
     let _ = rsbinder::ProcessState::init_default();
@@ -369,6 +379,7 @@ fn run() -> Result<()> {
     prepare_android_storage();
     config::install_runtime_config(config_file, resolved_trust)
         .context("failed to install runtime config")?;
+    drop(security_patch_lock);
 
     install_module_info_bundle_if_available().context("failed to initialize moduleHash input")?;
 

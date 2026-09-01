@@ -15,6 +15,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::string::ToString;
+use std::sync::mpsc::{self, SyncSender};
 use std::thread;
 use std::time::{Duration, SystemTime};
 use std::{format, fs, vec};
@@ -72,20 +73,24 @@ pub fn spawn_path_watcher<F>(thread_name: &str, path: PathBuf, on_change: F) -> 
 where
     F: Fn(WatchTrigger) + Send + Sync + 'static,
 {
+    let (ready_tx, ready_rx) = mpsc::sync_channel(1);
     thread::Builder::new()
         .name(thread_name.to_string())
         .spawn(move || {
-            if let Err(error) = watch_loop_inotify(&path, &on_change) {
+            let mut ready = Some(ready_tx);
+            if let Err(error) = watch_loop_inotify(&path, &on_change, &mut ready) {
                 log::error!(
                     "inotify watcher failed for {}: {}; falling back to polling",
                     path.display(),
                     error
                 );
-                watch_loop_polling(&path, &on_change);
+                watch_loop_polling(&path, &on_change, &mut ready);
             }
         })
         .with_context(|| format!("failed to spawn watcher thread {thread_name}"))?;
-    Ok(())
+    ready_rx
+        .recv()
+        .with_context(|| format!("watcher thread {thread_name} exited before becoming ready"))
 }
 
 fn inspect_path(path: &Path) -> Option<(u64, Option<SystemTime>)> {
@@ -93,11 +98,18 @@ fn inspect_path(path: &Path) -> Option<(u64, Option<SystemTime>)> {
     Some((metadata.len(), metadata.modified().ok()))
 }
 
-fn watch_loop_polling<F>(path: &Path, callback: &F)
+fn signal_ready(ready: &mut Option<SyncSender<()>>) {
+    if let Some(sender) = ready.take() {
+        let _ = sender.send(());
+    }
+}
+
+fn watch_loop_polling<F>(path: &Path, callback: &F, ready: &mut Option<SyncSender<()>>)
 where
     F: Fn(WatchTrigger) + Send + Sync + 'static,
 {
     let mut last_seen = inspect_path(path);
+    signal_ready(ready);
     loop {
         thread::sleep(WATCH_INTERVAL);
 
@@ -110,7 +122,11 @@ where
     }
 }
 
-fn watch_loop_inotify<F>(path: &Path, callback: &F) -> io::Result<()>
+fn watch_loop_inotify<F>(
+    path: &Path,
+    callback: &F,
+    ready: &mut Option<SyncSender<()>>,
+) -> io::Result<()>
 where
     F: Fn(WatchTrigger) + Send + Sync + 'static,
 {
@@ -154,6 +170,7 @@ where
 
     let watched_name = file_name.as_bytes().to_vec();
     let mut buffer = vec![0u8; 4096];
+    signal_ready(ready);
     loop {
         let read =
             unsafe { libc::read(fd, buffer.as_mut_ptr() as *mut libc::c_void, buffer.len()) };

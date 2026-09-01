@@ -320,7 +320,7 @@ fn current_patchlevel() -> Result<String> {
     Ok(format!("{year:04}-{month:02}-05"))
 }
 
-fn read_build_prop_value(key: &str) -> Option<String> {
+pub(crate) fn read_build_prop_value(key: &str) -> Option<String> {
     BUILD_PROP_PATHS.iter().find_map(|path| {
         std::fs::read_to_string(path)
             .ok()

@@ -99,6 +99,7 @@ fn bootstrap_device_ids(config_file: &mut ConfigFile) -> Option<bool> {
 }
 
 pub fn resolve_runtime_device_ids() -> Result<Option<DeviceProperty>> {
+    let _security_patch_lock = crate::security_patch::acquire_operation_lock()?;
     let mut config_file = config::load_config_file()?;
     let Some(changed) = bootstrap_device_ids(&mut config_file) else {
         log::debug!("telephony Binder services are not ready; deferring attestation ID snapshot");
