@@ -28,6 +28,7 @@ export function isSecurityPatchDate(value: string): boolean {
   const month = Number(match[2])
   const day = Number(match[3])
   if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false
+  if (year < 2000) return false
   if (month < 1 || month > 12 || day < 1) return false
   const leap = year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0)
   const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]

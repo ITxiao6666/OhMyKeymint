@@ -252,6 +252,26 @@ A successful WebUI save follows the injector hot-reload path and needs no
 keymint restart. Close and reopen the selected app when you need a clean
 routing boundary.
 
+### What does Spoof PIF fingerprint change?
+
+It stores a validated Pixel profile at
+`/data/misc/keystore/omk/data/pif_fingerprint.json`. The selected profile is
+downloaded through OMK's native HTTPS client, validated, and expanded into
+matching Android Build fields. OMK's own Zygisk payload reads that profile
+when the target process starts through the Zygisk Next loader. Zygisk Next must
+be installed and active by the user; OMK does not bundle, install, or implement
+that loader.
+
+OMK applies these fields only while starting `com.google.android.gms.unstable`.
+It ends that process and Play Store after a
+successful change so a new process can read the file. This action does not
+change global system properties, OMK's attested device identity, or the
+security-patch synchronization setting. Installing or updating OMK's Zygisk
+payload, or enabling Zygisk Next for the first time, still requires a device
+reboot. Turning the WebUI switch
+off removes the profile and refreshes the same processes so they return to the
+device's original Build values.
+
 If you changed `vb_key` or `vb_hash` from `"random"` back to `"auto"`, a full
 reboot is required. The automatic value cannot return until the next boot.
 

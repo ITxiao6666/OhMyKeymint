@@ -6,10 +6,13 @@
     <string name="functional_button_close">關閉</string>
     <string name="functional_button_cancel">取消</string>
     <string name="functional_button_replace">替換</string>
+    <string name="functional_button_apply">套用</string>
+    <string name="functional_button_retry">重試</string>
     <string name="menu_add_system_app">添加系統應用</string>
     <string name="menu_replace_keybox">替換 keybox.xml</string>
     <string name="menu_sync_security_patch">同步安全性修補程式</string>
     <string name="menu_restore_default_security_patch">還原預設安全性修補程式</string>
+    <string name="menu_spoof_pif_fingerprint">偽裝 PIF 指紋</string>
     <string name="menu_language">語言</string>
     <string name="prompt_saved_target">配置已儲存</string>
     <string name="prompt_save_error">保存配置失敗</string>
@@ -25,4 +28,20 @@
     <string name="add_system_app_title">添加系統應用</string>
     <string name="replace_keybox_title">替換 keybox.xml</string>
     <string name="replace_keybox_selected_file">已選擇：%s</string>
+    <string name="pif_fingerprint_title">偽裝 PIF 指紋</string>
+    <string name="pif_enable_spoofing">啟用 PIF 指紋偽裝</string>
+    <string name="pif_zygisk_next_required">需自行安裝並啟用 Zygisk Next；OMK 不內建、下載或安裝該模組。</string>
+    <string name="pif_current_config">目前設定</string>
+    <string name="pif_security_patch">安全性修補程式：%s</string>
+    <string name="pif_disabled">已停用</string>
+    <string name="pif_loading_config">正在載入 PIF 設定…</string>
+    <string name="pif_config_load_error">載入 PIF 設定失敗</string>
+    <string name="pif_loading_devices">正在載入 Pixel 裝置…</string>
+    <string name="pif_devices_load_error">載入 Pixel 裝置失敗</string>
+    <string name="pif_choose_device">選擇 Pixel 裝置</string>
+    <string name="pif_random_device">隨機</string>
+    <string name="pif_applying">正在套用…</string>
+    <string name="prompt_pif_applied">已套用 %1$s 的 PIF 指紋，安全性修補程式為 %2$s。</string>
+    <string name="prompt_pif_disabled">已停用 PIF 指紋偽裝。</string>
+    <string name="prompt_pif_apply_error">更新 PIF 指紋偽裝失敗：%s</string>
 </resources>

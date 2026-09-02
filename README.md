@@ -40,7 +40,8 @@ comma-separated TOML form remains accepted.
 ## Embedded WebUI
 
 The module includes a WebUI for choosing the exact packages in `scoop`,
-installing a local keybox, and managing the Android security patch level:
+installing a local keybox, managing the Android security patch level, and
+applying a Pixel PIF fingerprint through OMK's own Zygisk payload:
 
 - In KernelSU, open Oh My Keymint from the module list and select its WebUI.
 - In Magisk, run the module action. This requires KSUWebUIStandalone or WebUI X
@@ -70,8 +71,25 @@ runtime properties from the saved snapshot, sets `security_patch`,
 deletes the snapshot. These runtime properties are global for the current boot,
 so other processes can observe the synchronized or restored values. A failed
 operation is reported, property writes are rolled back when a later step fails,
-and a snapshot needed for another restore attempt is retained. Other than the
-explicit sync action, the WebUI does not access the network. It can also read
+and a snapshot needed for another restore attempt is retained.
+
+**Spoof PIF fingerprint** downloads the current Pixel device catalog and the
+selected profile from the `bot` branch of `KOWX712/PlayIntegrityFix`. That feed
+is generated daily from Google's Android preview pages, Android Flash Tool
+metadata, and Pixel security bulletin. The native helper validates the
+catalog, the four profile fields, and the complete fingerprint structure. It
+then derives the matching Build fields and atomically stores the active profile
+at `/data/misc/keystore/omk/data/pif_fingerprint.json`. OMK's own Zygisk
+payload applies these values only inside a newly started
+`com.google.android.gms.unstable` process through the Zygisk Next loader. Zygisk
+Next must already be installed and enabled by the user; OMK does not bundle,
+install, or implement that loader. The
+selected values are not global Android properties and do not change OMK's
+`[device]` identity. Disabling the action removes the OMK profile and restarts
+the affected processes so their next instances use the original Build values.
+
+Both network actions use the bundled native HTTPS client and require neither
+`curl` nor `wget`. Other WebUI operations remain local. The WebUI can also read
 and replace `scoop` and select a local XML file through Android's standard file
 picker to replace the active keybox. The security-patch actions do not change
 secrets, identity fields, or other settings.

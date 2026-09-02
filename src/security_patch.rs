@@ -2,7 +2,7 @@ use std::{
     fs::{self, File},
     os::fd::AsRawFd,
     path::Path,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -23,6 +23,7 @@ use crate::{
         vbmeta,
     },
     root_path,
+    webui_http::{self, DownloadPolicy},
 };
 
 const DEFAULTS_PATH: &str = root_path!("data/security_patch_defaults.toml");
@@ -118,6 +119,10 @@ pub(crate) fn acquire_operation_lock() -> Result<OperationLock> {
     OperationLock::acquire(Path::new(DEFAULTS_PATH))
 }
 
+pub(crate) fn acquire_data_operation_lock(state_path: &Path) -> Result<OperationLock> {
+    OperationLock::acquire(state_path)
+}
+
 impl Drop for OperationLock {
     fn drop(&mut self) {
         let _ = unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
@@ -153,80 +158,6 @@ fn is_official_security_bulletin_uri(uri: &Uri) -> bool {
         .any(|allowed_host| host.eq_ignore_ascii_case(allowed_host))
 }
 
-/// Resolve an HTTP Location value against an already validated bulletin URI.
-///
-/// `http::Uri` intentionally does not implement URL joining.  The small
-/// resolver below handles the reference forms a Google redirect can use while
-/// keeping the result as an absolute URI for the allowlist check.  A fragment
-/// or malformed reference is rejected by the URI parser instead of being
-/// silently discarded.
-fn resolve_bulletin_redirect(base: &Uri, location: &str) -> Result<Uri> {
-    let location = location.trim();
-    if location.is_empty() {
-        bail!("Android Security Bulletin redirect has an empty Location header");
-    }
-
-    let target: Uri = location
-        .parse()
-        .context("Android Security Bulletin redirect Location is invalid")?;
-    if target.scheme().is_some() {
-        return Ok(target);
-    }
-
-    let scheme = base
-        .scheme()
-        .ok_or_else(|| anyhow!("Android Security Bulletin base URI has no scheme"))?;
-    let authority = base
-        .authority()
-        .ok_or_else(|| anyhow!("Android Security Bulletin base URI has no authority"))?;
-
-    // A network-path reference (`//host/path`) inherits the base scheme.
-    if target.authority().is_some() {
-        return format!("{}:{}", scheme, target)
-            .parse()
-            .context("Android Security Bulletin redirect URI is invalid");
-    }
-
-    let path_and_query = target
-        .path_and_query()
-        .map(ToString::to_string)
-        .unwrap_or_default();
-    let absolute = if path_and_query.starts_with('/') {
-        // Root-relative reference.
-        format!("{}://{}{}", scheme, authority, path_and_query)
-    } else if path_and_query.starts_with('?') {
-        // Query-only reference keeps the current path.
-        format!(
-            "{}://{}{}{}",
-            scheme,
-            authority,
-            base.path(),
-            path_and_query
-        )
-    } else {
-        // Resolve a path relative to the directory of the current URI.  The
-        // allowlist below still rejects dot-segments or any non-bulletin path.
-        let base_directory = base
-            .path()
-            .rsplit_once('/')
-            .map(|(directory, _)| directory)
-            .unwrap_or("");
-        let separator = if base_directory.ends_with('/') {
-            ""
-        } else {
-            "/"
-        };
-        format!(
-            "{}://{}{}{}{}",
-            scheme, authority, base_directory, separator, path_and_query
-        )
-    };
-
-    absolute
-        .parse()
-        .context("Android Security Bulletin redirect URI is invalid")
-}
-
 /// Download one explicitly allowed Android Security Bulletin overview page.
 ///
 /// The WebUI invokes this entry point in a short-lived `keymint` process so
@@ -239,80 +170,19 @@ pub fn download_android_security_bulletin(url: &str) -> Result<String> {
         bail!("Android Security Bulletin URL is not an allowed Google page");
     }
 
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .https_only(true)
-        // Redirects are handled below so every Location can be checked before
-        // any connection to the next host is attempted.
-        .max_redirects(0)
-        .timeout_connect(Some(BULLETIN_CONNECT_TIMEOUT))
-        .timeout_global(Some(BULLETIN_TIMEOUT))
-        .build()
-        .into();
-
-    let started = Instant::now();
-    let mut current_uri = requested_uri;
-    for redirect_count in 0..=MAX_BULLETIN_REDIRECTS {
-        let remaining = BULLETIN_TIMEOUT
-            .checked_sub(started.elapsed())
-            .ok_or_else(|| anyhow!("Android Security Bulletin request timed out"))?;
-        let mut response = agent
-            .get(current_uri.clone())
-            // `Agent::timeout_global` is scoped to one call.  Since redirects
-            // are issued as separate calls, carry the remaining deadline into
-            // each request so the whole operation still has one 15-second cap.
-            .config()
-            .timeout_global(Some(remaining))
-            .build()
-            .header(
-                "User-Agent",
-                concat!("OhMyKeymint/", env!("CARGO_PKG_VERSION")),
-            )
-            .header("Accept-Encoding", "identity")
-            .call()
-            .context("failed to download the Android Security Bulletin")?;
-
-        if response.status().is_redirection() {
-            if redirect_count == MAX_BULLETIN_REDIRECTS {
-                bail!("Android Security Bulletin exceeded the 3 redirect limit");
-            }
-            let location = response
-                .headers()
-                .get("location")
-                .ok_or_else(|| {
-                    anyhow!("Android Security Bulletin redirect has no Location header")
-                })?
-                .to_str()
-                .context("Android Security Bulletin redirect Location is not valid UTF-8")?;
-            let next_uri = resolve_bulletin_redirect(&current_uri, location)?;
-            if !is_official_security_bulletin_uri(&next_uri) {
-                bail!("Android Security Bulletin redirected outside the allowed Google page");
-            }
-            current_uri = next_uri;
-            // Dropping the response closes or releases the redirect body before
-            // the next request.  We never buffer an untrusted redirect body.
-            continue;
-        }
-
-        if !response.status().is_success() {
-            bail!(
-                "Android Security Bulletin returned HTTP status {}",
-                response.status()
-            );
-        }
-
-        let bytes = response
-            .body_mut()
-            .with_config()
-            .limit((MAX_BULLETIN_BYTES + 1) as u64)
-            .read_to_vec()
-            .context("failed to read the Android Security Bulletin response")?;
-        if bytes.len() > MAX_BULLETIN_BYTES {
-            bail!("Android Security Bulletin response exceeds the 2 MiB limit");
-        }
-        return String::from_utf8(bytes).context("Android Security Bulletin response is not UTF-8");
-    }
-
-    unreachable!("bulletin redirect loop always returns or errors")
+    webui_http::download_https_utf8(
+        requested_uri,
+        &DownloadPolicy {
+            resource: "Android Security Bulletin",
+            redirect_allowlist: "the allowed Google page",
+            max_bytes: MAX_BULLETIN_BYTES,
+            max_size_label: "2 MiB",
+            max_redirects: MAX_BULLETIN_REDIRECTS,
+            timeout: BULLETIN_TIMEOUT,
+            connect_timeout: BULLETIN_CONNECT_TIMEOUT,
+        },
+        is_official_security_bulletin_uri,
+    )
 }
 
 pub fn apply_webui_security_patch(value: &str) -> Result<()> {
@@ -718,7 +588,9 @@ mod tests {
         ];
 
         for (location, expected) in cases {
-            let resolved = resolve_bulletin_redirect(&base, location).unwrap();
+            let resolved =
+                crate::webui_http::resolve_redirect(&base, location, "Android Security Bulletin")
+                    .unwrap();
             assert_eq!(resolved.to_string(), expected);
             assert!(is_official_security_bulletin_uri(&resolved));
         }
@@ -737,7 +609,8 @@ mod tests {
             "//source.android.com.evil.example/docs/security/bulletin/asb-overview",
             "/docs/security/bulletin/../bulletin/asb-overview",
         ] {
-            let resolved = resolve_bulletin_redirect(&base, location);
+            let resolved =
+                crate::webui_http::resolve_redirect(&base, location, "Android Security Bulletin");
             if let Ok(uri) = resolved {
                 assert!(
                     !is_official_security_bulletin_uri(&uri),

@@ -6,10 +6,13 @@
     <string name="functional_button_close">Close</string>
     <string name="functional_button_cancel">Cancel</string>
     <string name="functional_button_replace">Replace</string>
+    <string name="functional_button_apply">Apply</string>
+    <string name="functional_button_retry">Retry</string>
     <string name="menu_add_system_app">Add System App</string>
     <string name="menu_replace_keybox">Replace keybox.xml</string>
     <string name="menu_sync_security_patch">Sync security patch</string>
     <string name="menu_restore_default_security_patch">Restore default security patch</string>
+    <string name="menu_spoof_pif_fingerprint">Spoof PIF fingerprint</string>
     <string name="menu_language">Language</string>
     <string name="menu_more_options">More options</string>
     <string name="menu_select_all">Select all</string>
@@ -30,4 +33,20 @@
     <string name="add_system_app_title">Add System App</string>
     <string name="replace_keybox_title">Replace keybox.xml</string>
     <string name="replace_keybox_selected_file">Selected file: %s</string>
+    <string name="pif_fingerprint_title">Spoof PIF fingerprint</string>
+    <string name="pif_enable_spoofing">Enable PIF fingerprint spoofing</string>
+    <string name="pif_zygisk_next_required">Install and enable Zygisk Next separately. OMK does not bundle, download, or install it.</string>
+    <string name="pif_current_config">Current configuration</string>
+    <string name="pif_security_patch">Security patch: %s</string>
+    <string name="pif_disabled">Disabled</string>
+    <string name="pif_loading_config">Loading PIF configuration…</string>
+    <string name="pif_config_load_error">Failed to load the PIF configuration</string>
+    <string name="pif_loading_devices">Loading Pixel devices…</string>
+    <string name="pif_devices_load_error">Failed to load Pixel devices</string>
+    <string name="pif_choose_device">Choose a Pixel device</string>
+    <string name="pif_random_device">Random</string>
+    <string name="pif_applying">Applying…</string>
+    <string name="prompt_pif_applied">PIF fingerprint applied: %1$s · security patch %2$s.</string>
+    <string name="prompt_pif_disabled">PIF fingerprint spoofing disabled.</string>
+    <string name="prompt_pif_apply_error">Failed to update PIF fingerprint spoofing: %s</string>
 </resources>

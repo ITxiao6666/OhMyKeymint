@@ -1,0 +1,13 @@
+[package]
+name = "zygisk-api"
+authors = ["Paskal Sitepu <rmnscnce@ya.ru>"]
+license = "0BSD"
+description = "Zygisk API bindings for Rust"
+version = "0.0.2"
+edition = "2024"
+
+[dependencies]
+thiserror = { version = "2.0", default-features = false }
+libc = { version = "0.2", default-features = false }
+jni = { version = "0.21" }
+bitflags = { version = "2.9" }

@@ -12,12 +12,15 @@ import '@material/web/menu/menu-item.js'
 import '@material/web/menu/menu.js'
 import '@material/web/menu/sub-menu.js'
 import '@material/web/progress/circular-progress.js'
+import '@material/web/radio/radio.js'
 import '@material/web/ripple/ripple.js'
+import '@material/web/switch/switch.js'
 import '@material/web/textfield/outlined-text-field.js'
 import { AppList } from './app_list/app_list'
 import { Cli } from './cli'
 import { ConfigOhMyKeyMint } from './config_ohmykeymint'
 import { KeyboxDialog } from './dialog/keybox'
+import { PifFingerprintDialog } from './dialog/pif_fingerprint'
 import { SystemAppDialog } from './dialog/system_app'
 import { History } from './history'
 import { i18n } from './i18n'
@@ -152,6 +155,11 @@ dialogContent.appendChild(keyboxDialog.getElement())
 keyboxDialog.initAnimation()
 mainMenu.on('menu-install-keybox', () => keyboxDialog.choose())
 
+const pifFingerprintDialog = new PifFingerprintDialog(cli, snackbar)
+dialogContent.appendChild(pifFingerprintDialog.getElement())
+pifFingerprintDialog.initAnimation()
+mainMenu.on('menu-spoof-pif-fingerprint', () => pifFingerprintDialog.show())
+
 let securityPatchBusy = false
 async function syncSecurityPatch(): Promise<void> {
   if (securityPatchBusy) return
@@ -197,6 +205,14 @@ dialogContent.querySelectorAll<MdDialog>('md-dialog').forEach((dialog, index) =>
       if (!keyboxDialog.close()) {
         window.setTimeout(() => {
           if (!keyboxDialog.close()) history.push(id, closeFromHistory)
+        }, 0)
+      }
+      return
+    }
+    if (id === 'pif-fingerprint-dialog') {
+      if (!pifFingerprintDialog.close()) {
+        window.setTimeout(() => {
+          if (!pifFingerprintDialog.close()) history.push(id, closeFromHistory)
         }, 0)
       }
       return

@@ -62,8 +62,9 @@ change does not require a keymint restart.
 ## Embedded WebUI
 
 The module includes a WebUI for selecting packages in `scoop`, installing a
-local keybox, and managing the Android security patch level. Open it from the
-Oh My Keymint module page in
+local keybox, managing the Android security patch level, and applying a Pixel
+PIF fingerprint through OMK's own Zygisk payload. Open it from the Oh My
+Keymint module page in
 KernelSU. With Magisk, run the module action after installing either
 KSUWebUIStandalone or WebUI X; the action does not download or install either
 host.
@@ -94,6 +95,51 @@ request. It first restores both properties from the snapshot, then sets
 configuration update succeed; a failed restore retains it for another attempt.
 The two properties are global Android runtime state for the current boot, so
 every process that reads them can observe the synchronized or restored values.
+
+The **Spoof PIF fingerprint** action is a separate OMK Zygisk integration. It
+downloads a Pixel device list from
+`KOWX712/PlayIntegrityFix`'s `bot/device_list.json`, then downloads the selected
+`bot/device_prop/<product>.prop`. The upstream bot refreshes these records
+daily from Google's Android preview pages, Android Flash Tool Canary metadata,
+and Pixel security bulletin. The helper first tries the exact GitHub Raw path
+and then the exact jsDelivr path. It does not run the upstream Autopif shell
+script and does not require a device-provided `curl`, `wget`, or shell download
+tool.
+
+The native helper accepts only the fixed feed paths, validates every catalog
+entry, requires exactly `FINGERPRINT`, `MANUFACTURER`, `MODEL`, and
+`SECURITY_PATCH` in a profile, and splits the fingerprint into its eight Build
+components. It writes the following LF-delimited values only after they agree
+with one another and satisfy TrickyStore's value limits:
+
+```text
+MANUFACTURER=Google
+MODEL=Pixel ...
+FINGERPRINT=google/.../...:.../.../...:user/release-keys
+BRAND=google
+PRODUCT=...
+DEVICE=...
+RELEASE=...
+ID=...
+INCREMENTAL=...
+TYPE=user
+TAGS=release-keys
+SECURITY_PATCH=YYYY-MM-DD
+```
+
+The complete candidate is atomically stored at
+`/data/misc/keystore/omk/data/pif_fingerprint.json`; an invalid download or
+failed write leaves the previous profile unchanged. This state file is not
+part of either OMK TOML schema. OMK packages its own Zygisk library, which reads
+the validated profile through its root companion when a new
+`com.google.android.gms.unstable` process is specialized by the Zygisk Next
+loader. Zygisk Next must already be installed and enabled by the user; OMK does
+not bundle, install, or implement that loader. The helper ends that process and Play Store after a successful
+change so a later process receives the selected values. Disabling spoofing
+removes the profile and repeats the same process refresh. The spoof is limited
+to that GMS process: it does not call `resetprop`, change global Android
+properties, or change values under OMK's `[device]` section.
+
 All other WebUI assets are bundled and no network request is made for normal
 local operations.
 
