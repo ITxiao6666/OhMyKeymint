@@ -316,7 +316,7 @@ fn refresh_target_processes() -> Result<()> {
             continue;
         };
         let name = cmdline.split(|byte| *byte == 0).next().unwrap_or_default();
-        if !PROCESS_NAMES.contains(&name) {
+        if !is_target_process_name(name) {
             continue;
         }
         if unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
@@ -339,6 +339,13 @@ fn refresh_target_processes() -> Result<()> {
             failures.join("; ")
         );
     }
+}
+
+fn is_target_process_name(name: &[u8]) -> bool {
+    PROCESS_NAMES.iter().any(|base| {
+        name == *base
+            || (name.len() > base.len() + 1 && name.starts_with(base) && name[base.len()] == b':')
+    })
 }
 
 #[cfg(test)]
@@ -442,5 +449,34 @@ mod tests {
         )
         .unwrap();
         assert!(load_profile(&noncanonical).is_err());
+    }
+
+    #[test]
+    fn refresh_matching_accepts_supported_colon_processes_only() {
+        for name in [
+            b"com.google.android.gms.unstable".as_slice(),
+            b"com.google.android.gms.unstable:background".as_slice(),
+            b"com.android.vending".as_slice(),
+            b"com.android.vending:instant".as_slice(),
+        ] {
+            assert!(
+                is_target_process_name(name),
+                "{}",
+                String::from_utf8_lossy(name)
+            );
+        }
+        for name in [
+            b"com.google.android.gms".as_slice(),
+            b"com.google.android.gms.unstable2".as_slice(),
+            b"com.google.android.gms.unstable:".as_slice(),
+            b"com.android.vending.evil".as_slice(),
+            b"com.android.vending/child".as_slice(),
+        ] {
+            assert!(
+                !is_target_process_name(name),
+                "{}",
+                String::from_utf8_lossy(name)
+            );
+        }
     }
 }

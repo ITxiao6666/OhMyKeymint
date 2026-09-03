@@ -114,12 +114,17 @@ pub(crate) fn resolve_redirect(base: &Uri, location: &str, resource: &str) -> Re
     if location.is_empty() {
         bail!("{resource} redirect has an empty Location header");
     }
+    if location.contains('#') {
+        bail!("{resource} redirect Location contains a fragment");
+    }
 
-    let target: Uri = location
-        .parse()
-        .with_context(|| format!("{resource} redirect Location is invalid"))?;
-    if target.scheme().is_some() {
-        return Ok(target);
+    if location.starts_with("//") {
+        let scheme = base
+            .scheme()
+            .ok_or_else(|| anyhow!("{resource} base URI has no scheme"))?;
+        return format!("{scheme}:{location}")
+            .parse()
+            .with_context(|| format!("{resource} redirect URI is invalid"));
     }
 
     let scheme = base
@@ -128,26 +133,24 @@ pub(crate) fn resolve_redirect(base: &Uri, location: &str, resource: &str) -> Re
     let authority = base
         .authority()
         .ok_or_else(|| anyhow!("{resource} base URI has no authority"))?;
-    if target.authority().is_some() {
-        return format!("{}:{}", scheme, target)
+    if location.starts_with('?') {
+        return format!("{}://{}{}{}", scheme, authority, base.path(), location)
             .parse()
             .with_context(|| format!("{resource} redirect URI is invalid"));
     }
 
-    let path_and_query = target
-        .path_and_query()
-        .map(ToString::to_string)
-        .unwrap_or_default();
-    let absolute = if path_and_query.starts_with('/') {
-        format!("{}://{}{}", scheme, authority, path_and_query)
-    } else if path_and_query.starts_with('?') {
-        format!(
-            "{}://{}{}{}",
-            scheme,
-            authority,
-            base.path(),
-            path_and_query
-        )
+    if has_uri_scheme(location) {
+        return location
+            .parse()
+            .with_context(|| format!("{resource} redirect Location is invalid"));
+    }
+
+    // `http::Uri` models HTTP request targets rather than general RFC URI
+    // references. In particular, it rejects a query-only reference and
+    // interprets a single path segment as an authority. Resolve the original
+    // Location text against the base before parsing the complete URI.
+    let absolute = if location.starts_with('/') {
+        format!("{}://{}{}", scheme, authority, location)
     } else {
         let base_directory = base
             .path()
@@ -161,13 +164,32 @@ pub(crate) fn resolve_redirect(base: &Uri, location: &str, resource: &str) -> Re
         };
         format!(
             "{}://{}{}{}{}",
-            scheme, authority, base_directory, separator, path_and_query
+            scheme, authority, base_directory, separator, location
         )
     };
 
     absolute
         .parse()
         .with_context(|| format!("{resource} redirect URI is invalid"))
+}
+
+fn has_uri_scheme(value: &str) -> bool {
+    let mut characters = value.chars();
+    if !characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+    {
+        return false;
+    }
+    for character in characters {
+        match character {
+            ':' => return true,
+            '+' | '-' | '.' => {}
+            character if character.is_ascii_alphanumeric() => {}
+            _ => return false,
+        }
+    }
+    false
 }
 
 #[cfg(test)]

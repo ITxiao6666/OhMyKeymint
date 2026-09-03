@@ -262,15 +262,29 @@ when the target process starts through the Zygisk Next loader. Zygisk Next must
 be installed and active by the user; OMK does not bundle, install, or implement
 that loader.
 
-OMK applies these fields only while starting `com.google.android.gms.unstable`.
-It ends that process and Play Store after a
-successful change so a new process can read the file. This action does not
-change global system properties, OMK's attested device identity, or the
-security-patch synchronization setting. Installing or updating OMK's Zygisk
-payload, or enabling Zygisk Next for the first time, still requires a device
-reboot. Turning the WebUI switch
-off removes the profile and refreshes the same processes so they return to the
-device's original Build values.
+OMK applies these fields while starting `com.google.android.gms.unstable` and
+`com.android.vending`, including their named `:...` child processes. During
+pre-app specialization the payload installs available PLT hooks. On AArch64 it
+also attempts a process-wide bionic callback hook only after validating the
+wrapper semantics, memory mappings, and BTI/MTE permissions. If that validation
+fails, libc remains unchanged, the reason is logged, and the available PLT and
+Java paths continue. After specialization the payload updates Java `Build`
+fields and records a property probe. It ends both
+process families after a successful change so a new
+process can read the file. This action does not change global system
+properties, OMK's attested device identity, or the security-patch
+synchronization setting.
+Installing or updating OMK's Zygisk payload, or enabling Zygisk Next for the
+first time, still requires a device reboot. Turning the WebUI switch off
+removes the profile and refreshes the same process families so their next
+instances return to the device's original values.
+
+A general Play Integrity checker application is not one of the target
+processes. Its own `Build.FINGERPRINT` display can therefore remain the device
+value even when the Google Play services and Play Store processes receive the
+selected profile. Check the `OhMyKeymint-PIF` log entries for the target process
+and hook status when diagnosing the integration; a payload or Zygisk Next change
+also requires a reboot before new app processes can load it.
 
 If you changed `vb_key` or `vb_hash` from `"random"` back to `"auto"`, a full
 reboot is required. The automatic value cannot return until the next boot.

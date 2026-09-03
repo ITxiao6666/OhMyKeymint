@@ -132,13 +132,21 @@ The complete candidate is atomically stored at
 failed write leaves the previous profile unchanged. This state file is not
 part of either OMK TOML schema. OMK packages its own Zygisk library, which reads
 the validated profile through its root companion when a new
-`com.google.android.gms.unstable` process is specialized by the Zygisk Next
-loader. Zygisk Next must already be installed and enabled by the user; OMK does
-not bundle, install, or implement that loader. The helper ends that process and Play Store after a successful
-change so a later process receives the selected values. Disabling spoofing
-removes the profile and repeats the same process refresh. The spoof is limited
-to that GMS process: it does not call `resetprop`, change global Android
-properties, or change values under OMK's `[device]` section.
+`com.google.android.gms.unstable` or `com.android.vending` process (including a
+named `:...` child process) is specialized by the Zygisk Next loader. During
+pre-app specialization the payload installs available PLT hooks. On AArch64 it
+also attempts a process-wide bionic callback hook only after validating the
+wrapper semantics, memory mappings, and BTI/MTE permissions. A rejected
+callback hook leaves libc unchanged, records the reason, and continues with
+the available PLT and Java paths. After specialization the payload updates Java
+`Build` fields and records a property probe. Zygisk Next must already be
+installed and enabled by the user; OMK does
+not bundle, install, or implement that loader. The helper ends both target
+process families after a successful change so a later process receives the
+selected values. Disabling spoofing removes the profile and repeats the same
+process refresh. The spoof is process-local: it does not call `resetprop`,
+change global Android properties, or change values under OMK's `[device]`
+section.
 
 All other WebUI assets are bundled and no network request is made for normal
 local operations.

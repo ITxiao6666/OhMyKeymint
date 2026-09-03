@@ -80,13 +80,21 @@ metadata, and Pixel security bulletin. The native helper validates the
 catalog, the four profile fields, and the complete fingerprint structure. It
 then derives the matching Build fields and atomically stores the active profile
 at `/data/misc/keystore/omk/data/pif_fingerprint.json`. OMK's own Zygisk
-payload applies these values only inside a newly started
-`com.google.android.gms.unstable` process through the Zygisk Next loader. Zygisk
-Next must already be installed and enabled by the user; OMK does not bundle,
-install, or implement that loader. The
-selected values are not global Android properties and do not change OMK's
-`[device]` identity. Disabling the action removes the OMK profile and restarts
-the affected processes so their next instances use the original Build values.
+payload applies these values inside newly started
+`com.google.android.gms.unstable` and `com.android.vending` processes (including
+their named `:...` child processes) through the Zygisk Next loader. During
+pre-app specialization it installs available PLT hooks and, on AArch64, tries a
+process-wide bionic callback hook only after validating the wrapper semantics,
+memory mappings, and BTI/MTE permissions. A rejected callback hook leaves libc
+unchanged, records the reason, and continues with the available PLT and Java
+paths. Java `Build` fields and a property probe are updated after
+specialization.
+Zygisk Next must already be
+installed and enabled by the user; OMK does not bundle, install, or implement
+that loader. The selected values are process-local, are not global Android
+properties, and do not change OMK's `[device]` identity. Disabling the action
+removes the OMK profile and restarts the affected processes so their next
+instances use the original values.
 
 Both network actions use the bundled native HTTPS client and require neither
 `curl` nor `wget`. Other WebUI operations remain local. The WebUI can also read
