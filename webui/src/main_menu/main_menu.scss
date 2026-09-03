@@ -17,6 +17,37 @@
 
   #language-menu {
     --md-menu-top-space: max(var(--top-inset), 8px);
+    --md-menu-bottom-space: max(var(--bottom-inset), 8px);
+    width: min(280px, calc(100vw - var(--left-inset) - var(--right-inset) - 24px));
+    min-width: 0;
+    max-width: min(320px, calc(100vw - var(--left-inset) - var(--right-inset) - 24px));
+    max-height: min(70dvh, 560px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    touch-action: pan-y;
+
+    md-menu-item {
+      width: 100%;
+      min-width: 0;
+      max-width: none;
+      min-height: 48px;
+      padding-inline: 12px;
+
+      [slot='headline'] {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .language-check {
+        flex: none;
+        color: var(--md-sys-color-primary);
+        font-size: 20px;
+      }
+    }
   }
 
   md-menu-item {
@@ -26,6 +57,16 @@
     border-radius: 16px;
     padding: 0 8px;
     box-sizing: border-box;
+  }
+
+  .menu-action-icon,
+  .menu-action-progress {
+    flex: none;
+  }
+
+  .menu-action-progress {
+    --md-circular-progress-size: 24px;
+    --md-circular-progress-active-indicator-width: 8;
   }
 
   .menu-item-button-container {

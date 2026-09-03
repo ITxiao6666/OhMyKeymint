@@ -12,6 +12,9 @@
     user-select: none;
     pointer-events: auto;
     touch-action: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
     transition: transform 0.2s ease, opacity 0.2s ease;
 
     &.hide {
@@ -24,5 +27,16 @@
       background-color: var(--md-sys-color-error-container);
       color: var(--md-sys-color-on-error-container);
     }
+  }
+
+  .snackbar-progress {
+    --md-circular-progress-size: 22px;
+    --md-circular-progress-active-indicator-width: 8;
+    flex: none;
+  }
+
+  .snackbar-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 }

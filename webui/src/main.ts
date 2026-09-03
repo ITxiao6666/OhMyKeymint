@@ -57,7 +57,9 @@ root.innerHTML = /* html */ `
   </section>
 
   <section class="floating-content fab-hide">
-    <div class="snackbar hide"><div class="snackbar-text"></div></div>
+    <div class="snackbar hide" role="status" aria-live="polite">
+      <div class="snackbar-text"></div>
+    </div>
     <div class="fab-container">
       <md-fab variant="primary" class="fab fab-hide" id="save">
         <md-icon slot="icon">edit_note</md-icon>
@@ -169,6 +171,8 @@ let securityPatchBusy = false
 async function syncSecurityPatch(): Promise<void> {
   if (securityPatchBusy) return
   securityPatchBusy = true
+  mainMenu.setSecurityPatchBusy(true)
+  snackbar.showLoading(i18n.t('menu_sync_security_patch'))
   try {
     if (isDev()) {
       snackbar.show(i18n.t('prompt_security_patch_synced'))
@@ -182,6 +186,7 @@ async function syncSecurityPatch(): Promise<void> {
     console.error('Unable to sync the security patch:', error)
     snackbar.show(i18n.t('prompt_security_patch_sync_error', detail), false, 6000)
   } finally {
+    mainMenu.setSecurityPatchBusy(false)
     securityPatchBusy = false
   }
 }
@@ -190,6 +195,8 @@ mainMenu.on('menu-sync-security-patch', () => void syncSecurityPatch())
 async function restoreDefaultSecurityPatch(): Promise<void> {
   if (securityPatchBusy) return
   securityPatchBusy = true
+  mainMenu.setSecurityPatchBusy(true)
+  snackbar.showLoading(i18n.t('menu_restore_default_security_patch'))
   try {
     if (!isDev()) await cli.restoreDefaultSecurityPatch()
     snackbar.show(i18n.t('prompt_security_patch_restored_default'))
@@ -198,6 +205,7 @@ async function restoreDefaultSecurityPatch(): Promise<void> {
     console.error('Unable to restore the default security patch:', error)
     snackbar.show(i18n.t('prompt_security_patch_restore_error', detail), false, 6000)
   } finally {
+    mainMenu.setSecurityPatchBusy(false)
     securityPatchBusy = false
   }
 }

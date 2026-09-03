@@ -4,6 +4,10 @@ import './main_menu.scss'
 
 export class MainMenu {
   #callbacks = new Map<string, Array<() => void>>()
+  #securityPatchItems: Array<{
+    item: HTMLElement
+    icon: HTMLElement
+  }> = []
 
   appendTo(container: HTMLElement): void {
     container.appendChild(this.#getElement(container))
@@ -19,17 +23,20 @@ export class MainMenu {
           <md-filled-tonal-icon-button id="refresh"><md-icon>refresh</md-icon></md-filled-tonal-icon-button>
         </div>
         <md-divider role="separator" tabindex="-1"></md-divider>
-        <md-menu-item id="add-system-app"><div slot="headline"></div></md-menu-item>
+        <md-menu-item id="add-system-app">
+          <md-icon slot="start">apps</md-icon>
+          <div slot="headline"></div>
+        </md-menu-item>
         <md-menu-item id="install-keybox">
           <md-icon slot="start">upload_file</md-icon>
           <div slot="headline"></div>
         </md-menu-item>
         <md-menu-item id="sync-security-patch">
-          <md-icon slot="start">security_update</md-icon>
+          <md-icon class="menu-action-icon" slot="start">security_update</md-icon>
           <div slot="headline"></div>
         </md-menu-item>
         <md-menu-item id="restore-default-security-patch">
-          <md-icon slot="start">settings_backup_restore</md-icon>
+          <md-icon class="menu-action-icon" slot="start">settings_backup_restore</md-icon>
           <div slot="headline"></div>
         </md-menu-item>
         <md-menu-item id="spoof-pif-fingerprint">
@@ -60,6 +67,18 @@ export class MainMenu {
     this.#setHeadline(fragment, '#spoof-pif-fingerprint', i18n.t('menu_spoof_pif_fingerprint'))
     this.#setHeadline(fragment, '.sub-menu-entry', i18n.t('menu_language'))
 
+    this.#securityPatchItems = ['sync-security-patch', 'restore-default-security-patch']
+      .map(id => {
+        const item = fragment.querySelector<HTMLElement>(`#${id}`)
+        const icon = item?.querySelector<HTMLElement>('.menu-action-icon')
+        if (!item || !icon) return null
+        return { item, icon }
+      })
+      .filter((entry): entry is {
+        item: HTMLElement
+        icon: HTMLElement
+      } => entry !== null)
+
     const actions: Array<[string, string, string]> = [
       ['select-all', 'menu-select-all', i18n.t('menu_select_all')],
       ['deselect-all', 'menu-deselect-all', i18n.t('menu_deselect_all')],
@@ -75,6 +94,7 @@ export class MainMenu {
       item.title = label
       item.setAttribute('aria-label', label)
       item.onclick = () => {
+        if (item.hasAttribute('disabled')) return
         this.#emit(event)
         menuOptions.open = false
       }
@@ -96,22 +116,65 @@ export class MainMenu {
       subMenu.querySelector('md-menu')?.addEventListener('closing', () => { subMenuOpen = false })
     })
 
-    const languageMenu = fragment.querySelector<HTMLElement>('#language-menu')!
+    const languageMenu = fragment.querySelector<MdMenu>('#language-menu')!
+    languageMenu.setAttribute('aria-label', i18n.t('menu_language'))
     const languages = { default: i18n.t('system_default'), ...i18n.languages }
     for (const [code, name] of Object.entries(languages)) {
       const item = document.createElement('md-menu-item')
       item.id = `lang-${code}`
-      if (i18n.preference === code) item.setAttribute('selected', '')
+      const selected = i18n.preference === code
+      item.selected = selected
+      if (selected) {
+        item.setAttribute('selected', '')
+        item.setAttribute('aria-selected', 'true')
+      } else item.setAttribute('aria-selected', 'false')
+      item.setAttribute('aria-label', name)
+      item.dataset.language = code
 
       const headline = document.createElement('div')
       headline.setAttribute('slot', 'headline')
       headline.textContent = name
       item.appendChild(headline)
-      item.onclick = () => i18n.setLanguage(code)
+
+      const check = document.createElement('md-icon')
+      check.className = 'language-check'
+      check.setAttribute('slot', 'end')
+      check.textContent = 'check'
+      check.hidden = !selected
+      check.setAttribute('aria-hidden', 'true')
+      item.appendChild(check)
+
+      item.onclick = () => {
+        languageMenu.close()
+        i18n.setLanguage(code)
+      }
       languageMenu.appendChild(item)
     }
 
     return fragment
+  }
+
+  /** Show or hide the progress indicator for both security-patch actions. */
+  setSecurityPatchBusy(busy: boolean): void {
+    for (const { item, icon } of this.#securityPatchItems) {
+      item.toggleAttribute('disabled', busy)
+      item.toggleAttribute('aria-busy', busy)
+      icon.toggleAttribute('hidden', busy)
+
+      const progress = item.querySelector<HTMLElement>('.menu-action-progress')
+      if (busy) {
+        if (!progress) {
+          const indicator = document.createElement('md-circular-progress')
+          indicator.className = 'menu-action-progress'
+          indicator.setAttribute('slot', 'start')
+          indicator.setAttribute('indeterminate', '')
+          indicator.setAttribute('aria-hidden', 'true')
+          item.appendChild(indicator)
+        }
+      } else {
+        progress?.remove()
+      }
+    }
   }
 
   #setHeadline(root: ParentNode, selector: string, value: string): void {

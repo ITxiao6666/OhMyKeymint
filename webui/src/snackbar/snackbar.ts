@@ -3,6 +3,7 @@ import './snackbar.scss'
 export class Snackbar {
   #element: HTMLElement | null = null
   #textElement: HTMLElement | null = null
+  #progressElement: HTMLElement | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
 
   #swipeStartX = 0
@@ -12,7 +13,7 @@ export class Snackbar {
 
   html(): string {
     return /* html */ `
-      <div class="snackbar hide">
+      <div class="snackbar hide" role="status" aria-live="polite">
         <div class="snackbar-text"></div>
       </div>`
   }
@@ -26,10 +27,28 @@ export class Snackbar {
     this.#textElement.textContent = msg
     this.#element.classList.remove('hide')
     this.#element.classList.toggle('error', !success)
+    this.#element.classList.remove('snackbar-loading')
+    this.#removeProgress()
 
     this.#timer = setTimeout(() => {
       this.#element?.classList.add('hide')
     }, duration ?? 3000)
+  }
+
+  /** Show a persistent progress message until a later call to show(). */
+  showLoading(msg: string): void {
+    this.#ensureElements()
+    if (!this.#element || !this.#textElement) return
+    if (this.#timer) {
+      clearTimeout(this.#timer)
+      this.#timer = null
+    }
+
+    this.#resetInlineStyles()
+    this.#textElement.textContent = msg
+    this.#element.classList.remove('hide', 'error')
+    this.#element.classList.add('snackbar-loading')
+    this.#ensureProgress()
   }
 
   #ensureElements(): void {
@@ -40,6 +59,22 @@ export class Snackbar {
         this.#element.addEventListener('pointerdown', this.#onPointerDown)
       }
     }
+  }
+
+  #ensureProgress(): void {
+    if (!this.#element || this.#progressElement) return
+
+    const progress = document.createElement('md-circular-progress')
+    progress.className = 'snackbar-progress'
+    progress.setAttribute('indeterminate', '')
+    progress.setAttribute('aria-hidden', 'true')
+    this.#element.prepend(progress)
+    this.#progressElement = progress
+  }
+
+  #removeProgress(): void {
+    this.#progressElement?.remove()
+    this.#progressElement = null
   }
 
   #resetInlineStyles(): void {
