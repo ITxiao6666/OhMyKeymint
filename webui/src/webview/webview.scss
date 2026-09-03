@@ -2,8 +2,10 @@
 
 .webview {
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
-  padding: var(--top-inset) 16px var(--bottom-inset);
+  padding: var(--top-inset) calc(var(--right-inset) + 16px) var(--bottom-inset)
+    calc(var(--left-inset) + 16px);
   box-sizing: border-box;
   display: flex;
   justify-content: center;

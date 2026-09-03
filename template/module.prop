@@ -2,6 +2,6 @@ id=oh_my_keymint
 name=Oh My Keymint
 version=${versionName}
 versionCode=${versionCode}
-author=James Clef,ITxiao666
+author=James Clef,ITxiao6666
 description=Custom keystore implementation for Android Keystore Spoofer
 updateJson=https://raw.githubusercontent.com/qwq233/OhMyKeymint/changelog/update.json

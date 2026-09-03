@@ -11,7 +11,7 @@ body {
   display: flex;
   align-items: center;
   height: calc(64px + var(--top-inset));
-  padding: var(--top-inset) 8px 0;
+  padding: var(--top-inset) calc(var(--right-inset) + 8px) 0 calc(var(--left-inset) + 8px);
   width: 100%;
   background-color: var(--md-sys-color-surface);
   box-sizing: border-box;
@@ -41,24 +41,27 @@ body {
 
 .search-bar {
   position: absolute;
-  left: 16px;
-  width: calc(100% - 64px);
+  left: calc(var(--left-inset) + 16px);
+  width: calc(100% - var(--left-inset) - var(--right-inset) - 64px);
   transition: all 0.3s ease;
 
   &.hide {
-    width: calc(80% - 64px);
+    width: calc(80% - var(--left-inset) - var(--right-inset) - 64px);
     opacity: 0;
     pointer-events: none;
   }
 
   [dir='rtl'] & {
     left: auto;
-    right: 16px;
+    right: calc(var(--right-inset) + 16px);
   }
 }
 
 .body-content {
   padding-top: calc(var(--top-inset) + 72px);
+  padding-right: var(--right-inset);
+  padding-left: var(--left-inset);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -66,6 +69,7 @@ body {
 
 .loading {
   height: calc(100vh - var(--top-inset) - 72px);
+  height: calc(100dvh - var(--top-inset) - 72px);
   padding-bottom: calc(var(--top-inset) + 72px);
   box-sizing: border-box;
   width: 100%;
@@ -83,7 +87,8 @@ body {
   left: 0;
   bottom: 0;
   width: 100%;
-  padding: 0 16px calc(var(--bottom-inset) + 16px);
+  padding: 0 calc(var(--right-inset) + 16px) calc(var(--bottom-inset) + 16px)
+    calc(var(--left-inset) + 16px);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

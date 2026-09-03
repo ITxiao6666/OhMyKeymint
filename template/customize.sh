@@ -69,7 +69,6 @@ extract "$ZIPFILE" 'daemon'          "$MODPATH"
 extract "$ZIPFILE" 'daemon-injector' "$MODPATH"
 extract "$ZIPFILE" 'injector.toml'   "$MODPATH"
 extract "$ZIPFILE" 'keybox.xml'      "$MODPATH"
-extract "$ZIPFILE" 'action.sh'       "$MODPATH"
 extract "$ZIPFILE" 'webroot.manifest' "$MODPATH"
 
 while IFS= read -r asset || [ -n "$asset" ]; do
@@ -81,7 +80,7 @@ while IFS= read -r asset || [ -n "$asset" ]; do
 done < "$MODPATH/webroot.manifest"
 
 chmod 755 "$MODPATH/daemon" "$MODPATH/daemon-injector" \
-  "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh" "$MODPATH/action.sh"
+  "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh"
 find "$MODPATH/webroot" -type d -exec chmod 0755 {} \;
 find "$MODPATH/webroot" -type f -exec chmod 0644 {} \;
 chmod 0644 "$MODPATH/webroot.manifest"

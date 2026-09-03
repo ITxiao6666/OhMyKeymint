@@ -308,7 +308,6 @@ fn handle_webui_security_patch_command() -> Option<Result<String, String>> {
     prepare_android_storage();
     Some(
         crate::security_patch::apply_webui_security_patch(&value)
-            .map(|()| value)
             .map_err(|error| format!("{error:#}")),
     )
 }

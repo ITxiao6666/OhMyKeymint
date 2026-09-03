@@ -1,6 +1,38 @@
 @scope (.dialog-content) {
+  #keybox-dialog,
+  #pif-fingerprint-dialog,
+  #system-app-dialog {
+    max-height: min(
+      560px,
+      calc(
+        100vh - max(var(--top-inset), var(--bottom-inset)) -
+          max(var(--top-inset), var(--bottom-inset)) - 48px
+      )
+    );
+    max-height: min(
+      560px,
+      calc(
+        100dvh - max(var(--top-inset), var(--bottom-inset)) -
+          max(var(--top-inset), var(--bottom-inset)) - 48px
+      )
+    );
+    max-width: min(
+      560px,
+      calc(
+        100vw - max(var(--left-inset), var(--right-inset)) -
+          max(var(--left-inset), var(--right-inset)) - 48px
+      )
+    );
+  }
+
   #keybox-dialog {
-    max-width: min(420px, calc(100vw - 32px));
+    max-width: min(
+      420px,
+      calc(
+        100vw - max(var(--left-inset), var(--right-inset)) -
+          max(var(--left-inset), var(--right-inset)) - 32px
+      )
+    );
 
     .keybox-dialog-content {
       display: flex;
@@ -15,12 +47,24 @@
   }
 
   #pif-fingerprint-dialog {
-    max-width: min(480px, calc(100vw - 24px));
+    max-width: min(
+      480px,
+      calc(
+        100vw - max(var(--left-inset), var(--right-inset)) -
+          max(var(--left-inset), var(--right-inset)) - 24px
+      )
+    );
 
     .pif-dialog-content {
       display: flex;
       flex-direction: column;
-      width: min(400px, calc(100vw - 80px));
+      width: min(
+        400px,
+        calc(
+          100vw - max(var(--left-inset), var(--right-inset)) -
+            max(var(--left-inset), var(--right-inset)) - 80px
+        )
+      );
       height: min(56vh, 520px);
       height: min(56dvh, 520px);
       min-height: min(300px, 56vh);

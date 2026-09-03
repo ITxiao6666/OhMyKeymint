@@ -1,6 +1,6 @@
 [package]
 name = "OhMyKeymint"
-version = "1.2.5"
+version = "1.3.1"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 

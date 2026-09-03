@@ -185,16 +185,18 @@ export class Cli {
     await this.#run(keymint, ['--webui-install-keybox', ...chunks])
   }
 
-  async syncSecurityPatch(date: string): Promise<void> {
+  async syncSecurityPatch(date: string): Promise<string> {
     if (!isSecurityPatchDate(date)) {
       throw new Error('Invalid security-patch date')
     }
 
     const { keymint } = await this.#getHelperPaths()
     const output = await this.#run(keymint, ['--webui-sync-security-patch', date])
-    if (output !== date) {
+    const firstDayFallback = date.endsWith('-05') ? `${date.slice(0, 8)}01` : null
+    if (output !== date && output !== firstDayFallback) {
       throw new Error('OMK returned an unexpected security-patch date')
     }
+    return output
   }
 
   async restoreDefaultSecurityPatch(): Promise<void> {

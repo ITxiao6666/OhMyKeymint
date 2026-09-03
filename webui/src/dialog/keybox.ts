@@ -22,7 +22,7 @@ export class KeyboxDialog {
   getElement(): DocumentFragment {
     const template = document.createElement('template')
     template.innerHTML = /* html */ `
-      <input id="keybox-file-input" type="file" accept="application/xml,text/xml,.xml" hidden>
+      <input id="keybox-file-input" type="file" accept="*/*" hidden>
       <md-dialog id="keybox-dialog">
         <div slot="headline"></div>
         <div slot="content" class="keybox-dialog-content">

@@ -105,9 +105,8 @@ Deleting it can permanently remove keys that apps still need.
 
 In KernelSU, open Oh My Keymint from the module list and select its WebUI.
 
-In Magisk, run the Oh My Keymint module action. KSUWebUIStandalone or WebUI X
-must already be installed. The action does not download or install either app.
-If no compatible host is installed, install one and run the action again.
+In Magisk, open an installed KSUWebUIStandalone or WebUI X host and select Oh
+My Keymint. Install one of those WebUI hosts separately if neither is present.
 
 ### Does the WebUI use the network, and what can it change?
 
@@ -115,11 +114,15 @@ Its application code, icons, and language files are bundled with OMK. Normal
 local operations do not use the network. **Sync security patch** is the one
 exception: it invokes the module's native HTTPS client to request Google's
 official `source.android.com` Android Security Bulletin overview, with the
-official Chinese mirror as a fallback. It extracts the newest published date
-and asks the native helper to update the four `[trust]` patch-level fields. The
-helper also sets `ro.build.version.security_patch` and
-`ro.vendor.build.security_patch` to that date with `resetprop`. Before the first
-sync, it saves both current property values in
+official Chinese mirror as a fallback. It extracts the newest published patch
+month. If the saved default `ro.build.version.security_patch` uses day `01`,
+the synchronized value uses day `01` in that month; a saved day `05` or any
+other day keeps Google's published date. When the saved system and vendor
+dates differ, the system date determines this behavior. The helper updates the
+four `[trust]` patch-level fields and also sets
+`ro.build.version.security_patch` and `ro.vendor.build.security_patch` to that
+date with `resetprop`. Before the first sync, it saves both current property
+values in
 `/data/misc/keystore/omk/data/security_patch_defaults.toml`; repeated syncs keep
 the existing defaults snapshot. While that snapshot remains valid and all four
 patch fields still hold one exact date, keymint reapplies the paired properties

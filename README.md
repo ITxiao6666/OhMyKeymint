@@ -44,22 +44,25 @@ installing a local keybox, managing the Android security patch level, and
 applying a Pixel PIF fingerprint through OMK's own Zygisk payload:
 
 - In KernelSU, open Oh My Keymint from the module list and select its WebUI.
-- In Magisk, run the module action. This requires KSUWebUIStandalone or WebUI X
-  to be installed already. The action does not download or install a WebUI
-  host.
+- In Magisk, open an installed KSUWebUIStandalone or WebUI X host and select
+  Oh My Keymint. The module does not install a WebUI host.
 
 The WebUI uses bundled assets for normal operation. **Sync security patch**
 uses the module's native HTTPS client to download the Android Security Bulletin
 overview from Google's official `source.android.com` host (with its official
-Chinese mirror as a fallback), parses the newest published patch level, and
-sends that exact date to the native helper. It does not require `curl` or
+Chinese mirror as a fallback), and parses the newest published patch level.
+The synchronized value always uses that level's year and month. If the saved
+default `ro.build.version.security_patch` ends in day `01`, it uses day `01`;
+otherwise it keeps Google's published date. A saved day `05` therefore follows
+Google's published date. If the saved system and vendor patch dates disagree,
+the system date determines this choice. It does not require `curl` or
 `wget` on the device. TLS uses the client's embedded WebPKI roots, and HTTPS
 redirects are accepted only when they end at the official bulletin page.
 Before the first sync, the
 helper records the current `ro.build.version.security_patch` and
 `ro.vendor.build.security_patch` values in
 `/data/misc/keystore/omk/data/security_patch_defaults.toml`. Later syncs keep
-that original snapshot. Each sync writes the published date to all four
+that original snapshot. Each sync writes the selected date to all four
 `[trust]` patch-level fields and applies it to both runtime properties with
 `resetprop`. While that valid snapshot remains, keymint reapplies the paired
 property values at startup. A manually configured exact date without the

@@ -48,7 +48,6 @@ PIF_SPOOF_PACKAGE = "pif-spoof"
 PIF_SPOOF_LIBRARY = "libpif_spoof.so"
 
 REQUIRED_TEMPLATE_FILES = (
-    "action.sh",
     "customize.sh",
     "daemon",
     "daemon-injector",
@@ -67,7 +66,6 @@ MODULE_TEXT_FILES = (
     "README.md",
     "THIRD_PARTY_LICENSES/Tricky-Addon-Update-Target-List.txt",
     "THIRD_PARTY_LICENSES/zygisk-api-0BSD.txt",
-    "action.sh",
     "customize.sh",
     "daemon",
     "daemon-injector",

@@ -65,17 +65,20 @@ The module includes a WebUI for selecting packages in `scoop`, installing a
 local keybox, managing the Android security patch level, and applying a Pixel
 PIF fingerprint through OMK's own Zygisk payload. Open it from the Oh My
 Keymint module page in
-KernelSU. With Magisk, run the module action after installing either
-KSUWebUIStandalone or WebUI X; the action does not download or install either
-host.
+KernelSU. With Magisk, open an installed KSUWebUIStandalone or WebUI X host and
+select Oh My Keymint; the module does not install either host.
 
 The WebUI can read and replace the `scoop` package list and can install a local
 keybox selected through Android's standard file picker. Its **Sync security
 patch** action uses the root WebUI bridge to make an HTTPS request to the
 official `https://source.android.com/docs/security/bulletin/asb-overview` page,
 falling back to Google's official Chinese mirror when the primary host is
-unavailable. It extracts the newest published security-patch level and
-updates the four `[trust]` patch-level fields, and uses `resetprop` to set both
+unavailable. It extracts the newest published security-patch level and uses
+that level's year and month. When the saved default
+`ro.build.version.security_patch` has day `01`, the synchronized date also has
+day `01`; otherwise it keeps the published Google date. The saved system date
+is authoritative if it differs from the saved vendor date. The action updates
+the four `[trust]` patch-level fields and uses `resetprop` to set both
 `ro.build.version.security_patch` and `ro.vendor.build.security_patch` to that
 date. Before the first sync, the native helper saves the current values of both
 properties to
@@ -357,12 +360,20 @@ This controls `ro.build.version.security_patch`. It accepts:
 The WebUI **Sync security patch** action is separate from the `"latest"` mode.
 It reads the main table on Google's Android Security Bulletin overview,
 selects the greatest published security-patch date that is not in the future,
-and sends that exact date to the native helper. For example, an August bulletin
-whose levels are `2026-08-01` and `2026-08-05` synchronizes `2026-08-05`. The
-action never guesses an unpublished current-month date. It requires network
-access to Google's official bulletin host or mirror; if access or parsing
-fails, no file or property is changed. The native helper validates the date
-again and preserves all unrelated configuration values.
+and uses its year and month as the newest published patch month. The day is
+selected from the saved default `ro.build.version.security_patch`: day `01`
+uses day `01` in that newest month, while day `05` uses the Google bulletin
+date unchanged. Any other saved day also keeps the Google bulletin date. If
+the saved `ro.build.version.security_patch` and
+`ro.vendor.build.security_patch` dates differ, the system value determines
+the day behavior. For example, when the newest Google date is `2026-08-05`, a
+saved system default of `2025-06-01` synchronizes `2026-08-01`, while
+`2025-06-05` synchronizes `2026-08-05`. This does not change the separate
+`"latest"` mode described above. The action never guesses an unpublished
+current-month patch month. It requires network access to Google's official
+bulletin host or mirror; if access or parsing fails, no file or property is
+changed. The native helper validates the selected date again and preserves all
+unrelated configuration values.
 
 Before changing runtime properties for the first sync, the helper reads
 `ro.build.version.security_patch` and `ro.vendor.build.security_patch` and

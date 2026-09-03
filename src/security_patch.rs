@@ -185,7 +185,7 @@ pub fn download_android_security_bulletin(url: &str) -> Result<String> {
     )
 }
 
-pub fn apply_webui_security_patch(value: &str) -> Result<()> {
+pub fn apply_webui_security_patch(value: &str) -> Result<String> {
     config::validate_security_patch_sync_value(value)?;
     let _lock = acquire_operation_lock()?;
     let config_file = config::load_config_file()
@@ -234,7 +234,7 @@ fn apply_webui_security_patch_with<RuntimeReader, DefaultReader, PropertyWriter,
     mut read_defaults: DefaultReader,
     mut write_properties: PropertyWriter,
     mut write_config: ConfigWriter,
-) -> Result<()>
+) -> Result<String>
 where
     RuntimeReader: FnMut() -> Result<SecurityPatchProperties>,
     DefaultReader: FnMut() -> Result<SecurityPatchProperties>,
@@ -253,12 +253,17 @@ where
     let before = read_runtime().context("failed to read current security-patch properties")?;
     validate_properties(&before, "current")?;
 
+    let effective_value = if value == "auto" {
+        value.to_string()
+    } else {
+        synchronized_security_patch_date(value, &snapshot)
+    };
     let desired = if value == "auto" {
         snapshot.properties()
     } else {
         SecurityPatchProperties {
-            system: value.to_string(),
-            vendor: value.to_string(),
+            system: effective_value.clone(),
+            vendor: effective_value.clone(),
         }
     };
     write_properties(&before, &desired).with_context(|| {
@@ -269,7 +274,7 @@ where
         }
     })?;
 
-    if let Err(config_error) = write_config(value) {
+    if let Err(config_error) = write_config(&effective_value) {
         return Err(config_error_with_property_rollback(
             config_error,
             &desired,
@@ -282,7 +287,18 @@ where
         remove_snapshot(operation.state_path)
             .context("security patches were restored, but the defaults snapshot was not removed")?;
     }
-    Ok(())
+    Ok(effective_value)
+}
+
+fn synchronized_security_patch_date(
+    published_date: &str,
+    defaults: &SecurityPatchDefaults,
+) -> String {
+    if defaults.system_security_patch.ends_with("-01") && published_date.ends_with("-05") {
+        format!("{}01", &published_date[..8])
+    } else {
+        published_date.to_string()
+    }
 }
 
 fn prepare_startup_with<RuntimeReader, DefaultReader, PropertyWriter>(
@@ -629,7 +645,7 @@ mod tests {
         let config = ConfigFile::default();
 
         for date in ["2026-01-05", "2026-02-05"] {
-            apply_webui_security_patch_with(
+            let applied = apply_webui_security_patch_with(
                 date,
                 PatchOperation {
                     config_file: &config,
@@ -649,6 +665,7 @@ mod tests {
                 },
             )
             .unwrap();
+            assert_eq!(applied, date);
         }
 
         assert_eq!(*current.borrow(), properties("2026-02-05", "2026-02-05"));
@@ -661,6 +678,177 @@ mod tests {
             snapshot.properties(),
             properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)
         );
+    }
+
+    #[test]
+    fn sync_uses_the_saved_system_patch_day_convention() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security_patch_defaults.toml");
+        let defaults = properties("2025-06-01", "2025-06-05");
+        let current = RefCell::new(defaults.clone());
+        let config_values = RefCell::new(Vec::new());
+        let configs = [ConfigFile::default(), synchronized_config("2026-07-01")];
+
+        for ((published, expected), config) in
+            [("2026-07-05", "2026-07-01"), ("2026-08-05", "2026-08-01")]
+                .into_iter()
+                .zip(&configs)
+        {
+            let applied = apply_webui_security_patch_with(
+                published,
+                PatchOperation {
+                    config_file: config,
+                    state_path: &path,
+                    fingerprint: "brand/product/device:17/id/release-keys",
+                },
+                || Ok(current.borrow().clone()),
+                || panic!("matching snapshot should be reused"),
+                |before, desired| {
+                    assert_eq!(&*current.borrow(), before);
+                    *current.borrow_mut() = desired.clone();
+                    Ok(())
+                },
+                |value| {
+                    config_values.borrow_mut().push(value.to_string());
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(applied, expected);
+        }
+
+        assert_eq!(*current.borrow(), properties("2026-08-01", "2026-08-01"));
+        assert_eq!(
+            *config_values.borrow(),
+            vec!["2026-07-01".to_string(), "2026-08-01".to_string()]
+        );
+        assert_eq!(
+            load_snapshot(&path).unwrap().unwrap().properties(),
+            defaults
+        );
+    }
+
+    #[test]
+    fn sync_keeps_the_published_date_for_other_default_days() {
+        for (system_default, vendor_default) in
+            [("2025-06-05", "2025-06-01"), ("2025-06-02", "2025-06-01")]
+        {
+            let defaults = SecurityPatchDefaults::new(
+                "brand/product/device:17/id/release-keys",
+                &properties(system_default, vendor_default),
+            )
+            .unwrap();
+            assert_eq!(
+                synchronized_security_patch_date("2026-08-05", &defaults),
+                "2026-08-05"
+            );
+            assert_eq!(
+                synchronized_security_patch_date("2026-08-01", &defaults),
+                "2026-08-01"
+            );
+        }
+    }
+
+    #[test]
+    fn sync_refreshes_the_day_convention_after_a_build_change() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security_patch_defaults.toml");
+        persist_snapshot(
+            &path,
+            &SecurityPatchDefaults::new(
+                "brand/product/device:16/old/release-keys",
+                &properties("2025-06-05", "2025-06-05"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let new_defaults = properties("2025-07-01", "2025-07-05");
+        let current = RefCell::new(properties("2026-07-05", "2026-07-05"));
+        let default_reads = RefCell::new(0_u32);
+        let configured = RefCell::new(None);
+
+        let applied = apply_webui_security_patch_with(
+            "2026-08-05",
+            PatchOperation {
+                config_file: &synchronized_config("2026-07-05"),
+                state_path: &path,
+                fingerprint: "brand/product/device:17/new/release-keys",
+            },
+            || Ok(current.borrow().clone()),
+            || {
+                *default_reads.borrow_mut() += 1;
+                Ok(new_defaults.clone())
+            },
+            |before, desired| {
+                assert_eq!(&*current.borrow(), before);
+                *current.borrow_mut() = desired.clone();
+                Ok(())
+            },
+            |value| {
+                *configured.borrow_mut() = Some(value.to_string());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(applied, "2026-08-01");
+        assert_eq!(*default_reads.borrow(), 1);
+        assert_eq!(*configured.borrow(), Some("2026-08-01".to_string()));
+        assert_eq!(*current.borrow(), properties("2026-08-01", "2026-08-01"));
+        let snapshot = load_snapshot(&path).unwrap().unwrap();
+        assert_eq!(
+            snapshot.build_fingerprint,
+            "brand/product/device:17/new/release-keys"
+        );
+        assert_eq!(snapshot.properties(), new_defaults);
+    }
+
+    #[test]
+    fn adjusted_sync_rolls_properties_back_when_config_write_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security_patch_defaults.toml");
+        let fingerprint = "brand/product/device:17/id/release-keys";
+        let defaults = properties("2025-06-01", "2025-06-05");
+        persist_snapshot(
+            &path,
+            &SecurityPatchDefaults::new(fingerprint, &defaults).unwrap(),
+        )
+        .unwrap();
+        let current = RefCell::new(defaults.clone());
+        let writes = RefCell::new(Vec::new());
+
+        let error = apply_webui_security_patch_with(
+            "2026-08-05",
+            PatchOperation {
+                config_file: &ConfigFile::default(),
+                state_path: &path,
+                fingerprint,
+            },
+            || Ok(current.borrow().clone()),
+            || panic!("matching snapshot should be reused"),
+            |before, desired| {
+                assert_eq!(&*current.borrow(), before);
+                writes.borrow_mut().push(desired.clone());
+                *current.borrow_mut() = desired.clone();
+                Ok(())
+            },
+            |value| {
+                assert_eq!(value, "2026-08-01");
+                Err(anyhow!("config write failed"))
+            },
+        )
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("runtime properties were restored"));
+        assert_eq!(*current.borrow(), defaults);
+        assert_eq!(
+            *writes.borrow(),
+            vec![
+                properties("2026-08-01", "2026-08-01"),
+                properties("2025-06-01", "2025-06-05"),
+            ]
+        );
+        assert!(path.exists());
     }
 
     #[test]
@@ -677,7 +865,7 @@ mod tests {
         let current = RefCell::new(properties("2026-02-05", "2026-02-05"));
         let config_values = RefCell::new(Vec::new());
 
-        apply_webui_security_patch_with(
+        let applied = apply_webui_security_patch_with(
             "auto",
             PatchOperation {
                 config_file: &synchronized_config("2026-02-05"),
@@ -698,6 +886,7 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(applied, "auto");
         assert_eq!(
             *current.borrow(),
             properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)

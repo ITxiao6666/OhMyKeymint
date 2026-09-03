@@ -170,8 +170,8 @@ async function syncSecurityPatch(): Promise<void> {
       return
     }
     const date = await fetchLatestSecurityPatch(() => cli.fetchSecurityBulletin())
-    await cli.syncSecurityPatch(date)
-    snackbar.show(i18n.t('prompt_security_patch_synced_date', date))
+    const appliedDate = await cli.syncSecurityPatch(date)
+    snackbar.show(i18n.t('prompt_security_patch_synced_date', appliedDate))
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     console.error('Unable to sync the security patch:', error)
