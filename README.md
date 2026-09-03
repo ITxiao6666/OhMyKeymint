@@ -18,14 +18,17 @@ In theory, this would make it harder for detectors to identify behavior inconsis
 
 2. [Configure OMK](docs/CONFIGURATION.md) if needed.
 
-3. Replace template keybox.xml (if you need)
+3. Change the active keybox.xml from the WebUI (if you need)
 
 The keybox file must contain at least one complete RSA or EC entry, and every
 private key present must match its certificate chain. A keybox may contain both
 algorithms or only one; RKP-extracted keyboxes are legitimately EC-only. Keep
 the XML free of extra content such as watermarks or invisible characters. The
-embedded WebUI can install a replacement through Android's standard file
-picker.
+embedded WebUI can browse shared storage and install a replacement. Its folder
+button also opens Android's generic file chooser, so another installed storage
+app such as MT Manager can provide the file when the default picker does not
+expose it. The chooser requests all MIME types; the WebUI still requires an
+`.xml` file and the native helper performs the complete validation.
 
 The active files are `/data/misc/keystore/omk/config.toml` and
 `/data/misc/keystore/omk/injector.toml`. Read the
@@ -66,7 +69,9 @@ that original snapshot. Each sync writes the selected date to all four
 `[trust]` patch-level fields and applies it to both runtime properties with
 `resetprop`. While that valid snapshot remains, keymint reapplies the paired
 property values at startup. A manually configured exact date without the
-snapshot continues to use the normal configuration behavior.
+snapshot continues to use the normal configuration behavior. After a
+successful sync, the WebUI reports completion and asks you to reboot; it does
+not reboot the device automatically.
 
 **Restore default security patch** does not use the network. It restores both
 runtime properties from the saved snapshot, sets `security_patch`,
@@ -101,8 +106,8 @@ instances use the original values.
 
 Both network actions use the bundled native HTTPS client and require neither
 `curl` nor `wget`. Other WebUI operations remain local. The WebUI can also read
-and replace `scoop` and select a local XML file through Android's standard file
-picker to replace the active keybox. The security-patch actions do not change
+and replace `scoop` and select a local XML file from shared storage or through
+another installed file app to replace the active keybox. The security-patch actions do not change
 secrets, identity fields, or other settings.
 
 Saving `scoop` is delegated to the native `inject` helper, which validates the

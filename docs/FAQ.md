@@ -139,7 +139,9 @@ first restores both properties from that snapshot, then sets `security_patch`,
 preserving all other configuration values. The snapshot is deleted only after
 the properties and configuration are restored successfully. These properties
 are global runtime state for the current boot, so other processes can observe
-their synchronized or restored values.
+their synchronized or restored values. After a successful synchronization, the
+WebUI shows a completion message and asks you to reboot the device; it does not
+reboot automatically.
 
 A network, HTTP, or parsing failure occurs before anything is changed. Snapshot
 validation or creation failures also leave the properties and configuration
@@ -149,8 +151,12 @@ to restore the preceding property values. A failed restore keeps the snapshot
 available for another attempt and reports the error in the WebUI.
 
 The WebUI also reads and replaces `scoop` and can install a local XML file
-selected through Android's standard file picker as the active keybox. It does
-not change `[crypto]`, device identity, or unrelated configuration settings.
+selected from shared storage as the active keybox. Its built-in selector has a
+folder action that opens Android's generic chooser, allowing another installed
+app such as MT Manager to provide the file. That chooser requests all MIME
+types because providers may label XML as `text/plain` or
+`application/octet-stream`; the WebUI still requires an `.xml` filename. It
+does not change `[crypto]`, device identity, or unrelated configuration settings.
 Continue to manage those settings through the documented active files.
 
 ### What happens when the WebUI saves the app list?
@@ -341,11 +347,14 @@ tools accept damaged or incomplete XML that OMK correctly rejects.
 
 ### How should I replace `keybox.xml`?
 
-In the WebUI, choose the keybox replacement action and select the XML through
-Android's standard file picker. The native `keymint` helper checks the input
-size, decodes it as UTF-8, and performs the complete in-memory `KeyBox`
-validation, including private-key and certificate-chain matching. It atomically
-replaces the canonical lowercase
+In the WebUI, choose **Change Keybox**. You can browse shared storage in the
+built-in selector, or tap its folder action to open Android's generic chooser
+and select the file with another installed app such as MT Manager. The generic
+chooser requests all MIME types because providers may label XML as
+`text/plain` or `application/octet-stream`; the WebUI still requires an
+`.xml` filename. The native `keymint` helper checks the input size, decodes it
+as UTF-8, and performs the complete in-memory `KeyBox` validation, including
+private-key and certificate-chain matching. It atomically replaces the canonical lowercase
 `/data/misc/keystore/omk/keybox.xml` only after every check succeeds. A read,
 size, UTF-8, validation, or write failure leaves the current keybox unchanged.
 

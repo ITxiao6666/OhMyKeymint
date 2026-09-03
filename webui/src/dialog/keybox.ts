@@ -1,5 +1,6 @@
 import type { MdDialog, MdFilledButton, MdOutlinedButton } from '@material/web/all'
 import { Cli, MAX_KEYBOX_XML_BYTES } from '../cli'
+import type { FileSelector, SelectedFile } from '../file_selector/file_selector'
 import { i18n } from '../i18n'
 import { Snackbar } from '../snackbar/snackbar'
 import { isDev } from '../utils/dev'
@@ -8,21 +9,21 @@ import './dialog.scss'
 
 export class KeyboxDialog {
   #dialog: MdDialog | null = null
-  #fileInput: HTMLInputElement | null = null
-  #selectedFile: File | null = null
+  #selectedFile: SelectedFile | null = null
   #busy = false
   readonly #cli: Cli
   readonly #snackbar: Snackbar
+  readonly #fileSelector: FileSelector
 
-  constructor(cli: Cli, snackbar: Snackbar) {
+  constructor(cli: Cli, snackbar: Snackbar, fileSelector: FileSelector) {
     this.#cli = cli
     this.#snackbar = snackbar
+    this.#fileSelector = fileSelector
   }
 
   getElement(): DocumentFragment {
     const template = document.createElement('template')
     template.innerHTML = /* html */ `
-      <input id="keybox-file-input" type="file" accept="*/*" hidden>
       <md-dialog id="keybox-dialog">
         <div slot="headline"></div>
         <div slot="content" class="keybox-dialog-content">
@@ -37,9 +38,7 @@ export class KeyboxDialog {
 
     const fragment = template.content
     const dialog = fragment.querySelector<MdDialog>('#keybox-dialog')!
-    const fileInput = fragment.querySelector<HTMLInputElement>('#keybox-file-input')!
     this.#dialog = dialog
-    this.#fileInput = fileInput
 
     fragment.querySelector<HTMLElement>('#keybox-dialog [slot="headline"]')!.textContent =
       i18n.t('replace_keybox_title')
@@ -51,7 +50,6 @@ export class KeyboxDialog {
     replaceButton.textContent = i18n.t('functional_button_replace')
     replaceButton.onclick = () => void this.#install()
 
-    fileInput.addEventListener('change', () => this.#handleSelection())
     dialog.addEventListener('closed', () => {
       if (!this.#busy) this.#clearSelection()
     })
@@ -68,9 +66,8 @@ export class KeyboxDialog {
   }
 
   choose(): void {
-    if (!this.#fileInput || this.#busy) return
-    this.#fileInput.value = ''
-    this.#fileInput.click()
+    if (this.#busy || this.#dialog?.open) return
+    void this.#chooseFile()
   }
 
   close(): boolean {
@@ -79,34 +76,31 @@ export class KeyboxDialog {
     return true
   }
 
-  #handleSelection(): void {
-    const file = this.#fileInput?.files?.[0]
-    if (!file) return
-    if (!file.name.toLowerCase().endsWith('.xml')) {
-      this.#snackbar.show(i18n.t('prompt_keybox_xml_required'), false)
-      this.#clearSelection()
+  async #chooseFile(): Promise<void> {
+    let selected: SelectedFile | null
+    try {
+      selected = await this.#fileSelector.getFileContent('xml', MAX_KEYBOX_XML_BYTES)
+    } catch (error) {
+      console.error('Unable to open the keybox file selector:', error)
+      this.#snackbar.show(i18n.t('replace_keybox_storage_error'), false, 6000)
       return
     }
-    if (file.size > MAX_KEYBOX_XML_BYTES) {
-      this.#snackbar.show(i18n.t('prompt_keybox_too_large'), false)
-      this.#clearSelection()
-      return
-    }
+    if (!selected || this.#busy) return
 
-    this.#selectedFile = file
-    const selected = this.#dialog?.querySelector<HTMLElement>('.keybox-selected-file')
-    if (selected) selected.textContent = i18n.t('replace_keybox_selected_file', file.name)
+    this.#selectedFile = selected
+    const selectedLabel = this.#dialog?.querySelector<HTMLElement>('.keybox-selected-file')
+    if (selectedLabel) selectedLabel.textContent = i18n.t('replace_keybox_selected_file', selected.name)
     this.#dialog?.show()
   }
 
   async #install(): Promise<void> {
-    const file = this.#selectedFile
-    if (!file || this.#busy) return
+    const selected = this.#selectedFile
+    if (!selected || this.#busy) return
 
     this.#setBusy(true)
     let replaced = false
     try {
-      const contents = new Uint8Array(await file.arrayBuffer())
+      const contents = selected.contents
       if (contents.byteLength > MAX_KEYBOX_XML_BYTES) {
         throw new Error(i18n.t('prompt_keybox_too_large'))
       }
@@ -134,6 +128,5 @@ export class KeyboxDialog {
 
   #clearSelection(): void {
     this.#selectedFile = null
-    if (this.#fileInput) this.#fileInput.value = ''
   }
 }

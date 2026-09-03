@@ -1,0 +1,133 @@
+@scope (.file-selector-dialog) {
+  :scope {
+    --md-dialog-container-color: var(--md-sys-color-surface-container-high);
+    width: min(
+      640px,
+      calc(
+        100vw - var(--left-inset) - var(--right-inset) - 24px
+      )
+    );
+    max-height: min(
+      720px,
+      calc(
+        100dvh - var(--top-inset) - var(--bottom-inset) - 24px
+      )
+    );
+  }
+
+  .file-selector-headline {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .current-path {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    color: var(--md-sys-color-on-surface);
+    font-size: 0.95rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .file-selector-content {
+    display: flex;
+    min-height: min(52vh, 520px);
+    max-height: min(52vh, 520px);
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .file-list {
+    flex: 1;
+    min-height: 0;
+    padding: 8px 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .file-list.loading {
+    pointer-events: none;
+  }
+
+  .file-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    gap: 12px;
+    box-sizing: border-box;
+    padding: 8px 16px;
+    overflow: hidden;
+    border-radius: 8px;
+    color: var(--md-sys-color-on-surface);
+    user-select: none;
+    cursor: pointer;
+
+    &:hover {
+      background-color: var(--md-sys-color-surface-container);
+    }
+
+    &:active {
+      background-color: var(--md-sys-color-surface-container-highest);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--md-sys-color-primary);
+      outline-offset: -2px;
+    }
+
+    md-icon {
+      flex-shrink: 0;
+    }
+
+    span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .file-selector-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 160px;
+    box-sizing: border-box;
+    padding: 24px;
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: center;
+  }
+
+  .selector-actions-spacer {
+    flex: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  @scope (.file-selector-dialog) {
+    :scope {
+      width: calc(
+        100vw - var(--left-inset) - var(--right-inset) - 16px
+      );
+      max-height: calc(
+        100dvh - var(--top-inset) - var(--bottom-inset) - 16px
+      );
+    }
+
+    .file-selector-content {
+      min-height: min(58vh, 520px);
+      max-height: min(58vh, 520px);
+    }
+
+    .file-item {
+      min-height: 52px;
+      padding-inline: 12px;
+    }
+  }
+}

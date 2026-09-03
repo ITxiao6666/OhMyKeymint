@@ -69,7 +69,11 @@ KernelSU. With Magisk, open an installed KSUWebUIStandalone or WebUI X host and
 select Oh My Keymint; the module does not install either host.
 
 The WebUI can read and replace the `scoop` package list and can install a local
-keybox selected through Android's standard file picker. Its **Sync security
+keybox selected from shared storage. The built-in selector's folder action also
+opens Android's generic file chooser, allowing another installed storage app
+such as MT Manager to provide the XML. The chooser requests all MIME types so
+providers that label XML as `text/plain` or `application/octet-stream` remain
+available; the WebUI still requires an `.xml` filename. Its **Sync security
 patch** action uses the root WebUI bridge to make an HTTPS request to the
 official `https://source.android.com/docs/security/bulletin/asb-overview` page,
 falling back to Google's official Chinese mirror when the primary host is
@@ -373,17 +377,21 @@ saved system default of `2025-06-01` synchronizes `2026-08-01`, while
 current-month patch month. It requires network access to Google's official
 bulletin host or mirror; if access or parsing fails, no file or property is
 changed. The native helper validates the selected date again and preserves all
-unrelated configuration values.
+unrelated configuration values. After a successful sync, the WebUI shows a
+completion message asking you to reboot the device; it does not reboot
+automatically.
 
-Before changing runtime properties for the first sync, the helper reads
-`ro.build.version.security_patch` and `ro.vendor.build.security_patch` and
-atomically saves both defaults to
-`/data/misc/keystore/omk/data/security_patch_defaults.toml`. An existing valid
-snapshot is retained across repeated syncs. The helper then sets both properties
-to the selected date with `resetprop` and verifies the results. After that, it
-writes the date to `security_patch`, `os_patchlevel`, `vendor_patchlevel`, and
-`boot_patchlevel`. These are global Android properties for the current boot,
-not values visible only to OMK.
+Before changing runtime properties for the first sync, the helper atomically
+saves both default properties to
+`/data/misc/keystore/omk/data/security_patch_defaults.toml`. When all four
+`[trust]` patch-level fields are `auto`, those defaults are read from the
+current runtime properties; for an explicit date or a mixed configuration, they
+are read from the trusted `build.prop` sources. An existing valid snapshot for
+the same build fingerprint is retained across repeated syncs. The helper then
+sets both properties to the selected date with `resetprop` and verifies the
+results. After that, it writes the date to `security_patch`, `os_patchlevel`,
+`vendor_patchlevel`, and `boot_patchlevel`. These are global Android properties
+for the current boot, not values visible only to OMK.
 
 While a valid defaults snapshot exists and all four configuration fields still
 contain the same exact date, keymint reapplies that date to both properties at
@@ -394,9 +402,9 @@ the optional snapshot cannot be read or validated during startup, keymint logs
 the error, skips this paired reapply, and continues its normal initialization.
 
 The WebUI **Restore default security patch** action uses the saved snapshot and
-does not access the network. If the snapshot is absent, the helper first
-reconstructs it from the current build's trusted property sources. It restores
-both properties first, writes `"auto"` to `security_patch`, `os_patchlevel`,
+does not access the network. If the snapshot is absent, the helper records the
+current runtime properties as the restore values. It restores both properties
+first, writes `"auto"` to `security_patch`, `os_patchlevel`,
 `vendor_patchlevel`, and `boot_patchlevel`, and deletes the snapshot only when
 every step succeeds. It preserves every other configuration value. A malformed
 or unverifiable snapshot stops the operation before either property or the

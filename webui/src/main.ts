@@ -20,6 +20,7 @@ import { AppList } from './app_list/app_list'
 import { Cli } from './cli'
 import { ConfigOhMyKeyMint } from './config_ohmykeymint'
 import { KeyboxDialog } from './dialog/keybox'
+import { FileSelector } from './file_selector/file_selector'
 import { PifFingerprintDialog } from './dialog/pif_fingerprint'
 import { SystemAppDialog } from './dialog/system_app'
 import { History } from './history'
@@ -150,7 +151,11 @@ dialogContent.appendChild(systemAppDialog.getElement())
 systemAppDialog.initAnimation()
 mainMenu.on('menu-add-system-app', () => systemAppDialog.show())
 
-const keyboxDialog = new KeyboxDialog(cli, snackbar)
+const fileSelector = new FileSelector()
+dialogContent.appendChild(fileSelector.getElement())
+fileSelector.initAnimation()
+
+const keyboxDialog = new KeyboxDialog(cli, snackbar, fileSelector)
 dialogContent.appendChild(keyboxDialog.getElement())
 keyboxDialog.initAnimation()
 mainMenu.on('menu-install-keybox', () => keyboxDialog.choose())
@@ -171,7 +176,7 @@ async function syncSecurityPatch(): Promise<void> {
     }
     const date = await fetchLatestSecurityPatch(() => cli.fetchSecurityBulletin())
     const appliedDate = await cli.syncSecurityPatch(date)
-    snackbar.show(i18n.t('prompt_security_patch_synced_date', appliedDate))
+    snackbar.show(i18n.t('prompt_security_patch_sync_complete', appliedDate))
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     console.error('Unable to sync the security patch:', error)
@@ -207,6 +212,10 @@ dialogContent.querySelectorAll<MdDialog>('md-dialog').forEach((dialog, index) =>
           if (!keyboxDialog.close()) history.push(id, closeFromHistory)
         }, 0)
       }
+      return
+    }
+    if (id === 'file-selector-dialog') {
+      fileSelector.close()
       return
     }
     if (id === 'pif-fingerprint-dialog') {

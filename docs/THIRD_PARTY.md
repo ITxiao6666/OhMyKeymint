@@ -15,10 +15,12 @@ Keymint WebUI. It reads and replaces the OMK `scoop` list through the native
 `inject` helper. That adapted portion does not provide network access, module
 self-update, property modification, trust editing, or automatic WebUI-host
 installation. Oh My Keymint separately provides a keybox action that validates
-and atomically installs a local XML file, plus a security-patch action that
-downloads Google's official Android Security Bulletin and updates only the four
-`[trust]` patch-level fields. Its separate restore action resets those fields
-to `auto` without network access.
+and atomically installs a local XML file. Its security-patch action downloads
+Google's official Android Security Bulletin, updates the four `[trust]`
+patch-level fields, applies the selected date to both runtime security-patch
+properties with `resetprop`, and records the original values for restore. Its
+separate restore action restores those properties and resets the four fields to
+`auto` without network access.
 
 ## Pixel PIF profile feed
 
