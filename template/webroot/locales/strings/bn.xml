@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">নিরাপত্তা প্যাচ %s পর্যন্ত সিঙ্ক হয়েছে।</string>
     <string name="prompt_security_patch_sync_complete">নিরাপত্তা প্যাচের %s তারিখের সিঙ্ক সম্পন্ন হয়েছে, ডিভাইসটি পুনরায় চালু করুন।</string>
     <string name="prompt_security_patch_sync_error">নিরাপত্তা প্যাচ সিঙ্ক করা যায়নি: %s</string>
-    <string name="prompt_security_patch_restored_default">ডিফল্ট নিরাপত্তা প্যাচ পুনরুদ্ধার করা হয়েছে।</string>
+    <string name="prompt_security_patch_restored_default">ডিফল্ট নিরাপত্তা প্যাচ পুনরুদ্ধার করা হয়েছে। ডিভাইসটি পুনরায় চালু করুন।</string>
     <string name="prompt_security_patch_restore_error">ডিফল্ট নিরাপত্তা প্যাচ পুনরুদ্ধার করা যায়নি: %s</string>
     <string name="add_system_app_title">সিস্টেম অ্যাপ যোগ করুন</string>
     <string name="replace_keybox_title">Keybox পরিবর্তন করুন</string>

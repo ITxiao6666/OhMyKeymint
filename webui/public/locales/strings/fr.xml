@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">Correctif de sécurité synchronisé sur %s.</string>
     <string name="prompt_security_patch_sync_complete">Synchronisation du correctif de sécurité pour %s terminée. Veuillez redémarrer l'appareil.</string>
     <string name="prompt_security_patch_sync_error">Impossible de synchroniser le correctif de sécurité : %s</string>
-    <string name="prompt_security_patch_restored_default">Correctif de sécurité par défaut restauré.</string>
+    <string name="prompt_security_patch_restored_default">Correctif de sécurité par défaut restauré. Veuillez redémarrer l'appareil.</string>
     <string name="prompt_security_patch_restore_error">Impossible de restaurer le correctif de sécurité par défaut : %s</string>
     <string name="add_system_app_title">Ajouter une application système</string>
     <string name="replace_keybox_title">Changer la Keybox</string>

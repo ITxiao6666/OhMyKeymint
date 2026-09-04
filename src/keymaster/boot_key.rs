@@ -163,6 +163,7 @@ pub fn get_level_zero_key(db: &mut KeymasterDb) -> Result<ZVec> {
             &key_desc,
             KeyType::Client,
             &params,
+            true,
             |key_characteristics| {
                 key_characteristics.iter().any(|kc| {
                     if kc.securityLevel != required_security_level {

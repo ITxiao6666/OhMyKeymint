@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">تمت مزامنة تصحيح الأمان إلى %s.</string>
     <string name="prompt_security_patch_sync_complete">اكتملت مزامنة تصحيح الأمان لـ %s، يُرجى إعادة تشغيل الجهاز.</string>
     <string name="prompt_security_patch_sync_error">تعذّرت مزامنة تصحيح الأمان: %s</string>
-    <string name="prompt_security_patch_restored_default">تمت استعادة تصحيح الأمان الافتراضي.</string>
+    <string name="prompt_security_patch_restored_default">تمت استعادة تصحيح الأمان الافتراضي، يُرجى إعادة تشغيل الجهاز.</string>
     <string name="prompt_security_patch_restore_error">تعذّرت استعادة تصحيح الأمان الافتراضي: %s</string>
     <string name="add_system_app_title">إضافة تطبيق نظام</string>
     <string name="replace_keybox_title">تغيير Keybox</string>

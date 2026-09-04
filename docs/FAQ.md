@@ -91,13 +91,15 @@ guaranteed to work on another device.
 
 ### What happens if I disable or uninstall OMK?
 
-Disable or remove it in the root manager and reboot. Keys created through OMK
-are not converted into normal System keys, so some selected apps may ask you
-to sign in or register again after OMK is disabled.
+Disable it in the root manager when you need to keep OMK's persistent data.
+Keys created through OMK are not converted into normal System keys, so some
+selected apps may ask you to sign in or register again after OMK is disabled.
 
-OMK's persistent data is stored outside the module folder and may remain after
-uninstallation. Do not delete it merely to make an uninstall look clean.
-Deleting it can permanently remove keys that apps still need.
+When **Oh My Keymint is uninstalled from KernelSU**, its uninstaller removes
+exactly `/data/adb/omk` and `/data/misc/keystore/omk` before the module directory
+is deleted. This permanently removes OMK configuration, logs, keybox data, and
+OMK-created keys; affected apps may need to be registered or signed in again.
+Reboot after the uninstall. Disabling the module does not run this cleanup.
 
 ## Choosing apps and changing settings
 
@@ -125,20 +127,12 @@ date with `resetprop`. Before the first sync, it saves both current property
 values in
 `/data/misc/keystore/omk/data/security_patch_defaults.toml`; repeated syncs keep
 the existing defaults snapshot. While that snapshot remains valid and all four
-patch fields still hold one exact date, a standard boot first replays the paired
-properties from `post-fs-data` with `resetprop -n`, before Zygote/framework
-processes cache `Build.VERSION.SECURITY_PATCH`. In KernelSU late-load mode,
-`late-load.sh` replaces that stage: it runs the early replay, reconciles the
-managed `system.prop` entry, and finishes before module properties are loaded;
-`post-mount.sh` then replays the properties again after mounting. On a
-standard KernelSU boot, `post-mount.sh` replays once more after module
-properties are loaded, and KeyMint repeats the replay at daemon startup as a
-fallback. The early path can use the validated snapshot while the build
-fingerprint is still unavailable; the daemon performs the strict fingerprint
-and OTA refresh later. If an early hook cannot run, it logs a warning and continues
-boot; a manual exact-date configuration without the snapshot does not trigger
-this additional vendor-property write. The native client
-validates TLS with embedded WebPKI roots, so the device does not need to
+patch fields still hold one exact date, the module's early boot hook reapplies
+the paired properties before Android framework values are cached; keymint also
+reapplies them at startup. A manual exact-date configuration without the
+snapshot does not trigger that additional vendor-property write. A snapshot
+error skips this optional reapply without preventing keymint from starting. The native
+client validates TLS with embedded WebPKI roots, so the device does not need to
 provide `curl` or `wget`. HTTPS redirects are accepted only when the final URL
 remains the official bulletin page.
 
@@ -148,9 +142,9 @@ first restores both properties from that snapshot, then sets `security_patch`,
 preserving all other configuration values. The snapshot is deleted only after
 the properties and configuration are restored successfully. These properties
 are global runtime state for the current boot, so other processes can observe
-their synchronized or restored values. After a successful synchronization, the
-WebUI shows a completion message and asks you to reboot the device; it does not
-reboot automatically.
+their synchronized or restored values. After a successful synchronization or
+restore, the WebUI shows a completion message and asks you to reboot the device;
+it does not reboot automatically.
 
 A network, HTTP, or parsing failure occurs before anything is changed. Snapshot
 validation or creation failures also leave the properties and configuration

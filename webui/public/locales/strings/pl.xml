@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">Zsynchronizowano poprawkę zabezpieczeń z datą %s.</string>
     <string name="prompt_security_patch_sync_complete">Synchronizacja poprawki zabezpieczeń dla %s zakończona. Uruchom ponownie urządzenie.</string>
     <string name="prompt_security_patch_sync_error">Nie udało się zsynchronizować poprawki zabezpieczeń: %s</string>
-    <string name="prompt_security_patch_restored_default">Przywrócono domyślną poprawkę zabezpieczeń.</string>
+    <string name="prompt_security_patch_restored_default">Przywrócono domyślną poprawkę zabezpieczeń. Uruchom ponownie urządzenie.</string>
     <string name="prompt_security_patch_restore_error">Nie udało się przywrócić domyślnej poprawki zabezpieczeń: %s</string>
     <string name="add_system_app_title">Dodaj aplikację systemową</string>
     <string name="replace_keybox_title">Zmień Keybox</string>

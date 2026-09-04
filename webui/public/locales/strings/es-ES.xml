@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">Parche de seguridad sincronizado con %s.</string>
     <string name="prompt_security_patch_sync_complete">Sincronización del parche de seguridad para %s completada. Reinicia el dispositivo.</string>
     <string name="prompt_security_patch_sync_error">No se pudo sincronizar el parche de seguridad: %s</string>
-    <string name="prompt_security_patch_restored_default">Parche de seguridad predeterminado restaurado.</string>
+    <string name="prompt_security_patch_restored_default">Parche de seguridad predeterminado restaurado. Reinicia el dispositivo.</string>
     <string name="prompt_security_patch_restore_error">No se pudo restaurar el parche de seguridad predeterminado: %s</string>
     <string name="add_system_app_title">Añadir aplicación del sistema</string>
     <string name="replace_keybox_title">Cambiar Keybox</string>

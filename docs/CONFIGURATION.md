@@ -103,6 +103,11 @@ configuration update succeed; a failed restore retains it for another attempt.
 The two properties are global Android runtime state for the current boot, so
 every process that reads them can observe the synchronized or restored values.
 
+When Oh My Keymint is uninstalled from KernelSU, the bundled uninstaller removes
+exactly `/data/adb/omk` and `/data/misc/keystore/omk`. This includes the active
+configuration, keybox, logs, and OMK-created key data and cannot be undone. A
+module disable does not remove these directories; reboot after an uninstall.
+
 The **Spoof PIF fingerprint** action is a separate OMK Zygisk integration. It
 downloads a Pixel device list from
 `KOWX712/PlayIntegrityFix`'s `bot/device_list.json`, then downloads the selected
@@ -377,8 +382,8 @@ saved system default of `2025-06-01` synchronizes `2026-08-01`, while
 current-month patch month. It requires network access to Google's official
 bulletin host or mirror; if access or parsing fails, no file or property is
 changed. The native helper validates the selected date again and preserves all
-unrelated configuration values. After a successful sync, the WebUI shows a
-completion message asking you to reboot the device; it does not reboot
+unrelated configuration values. After a successful sync or restore, the WebUI
+shows a completion message asking you to reboot the device; it does not reboot
 automatically.
 
 Before changing runtime properties for the first sync, the helper atomically
@@ -394,21 +399,14 @@ results. After that, it writes the date to `security_patch`, `os_patchlevel`,
 for the current boot, not values visible only to OMK.
 
 While a valid defaults snapshot exists and all four configuration fields still
-contain the same exact date, a standard boot first reapplies that date to both
-properties from its blocking `post-fs-data` hook with `resetprop -n`, before
-Zygote/framework processes cache `Build.VERSION.SECURITY_PATCH`. In KernelSU
-late-load mode, `late-load.sh` replaces that stage: it runs the early replay,
-reconciles the managed `system.prop` entry, and finishes before KernelSU loads
-module properties; `post-mount.sh` then replays the properties again after
-mounting. On a standard KernelSU boot, `post-mount.sh` replays the properties
-after module properties are loaded, and KeyMint repeats the replay at daemon
-startup as a fallback. The early path uses the validated snapshot even if the
-build fingerprint is not available yet; the daemon performs the strict
-fingerprint/OTA refresh later. If an early hook cannot run or the snapshot
-cannot be read, it logs a warning and continues boot. The snapshot is the
-persistent marker for a WebUI synchronization: a manually
-authored exact-date configuration without a snapshot follows the normal
-patch-level path and does not cause an extra vendor-property write.
+contain the same exact date, the module's early boot hook reapplies that date to
+both properties before Android framework values are cached. Keymint also
+reapplies the pair at startup. The snapshot is the persistent marker for a
+WebUI synchronization: a manually authored exact-date configuration without a
+snapshot follows the normal patch-level path and does not cause an extra
+vendor-property write. If the optional snapshot cannot be read or validated,
+both paths skip this paired reapply and keymint continues its normal
+initialization.
 
 The WebUI **Restore default security patch** action uses the saved snapshot and
 does not access the network. If the snapshot is absent, the helper records the

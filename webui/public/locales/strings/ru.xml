@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">Патч безопасности синхронизирован до %s.</string>
     <string name="prompt_security_patch_sync_complete">Синхронизация патча безопасности для %s завершена. Перезагрузите устройство.</string>
     <string name="prompt_security_patch_sync_error">Не удалось синхронизировать патч безопасности: %s</string>
-    <string name="prompt_security_patch_restored_default">Патч безопасности по умолчанию восстановлен.</string>
+    <string name="prompt_security_patch_restored_default">Патч безопасности по умолчанию восстановлен. Перезагрузите устройство.</string>
     <string name="prompt_security_patch_restore_error">Не удалось восстановить патч безопасности по умолчанию: %s</string>
     <string name="add_system_app_title">Добавить системное приложение</string>
     <string name="replace_keybox_title">Сменить Keybox</string>

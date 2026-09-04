@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">Təhlükəsizlik yaması %s tarixinə sinxronlaşdırıldı.</string>
     <string name="prompt_security_patch_sync_complete">Təhlükəsizlik yamasının %s üçün sinxronizasiyası tamamlandı, cihazı yenidən başladın.</string>
     <string name="prompt_security_patch_sync_error">Təhlükəsizlik yamasını sinxronlaşdırmaq mümkün olmadı: %s</string>
-    <string name="prompt_security_patch_restored_default">Standart təhlükəsizlik yaması bərpa edildi.</string>
+    <string name="prompt_security_patch_restored_default">Standart təhlükəsizlik yaması bərpa edildi, cihazı yenidən başladın.</string>
     <string name="prompt_security_patch_restore_error">Standart təhlükəsizlik yamasını bərpa etmək mümkün olmadı: %s</string>
     <string name="add_system_app_title">Sistem Tətbiqi Əlavə et</string>
     <string name="replace_keybox_title">Keybox-u dəyişdir</string>

@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">Güvenlik yaması %s tarihine eşitlendi.</string>
     <string name="prompt_security_patch_sync_complete">%s güvenlik yaması eşitlemesi tamamlandı. Lütfen cihazı yeniden başlatın.</string>
     <string name="prompt_security_patch_sync_error">Güvenlik yaması eşitlenemedi: %s</string>
-    <string name="prompt_security_patch_restored_default">Varsayılan güvenlik yaması geri yüklendi.</string>
+    <string name="prompt_security_patch_restored_default">Varsayılan güvenlik yaması geri yüklendi. Lütfen cihazı yeniden başlatın.</string>
     <string name="prompt_security_patch_restore_error">Varsayılan güvenlik yaması geri yüklenemedi: %s</string>
     <string name="add_system_app_title">Sistem Uygulaması Ekle</string>
     <string name="replace_keybox_title">Keybox'ı değiştir</string>

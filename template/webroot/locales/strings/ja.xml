@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">セキュリティパッチを %s に同期しました。</string>
     <string name="prompt_security_patch_sync_complete">セキュリティパッチ %s の同期が完了しました。端末を再起動してください。</string>
     <string name="prompt_security_patch_sync_error">セキュリティパッチの同期に失敗しました：%s</string>
-    <string name="prompt_security_patch_restored_default">デフォルトのセキュリティパッチに戻しました。</string>
+    <string name="prompt_security_patch_restored_default">デフォルトのセキュリティパッチに戻しました。端末を再起動してください。</string>
     <string name="prompt_security_patch_restore_error">デフォルトのセキュリティパッチへの復元に失敗しました：%s</string>
     <string name="add_system_app_title">システムアプリを追加</string>
     <string name="replace_keybox_title">Keyboxを変更</string>

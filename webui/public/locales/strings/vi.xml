@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">Đã đồng bộ bản vá bảo mật đến %s.</string>
     <string name="prompt_security_patch_sync_complete">Đã hoàn tất đồng bộ bản vá bảo mật cho %s. Vui lòng khởi động lại thiết bị.</string>
     <string name="prompt_security_patch_sync_error">Không thể đồng bộ bản vá bảo mật: %s</string>
-    <string name="prompt_security_patch_restored_default">Đã khôi phục bản vá bảo mật mặc định.</string>
+    <string name="prompt_security_patch_restored_default">Đã khôi phục bản vá bảo mật mặc định. Vui lòng khởi động lại thiết bị.</string>
     <string name="prompt_security_patch_restore_error">Không thể khôi phục bản vá bảo mật mặc định: %s</string>
     <string name="add_system_app_title">Thêm ứng dụng hệ thống</string>
     <string name="replace_keybox_title">Thay đổi Keybox</string>

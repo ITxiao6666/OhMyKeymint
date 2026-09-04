@@ -327,6 +327,7 @@ impl KeyMintDevice {
         key_desc: &KeyDescriptor,
         key_type: KeyType,
         params: &[KeyParameter],
+        allow_invalid_key_blob_upgrade: bool,
         validate_characteristics: F,
     ) -> Result<(KeyIdGuard, KeyBlob<'_>)>
     where
@@ -355,30 +356,88 @@ impl KeyMintDevice {
                 });
 
             if let Some(key_blob_vec) = key_blob {
-                let (key_characteristics, key_blob) = self
-                    .upgrade_keyblob_if_required_with(
-                        db,
-                        &key_id_guard,
-                        KeyBlob::NonSensitive(key_blob_vec),
-                        |key_blob| {
-                            map_km_error({
-                                let _wp = wd::watch(concat!(
-                                    "KeyMintDevice::lookup_or_generate_key: ",
-                                    "calling IKeyMintDevice::getKeyCharacteristics."
-                                ));
-                                self.km_dev.getKeyCharacteristics(key_blob, &[], &[])
-                            })
-                        },
-                    )
-                    .context(err!("calling getKeyCharacteristics"))?;
+                // Keep a copy because the normal upgrade helper takes ownership of its
+                // `KeyBlob`; the boot-level recovery path may need to retry the original bytes.
+                let original_key_blob = key_blob_vec.clone();
+                let get_characteristics = |key_blob: &[u8]| {
+                    map_km_error({
+                        let _wp = wd::watch(concat!(
+                            "KeyMintDevice::lookup_or_generate_key: ",
+                            "calling IKeyMintDevice::getKeyCharacteristics."
+                        ));
+                        self.km_dev.getKeyCharacteristics(key_blob, &[], &[])
+                    })
+                };
+                let existing_key = self.upgrade_keyblob_if_required_with(
+                    db,
+                    &key_id_guard,
+                    KeyBlob::NonSensitive(key_blob_vec),
+                    get_characteristics,
+                );
+
+                let (key_characteristics, key_blob, recovered_invalid_blob) = match existing_key {
+                    Ok((key_characteristics, key_blob)) => (key_characteristics, key_blob, false),
+                    Err(error)
+                        if allow_invalid_key_blob_upgrade
+                            && matches!(
+                                error.root_cause().downcast_ref::<Error>(),
+                                Some(Error::Km(ErrorCode::INVALID_KEY_BLOB))
+                            ) =>
+                    {
+                        // The boot-level key is module-owned and may have been created while a
+                        // synchronized security patch was active.  Ask the same KeyMint TA to
+                        // rewrite its patch-level authorizations so the key material and derived
+                        // boot-level encryption keys remain unchanged after restoring defaults.
+                        let upgraded_blob = {
+                            let _wp = wd::watch(
+                                "KeyMintDevice::lookup_or_generate_key: calling IKeyMintDevice::upgradeKey for boot-level key",
+                            );
+                            map_km_error(self.km_dev.upgradeKey(&original_key_blob, &[]))
+                        }
+                        .context(err!("upgrading invalid boot-level keyblob"))?;
+                        if upgraded_blob.is_empty() {
+                            return Err(Error::Km(ErrorCode::INVALID_KEY_BLOB)).context(err!(
+                                "upgradeKey returned an empty blob for invalid boot-level key"
+                            ));
+                        }
+
+                        let mut new_blob_metadata = BlobMetaData::new();
+                        new_blob_metadata.add(BlobMetaEntry::KmUuid(*self.km_uuid.read().unwrap()));
+                        db.set_blob(
+                            &key_id_guard,
+                            SubComponentType::KEY_BLOB,
+                            Some(&upgraded_blob),
+                            Some(&new_blob_metadata),
+                        )
+                        .context(err!("failed to persist upgraded boot-level keyblob"))?;
+
+                        let key_characteristics = get_characteristics(&upgraded_blob).context(
+                            err!("calling getKeyCharacteristics after boot-level keyblob upgrade"),
+                        )?;
+                        (
+                            key_characteristics,
+                            KeyBlob::NonSensitive(upgraded_blob),
+                            true,
+                        )
+                    }
+                    Err(error) => {
+                        return Err(error).context(err!("calling getKeyCharacteristics"));
+                    }
+                };
 
                 if validate_characteristics(&key_characteristics) {
                     return Ok((key_id_guard, key_blob));
                 }
 
+                if recovered_invalid_blob {
+                    return Err(Error::Km(ErrorCode::INVALID_KEY_BLOB)).context(err!(
+                        "upgraded boot-level keyblob failed characteristic validation"
+                    ));
+                }
+
                 // If this point is reached the existing key is considered outdated or corrupted
-                // in some way. It will be replaced with a new key below.
-            };
+                // in some way. It will be replaced with a new one below.
+            }
         }
 
         self.create_and_store_key(db, key_desc, key_type, |km_dev| {
@@ -1796,5 +1855,73 @@ mod tests {
             auth_token: None,
         }));
         assert_eq!(second_begin.error_code, ErrorCode::KEY_MAX_OPS_EXCEEDED.0);
+    }
+
+    #[test]
+    fn upgrade_key_rewraps_a_future_patchlevel_blob_after_restore() {
+        let mut ta = test_ta();
+        let boot_info = ta.process_req(PerformOpReq::SetBootInfo(kmr_wire::SetBootInfoRequest {
+            verified_boot_state: 0,
+            verified_boot_hash: vec![0; 32],
+            verified_boot_key: vec![0; 32],
+            device_boot_locked: true,
+            boot_patchlevel: 20260805,
+        }));
+        assert_eq!(boot_info.error_code, 0);
+        let hal_info = ta.process_req(PerformOpReq::SetHalInfo(SetHalInfoRequest {
+            os_version: 160000,
+            os_patchlevel: 202608,
+            vendor_patchlevel: 20260805,
+        }));
+        assert_eq!(hal_info.error_code, 0);
+
+        let generated = ta.process_req(PerformOpReq::DeviceGenerateKey(GenerateKeyRequest {
+            key_params: vec![
+                KeyParam::Purpose(kmr_wire::keymint::KeyPurpose::Sign),
+                KeyParam::Algorithm(kmr_wire::keymint::Algorithm::Hmac),
+                KeyParam::KeySize(KeySizeInBits(256)),
+                KeyParam::Digest(kmr_wire::keymint::Digest::Sha256),
+                KeyParam::MinMacLength(256),
+                KeyParam::NoAuthRequired,
+                KeyParam::EarlyBootOnly,
+            ],
+            attestation_key: None,
+        }));
+        assert_eq!(generated.error_code, 0);
+        let key_blob = match generated.rsp {
+            Some(PerformOpRsp::DeviceGenerateKey(response)) => response.ret.key_blob,
+            response => panic!("unexpected generate response: {response:?}"),
+        };
+
+        ta.update_patchlevels(202606, 20260605, 20260605)
+            .expect("patchlevel restore should succeed");
+        let invalid = ta.process_req(PerformOpReq::DeviceGetKeyCharacteristics(
+            GetKeyCharacteristicsRequest {
+                key_blob: key_blob.clone(),
+                app_id: vec![],
+                app_data: vec![],
+            },
+        ));
+        assert_eq!(invalid.error_code, ErrorCode::INVALID_KEY_BLOB.0);
+
+        let upgraded = ta.process_req(PerformOpReq::DeviceUpgradeKey(UpgradeKeyRequest {
+            key_blob_to_upgrade: key_blob,
+            upgrade_params: vec![],
+        }));
+        assert_eq!(upgraded.error_code, 0);
+        let upgraded_blob = match upgraded.rsp {
+            Some(PerformOpRsp::DeviceUpgradeKey(response)) => response.ret,
+            response => panic!("unexpected upgrade response: {response:?}"),
+        };
+        assert!(!upgraded_blob.is_empty());
+
+        let characteristics = ta.process_req(PerformOpReq::DeviceGetKeyCharacteristics(
+            GetKeyCharacteristicsRequest {
+                key_blob: upgraded_blob,
+                app_id: vec![],
+                app_data: vec![],
+            },
+        ));
+        assert_eq!(characteristics.error_code, 0);
     }
 }

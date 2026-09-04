@@ -29,7 +29,7 @@
     <string name="prompt_security_patch_synced_date">Η ενημέρωση ασφαλείας συγχρονίστηκε στο %s.</string>
     <string name="prompt_security_patch_sync_complete">Ο συγχρονισμός της ενημέρωσης ασφαλείας για %s ολοκληρώθηκε. Επανεκκινήστε τη συσκευή.</string>
     <string name="prompt_security_patch_sync_error">Αποτυχία συγχρονισμού της ενημέρωσης ασφαλείας: %s</string>
-    <string name="prompt_security_patch_restored_default">Η προεπιλεγμένη ενημέρωση ασφαλείας επαναφέρθηκε.</string>
+    <string name="prompt_security_patch_restored_default">Η προεπιλεγμένη ενημέρωση ασφαλείας επαναφέρθηκε. Επανεκκινήστε τη συσκευή.</string>
     <string name="prompt_security_patch_restore_error">Αποτυχία επαναφοράς της προεπιλεγμένης ενημέρωσης ασφαλείας: %s</string>
     <string name="add_system_app_title">Πρόσθεσε Εφαρμογή Συστήματος</string>
     <string name="replace_keybox_title">Αλλαγή Keybox</string>
