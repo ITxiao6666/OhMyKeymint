@@ -48,14 +48,22 @@ PIF_SPOOF_PACKAGE = "pif-spoof"
 PIF_SPOOF_LIBRARY = "libpif_spoof.so"
 
 REQUIRED_TEMPLATE_FILES = (
+    "AOSP.Apache-license-2.0.txt",
     "customize.sh",
     "daemon",
     "daemon-injector",
     "injector.toml",
+    "early-security-patch.sh",
+    "late-load.sh",
+    "keybox.xml",
     "module.prop",
     "post-fs-data.sh",
+    "post-mount.sh",
+    "sepolicy.rule",
     "service.sh",
     "verify.sh",
+    "META-INF/com/google/android/update-binary",
+    "META-INF/com/google/android/updater-script",
     "webroot",
 )
 
@@ -69,10 +77,13 @@ MODULE_TEXT_FILES = (
     "customize.sh",
     "daemon",
     "daemon-injector",
+    "early-security-patch.sh",
     "injector.toml",
+    "late-load.sh",
     "keybox.xml",
     "module.prop",
     "post-fs-data.sh",
+    "post-mount.sh",
     "sepolicy.rule",
     "service.sh",
     "verify.sh",

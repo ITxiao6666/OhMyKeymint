@@ -63,6 +63,9 @@ extract "$ZIPFILE" 'verify.sh'     "$TMPDIR/.vunzip"
 ui_print "- Extracting module files"
 extract "$ZIPFILE" 'module.prop'     "$MODPATH"
 extract "$ZIPFILE" 'post-fs-data.sh' "$MODPATH"
+extract "$ZIPFILE" 'post-mount.sh'   "$MODPATH"
+extract "$ZIPFILE" 'late-load.sh'    "$MODPATH"
+extract "$ZIPFILE" 'early-security-patch.sh' "$MODPATH"
 extract "$ZIPFILE" 'service.sh'      "$MODPATH"
 extract "$ZIPFILE" 'sepolicy.rule'   "$MODPATH"
 extract "$ZIPFILE" 'daemon'          "$MODPATH"
@@ -80,7 +83,9 @@ while IFS= read -r asset || [ -n "$asset" ]; do
 done < "$MODPATH/webroot.manifest"
 
 chmod 755 "$MODPATH/daemon" "$MODPATH/daemon-injector" \
-  "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh"
+  "$MODPATH/post-fs-data.sh" "$MODPATH/post-mount.sh" \
+  "$MODPATH/late-load.sh" "$MODPATH/early-security-patch.sh" \
+  "$MODPATH/service.sh"
 find "$MODPATH/webroot" -type d -exec chmod 0755 {} \;
 find "$MODPATH/webroot" -type f -exec chmod 0644 {} \;
 chmod 0644 "$MODPATH/webroot.manifest"
@@ -118,4 +123,23 @@ rm -f "$CONFIG_DIR/keymint" "$CONFIG_DIR/inject" "$CONFIG_DIR/injector" # clean 
 
 if [ ! -e "$CONFIG_DIR/omkdata" ] && [ ! -L "$CONFIG_DIR/omkdata" ]; then
   ln -s /data/misc/keystore/omk "$CONFIG_DIR/omkdata"
+fi
+
+# Preserve an active security-patch override across a module update.  The
+# durable file lives in OMK's data directory; this module-local entry is only
+# a boot-time view consumed by Magisk/KernelSU.  A failed symlink is replaced
+# with a regular copy because some module filesystems do not permit links.
+SECURITY_PATCH_PROP=/data/misc/keystore/omk/data/security_patch.prop
+SECURITY_PATCH_ENTRY_MARKER='# oh_my_keymint: managed security patch'
+if [ -r "$SECURITY_PATCH_PROP" ] && [ ! -e "$MODPATH/system.prop" ] && [ ! -L "$MODPATH/system.prop" ]; then
+  if ! ln -s "$SECURITY_PATCH_PROP" "$MODPATH/system.prop" 2>/dev/null; then
+    if {
+      printf '%s\n' "$SECURITY_PATCH_ENTRY_MARKER"
+      cat "$SECURITY_PATCH_PROP"
+    } > "$MODPATH/system.prop" 2>/dev/null; then
+      chmod 0644 "$MODPATH/system.prop" 2>/dev/null || true
+    else
+      ui_print "! Unable to preserve the security-patch property entry"
+    fi
+  fi
 fi

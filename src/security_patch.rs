@@ -27,6 +27,10 @@ use crate::{
 };
 
 const DEFAULTS_PATH: &str = root_path!("data/security_patch_defaults.toml");
+/// The only durable source for a synchronized system.prop override.  The
+/// module's `system.prop` entry is maintained by the installation scripts and
+/// points at this file when the active root implementation supports links.
+pub(crate) const SECURITY_PATCH_PROP_PATH: &str = root_path!("data/security_patch.prop");
 const ANDROID_SECURITY_BULLETIN_PATH: &str = "/docs/security/bulletin/asb-overview";
 const ANDROID_SECURITY_BULLETIN_HOSTS: [&str; 2] =
     ["source.android.com", "source.android.google.cn"];
@@ -38,6 +42,7 @@ const SNAPSHOT_VERSION: u32 = 1;
 const BUILD_FINGERPRINT_PROPERTY: &str = "ro.build.fingerprint";
 const MAX_SNAPSHOT_BYTES: u64 = 4096;
 const MAX_FINGERPRINT_BYTES: usize = 1024;
+const MAX_SECURITY_PATCH_PROP_BYTES: u64 = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -92,6 +97,11 @@ struct PatchOperation<'a> {
     config_file: &'a ConfigFile,
     state_path: &'a Path,
     fingerprint: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SecurityPatchOverrideState {
+    persistent_file: Option<Vec<u8>>,
 }
 
 pub(crate) struct OperationLock(File);
@@ -193,38 +203,377 @@ pub fn apply_webui_security_patch(value: &str) -> Result<String> {
     let fingerprint = current_build_fingerprint()?;
     let state_path = Path::new(DEFAULTS_PATH);
 
-    apply_webui_security_patch_with(
+    // Keep the module-facing `system.prop` entry synchronized with the
+    // durable data file as part of the same property/config transaction.  The
+    // generic transaction below is also used by unit tests with temporary
+    // paths, so this wrapper is deliberately where Android-specific state is
+    // captured and rolled back.
+    let previous_override = capture_security_patch_override_state()?;
+    let mut property_calls = 0usize;
+    let mut config_committed = false;
+    let mut property_writer = |before: &SecurityPatchProperties,
+                               desired: &SecurityPatchProperties|
+     -> Result<()> {
+        let is_rollback = property_calls != 0;
+        property_calls = property_calls.saturating_add(1);
+
+        if !is_rollback {
+            if value == "auto" {
+                deactivate_security_patch_override(&previous_override)
+                    .context("failed to remove the synchronized system.prop override")?;
+            } else {
+                activate_security_patch_override(desired, &previous_override)?;
+            }
+        }
+
+        // The callback always receives the currently observed value first and
+        // the value to write second.  On a config failure the generic
+        // transaction supplies those arguments in the reverse *semantic*
+        // order (the original desired value is now current), but the callback
+        // parameter names still describe the actual pair at this point.
+        let write_result =
+            resetprop::direct_write_and_verify_security_patch_properties(before, desired);
+
+        // A failed initial write, or a later config failure that invokes the
+        // paired rollback callback, must leave the module entry exactly as it
+        // was before the WebUI action.
+        if write_result.is_err() || is_rollback {
+            if let Err(restore_error) = restore_security_patch_override_state(&previous_override) {
+                return match write_result {
+                    Ok(()) => Err(restore_error)
+                        .context("security-patch property rollback completed with entry errors"),
+                    Err(write_error) => Err(anyhow!(
+                        "security-patch property update failed: {write_error:#}; system.prop rollback failed: {restore_error:#}"
+                    )),
+                };
+            }
+        }
+
+        write_result
+    };
+
+    let mut write_config = |effective_value: &str| {
+        let result = persist_and_verify_config(effective_value);
+        if result.is_ok() {
+            config_committed = true;
+        }
+        result
+    };
+
+    let result = apply_webui_security_patch_with(
         value,
         PatchOperation {
             config_file: &config_file,
             state_path,
             fingerprint: &fingerprint,
         },
-        resetprop::read_security_patch_properties,
+        // Read through a fresh getprop/resetprop process.  Some devices leave
+        // the in-process rsproperties mapping stale or latched in an early
+        // initialization failure, which otherwise makes an otherwise valid
+        // WebUI update abort before resetprop is invoked.
+        resetprop::read_early_security_patch_properties,
         read_build_security_patch_properties,
-        resetprop::direct_write_and_verify_security_patch_properties,
-        persist_and_verify_config,
+        &mut property_writer,
+        &mut write_config,
+    );
+
+    if let Err(error) = &result {
+        if !config_committed {
+            // This is idempotent and covers failures that happen before the
+            // property writer is called (for example a malformed snapshot),
+            // as well as errors returned before the config commit.
+            if let Err(restore_error) = restore_security_patch_override_state(&previous_override) {
+                return Err(anyhow!(
+                    "security-patch operation failed: {error:#}; system.prop rollback failed: {restore_error:#}"
+                ));
+            }
+        }
+    }
+    result
+}
+
+fn security_patch_prop_contents(properties: &SecurityPatchProperties) -> Result<Vec<u8>> {
+    validate_properties(properties, "synchronized")?;
+    let contents = format!(
+        "{VENDOR_SECURITY_PATCH_PROPERTY}={}\n{SYSTEM_SECURITY_PATCH_PROPERTY}={}\n",
+        properties.vendor, properties.system
     )
+    .into_bytes();
+    if contents.len() as u64 > MAX_SECURITY_PATCH_PROP_BYTES {
+        bail!("security-patch override file is too large");
+    }
+    Ok(contents)
+}
+
+fn capture_security_patch_override_state() -> Result<SecurityPatchOverrideState> {
+    let persistent_file = match fs::symlink_metadata(SECURITY_PATCH_PROP_PATH) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            if metadata.len() > MAX_SECURITY_PATCH_PROP_BYTES {
+                bail!("security-patch override file is too large");
+            }
+            Some(
+                fs::read(SECURITY_PATCH_PROP_PATH)
+                    .with_context(|| format!("failed to read {SECURITY_PATCH_PROP_PATH}"))?,
+            )
+        }
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            bail!("security-patch override path must not be a symlink")
+        }
+        Ok(_) => bail!("security-patch override path is not a regular file"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to inspect {SECURITY_PATCH_PROP_PATH}"))
+        }
+    };
+
+    Ok(SecurityPatchOverrideState { persistent_file })
+}
+
+fn persist_security_patch_override(properties: &SecurityPatchProperties) -> Result<()> {
+    let contents = security_patch_prop_contents(properties)?;
+    validate_security_patch_override_target()?;
+    atomic_replace_preserving_metadata(
+        Path::new(SECURITY_PATCH_PROP_PATH),
+        &contents,
+        0o600,
+        KEYSTORE_UID,
+        KEYSTORE_GID,
+    )
+    .with_context(|| format!("failed to save {SECURITY_PATCH_PROP_PATH}"))
+}
+
+fn remove_persistent_security_patch_override() -> Result<()> {
+    validate_security_patch_override_parent()?;
+    let metadata = match fs::symlink_metadata(SECURITY_PATCH_PROP_PATH) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to inspect {SECURITY_PATCH_PROP_PATH} before removal")
+            })
+        }
+    };
+    if !metadata.file_type().is_file() {
+        bail!("security-patch override path is not a regular file");
+    }
+    fs::remove_file(SECURITY_PATCH_PROP_PATH)
+        .with_context(|| format!("failed to remove {SECURITY_PATCH_PROP_PATH}"))?;
+    let parent = Path::new(SECURITY_PATCH_PROP_PATH)
+        .parent()
+        .ok_or_else(|| anyhow!("security-patch override path has no parent"))?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .context("failed to sync security-patch override directory after removal")
+}
+
+fn validate_security_patch_override_parent() -> Result<()> {
+    let parent = Path::new(SECURITY_PATCH_PROP_PATH)
+        .parent()
+        .ok_or_else(|| anyhow!("security-patch override path has no parent"))?;
+    let metadata = fs::symlink_metadata(parent).with_context(|| {
+        format!(
+            "failed to inspect security-patch override directory {}",
+            parent.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        bail!(
+            "security-patch override parent is not a regular directory: {}",
+            parent.display()
+        );
+    }
+    Ok(())
+}
+
+fn validate_security_patch_override_target() -> Result<()> {
+    validate_security_patch_override_parent()?;
+    match fs::symlink_metadata(SECURITY_PATCH_PROP_PATH) {
+        Ok(metadata) if metadata.file_type().is_file() => Ok(()),
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            bail!("security-patch override path must not be a symlink")
+        }
+        Ok(_) => bail!("security-patch override path is not a regular file"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "failed to inspect security-patch override path {}",
+                SECURITY_PATCH_PROP_PATH
+            )
+        }),
+    }
+}
+
+fn activate_security_patch_override(
+    desired: &SecurityPatchProperties,
+    _previous: &SecurityPatchOverrideState,
+) -> Result<()> {
+    persist_security_patch_override(desired)
+}
+
+fn deactivate_security_patch_override(_previous: &SecurityPatchOverrideState) -> Result<()> {
+    remove_persistent_security_patch_override()
+}
+
+fn restore_security_patch_override_state(previous: &SecurityPatchOverrideState) -> Result<()> {
+    validate_security_patch_override_target()?;
+    match &previous.persistent_file {
+        Some(contents) => atomic_replace_preserving_metadata(
+            Path::new(SECURITY_PATCH_PROP_PATH),
+            contents,
+            0o600,
+            KEYSTORE_UID,
+            KEYSTORE_GID,
+        )
+        .with_context(|| format!("failed to restore {SECURITY_PATCH_PROP_PATH}"))?,
+        None => remove_persistent_security_patch_override()?,
+    }
+    Ok(())
 }
 
 /// Reapply an active WebUI patch override before the regular vbmeta bootstrap
 /// can change the system property. This also refreshes defaults after an OTA.
-pub(crate) fn prepare_startup(config_file: &ConfigFile, _lock: &OperationLock) -> Result<()> {
-    let PatchIntent::Synchronized(date) = patch_intent(&config_file.trust) else {
-        return Ok(());
+pub(crate) fn prepare_startup(config_file: &ConfigFile, lock: &OperationLock) -> Result<()> {
+    let intent = patch_intent(&config_file.trust);
+    let fingerprint = match intent {
+        PatchIntent::Synchronized(_) => Some(current_build_fingerprint()?),
+        PatchIntent::Auto | PatchIntent::Other => None,
     };
+    prepare_startup_with_writer(
+        config_file,
+        Path::new(DEFAULTS_PATH),
+        lock,
+        fingerprint.as_deref(),
+        resetprop::direct_write_and_verify_security_patch_properties,
+    )
+}
 
-    let fingerprint = current_build_fingerprint()?;
-    let state_path = Path::new(DEFAULTS_PATH);
+/// Reapply a synchronized security-patch override from a short-lived, early
+/// boot invocation.
+///
+/// The regular KeyMint daemon calls [`prepare_startup`] as a fallback, but it
+/// starts during `late_start` on many module managers.  By the time that
+/// process starts, framework components may already have cached
+/// `Build.VERSION.SECURITY_PATCH`.  This entry point deliberately performs
+/// only the config bootstrap/read and paired `resetprop` update, then lets the
+/// caller exit before any Binder/KeyMint initialization.
+pub(crate) fn prepare_startup_early() -> Result<()> {
+    // The early command intentionally skips the full daemon storage bootstrap
+    // (which also touches the keybox), but the operation lock lives in the
+    // data subdirectory.  On a fresh or repaired install that directory may
+    // not exist yet, so create only this small state parent before opening the
+    // lock.  The normal post-fs-data setup owns the surrounding directory.
+    let state_parent = Path::new(DEFAULTS_PATH)
+        .parent()
+        .ok_or_else(|| anyhow!("security-patch defaults path has no parent"))?;
+    fs::create_dir_all(state_parent).with_context(|| {
+        format!(
+            "failed to create security-patch state directory {} during early startup",
+            state_parent.display()
+        )
+    })?;
+    let lock = acquire_operation_lock()
+        .context("failed to lock security-patch operations during early startup")?;
+    // Use the same migration/seeding path as the normal daemon.  This keeps a
+    // legacy config (or a first boot with no config yet) from delaying the
+    // replay until the late-start daemon.
+    let config_file = config::bootstrap_config_file()
+        .context("failed to bootstrap the active config during early startup")?;
+    // Do not make the early replay depend on a build fingerprint or on
+    // build.prop files being mounted.  A fingerprint that is only partially
+    // published (or temporarily differs while an OTA is being finalized)
+    // would otherwise force a snapshot refresh and prevent the replay.  The
+    // regular daemon performs the strict fingerprint/OTA check later.
+    prepare_startup_with_writer(
+        &config_file,
+        Path::new(DEFAULTS_PATH),
+        &lock,
+        None,
+        resetprop::direct_write_and_verify_security_patch_properties_no_triggers,
+    )
+}
+
+fn prepare_startup_with_writer(
+    config_file: &ConfigFile,
+    state_path: &Path,
+    _lock: &OperationLock,
+    fingerprint: Option<&str>,
+    write_properties: impl FnMut(&SecurityPatchProperties, &SecurityPatchProperties) -> Result<()>,
+) -> Result<()> {
+    let intent = patch_intent(&config_file.trust);
+    let date = match &intent {
+        PatchIntent::Synchronized(date) => date.clone(),
+        PatchIntent::Auto | PatchIntent::Other => String::new(),
+    };
+    let snapshot_is_valid = match load_startup_snapshot(&intent, state_path) {
+        Ok(valid) => valid,
+        Err(error) => {
+            log::warn!(
+                "security-patch defaults snapshot is invalid; keeping the durable override disabled: {error:#}"
+            );
+            false
+        }
+    };
+    match &intent {
+        PatchIntent::Synchronized(date) => {
+            let desired = SecurityPatchProperties {
+                system: date.clone(),
+                vendor: date.clone(),
+            };
+            // Rebuild the durable override from config on every boot.  This
+            // repairs installations upgraded from versions that only kept a
+            // runtime resetprop value, and makes the next Magisk system.prop
+            // stage see the same value even when the entry was replaced.
+            if snapshot_is_valid {
+                if let Err(error) = persist_security_patch_override(&desired) {
+                    log::warn!(
+                        "failed to persist synchronized security-patch override during startup: {error:#}"
+                    );
+                }
+            } else if let Err(error) = remove_persistent_security_patch_override() {
+                log::warn!(
+                    "failed to remove stale security-patch override without a valid snapshot: {error:#}"
+                );
+            }
+        }
+        PatchIntent::Auto => {
+            if let Err(error) = remove_persistent_security_patch_override() {
+                log::warn!(
+                    "failed to remove stale security-patch override during startup: {error:#}"
+                );
+            }
+            return Ok(());
+        }
+        PatchIntent::Other => {
+            if let Err(error) = remove_persistent_security_patch_override() {
+                log::warn!(
+                    "failed to remove stale security-patch override for non-synchronized config: {error:#}"
+                );
+            }
+            return Ok(());
+        }
+    }
+
     prepare_startup_with(
         config_file,
         state_path,
-        &fingerprint,
-        resetprop::read_security_patch_properties,
+        fingerprint,
+        if fingerprint.is_none() {
+            resetprop::read_early_security_patch_properties
+        } else {
+            resetprop::read_security_patch_properties
+        },
         read_build_security_patch_properties,
-        resetprop::direct_write_and_verify_security_patch_properties,
+        write_properties,
     )
     .with_context(|| format!("failed to reapply synchronized security patch {date}"))
+}
+
+fn load_startup_snapshot(intent: &PatchIntent, path: &Path) -> Result<bool> {
+    if !matches!(intent, PatchIntent::Synchronized(_)) {
+        return Ok(false);
+    }
+    Ok(load_snapshot(path)?.is_some())
 }
 
 fn apply_webui_security_patch_with<RuntimeReader, DefaultReader, PropertyWriter, ConfigWriter>(
@@ -304,7 +653,7 @@ fn synchronized_security_patch_date(
 fn prepare_startup_with<RuntimeReader, DefaultReader, PropertyWriter>(
     config_file: &ConfigFile,
     state_path: &Path,
-    fingerprint: &str,
+    fingerprint: Option<&str>,
     mut read_runtime: RuntimeReader,
     mut read_defaults: DefaultReader,
     mut write_properties: PropertyWriter,
@@ -320,18 +669,53 @@ where
     let Some(mut snapshot) = load_snapshot(state_path)? else {
         return Ok(());
     };
-    if snapshot.build_fingerprint != fingerprint {
-        let defaults = read_defaults()
-            .context("failed to refresh default security patches from build properties")?;
-        snapshot = SecurityPatchDefaults::new(fingerprint, &defaults)?;
-        persist_snapshot(state_path, &snapshot)?;
+    if let Some(fingerprint) = fingerprint {
+        validate_fingerprint(fingerprint)?;
+        if snapshot.build_fingerprint != fingerprint {
+            let defaults = read_defaults()
+                .context("failed to refresh default security patches from build properties")?;
+            snapshot = SecurityPatchDefaults::new(fingerprint, &defaults)?;
+            persist_snapshot(state_path, &snapshot)?;
+        }
+    } else {
+        log::debug!("deferring build-fingerprint validation during early security-patch replay");
     }
     let desired = SecurityPatchProperties {
         system: date.clone(),
         vendor: date,
     };
-    let before = read_runtime().context("failed to read startup security-patch properties")?;
-    write_properties(&before, &desired).context("failed to write startup security-patch properties")
+    let before = match read_runtime() {
+        Ok(properties) => properties,
+        Err(error) if fingerprint.is_none() => {
+            log::debug!(
+                "security-patch properties are not fully published during early replay: {error:#}"
+            );
+            snapshot.properties()
+        }
+        Err(error) => {
+            return Err(error).context("failed to read startup security-patch properties")
+        }
+    };
+    log::info!(
+        "security-patch startup replay: before system={} vendor={}, desired system={} vendor={}",
+        before.system,
+        before.vendor,
+        desired.system,
+        desired.vendor
+    );
+    write_properties(&before, &desired)
+        .context("failed to write startup security-patch properties")?;
+    match read_runtime() {
+        Ok(after) => log::info!(
+            "security-patch startup replay complete: after system={} vendor={}",
+            after.system,
+            after.vendor
+        ),
+        Err(error) => log::warn!(
+            "security-patch startup replay completed but after-values could not be read: {error:#}"
+        ),
+    }
+    Ok(())
 }
 
 fn ensure_defaults_snapshot<RuntimeReader, DefaultReader>(
@@ -1114,7 +1498,7 @@ mod tests {
         prepare_startup_with(
             &config,
             &path,
-            "brand/product/device:17/id/release-keys",
+            Some("brand/product/device:17/id/release-keys"),
             || Ok(properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)),
             || {
                 *default_reads.borrow_mut() += 1;
@@ -1130,6 +1514,27 @@ mod tests {
         assert_eq!(*default_reads.borrow(), 0);
         assert_eq!(*written.borrow(), None);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn startup_snapshot_validation_uses_the_supplied_state_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security_patch_defaults.toml");
+        persist_snapshot(
+            &path,
+            &SecurityPatchDefaults::new(
+                "brand/product/device:17/id/release-keys",
+                &properties(DEFAULT_SYSTEM, DEFAULT_VENDOR),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(
+            load_startup_snapshot(&PatchIntent::Synchronized("2026-02-05".to_string()), &path,)
+                .unwrap()
+        );
+        assert!(!load_startup_snapshot(&PatchIntent::Auto, &path).unwrap());
     }
 
     #[test]
@@ -1149,7 +1554,7 @@ mod tests {
         prepare_startup_with(
             &config,
             &path,
-            fingerprint,
+            Some(fingerprint),
             || Ok(current.borrow().clone()),
             || panic!("matching snapshot should not be refreshed"),
             |expected, desired| {
@@ -1165,6 +1570,80 @@ mod tests {
             load_snapshot(&path).unwrap().unwrap().properties(),
             properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)
         );
+    }
+
+    #[test]
+    fn early_startup_replays_verified_snapshot_without_a_build_fingerprint() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security_patch_defaults.toml");
+        persist_snapshot(
+            &path,
+            &SecurityPatchDefaults::new(
+                "brand/product/device:17/id/release-keys",
+                &properties(DEFAULT_SYSTEM, DEFAULT_VENDOR),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let current = RefCell::new(properties(DEFAULT_SYSTEM, DEFAULT_VENDOR));
+        let default_reads = RefCell::new(0_u32);
+        let config = synchronized_config("2026-02-05");
+
+        prepare_startup_with(
+            &config,
+            &path,
+            None,
+            || Ok(current.borrow().clone()),
+            || {
+                *default_reads.borrow_mut() += 1;
+                Ok(properties("2030-01-05", "2030-01-05"))
+            },
+            |expected, desired| {
+                assert_eq!(&*current.borrow(), expected);
+                *current.borrow_mut() = desired.clone();
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(*default_reads.borrow(), 0);
+        assert_eq!(*current.borrow(), properties("2026-02-05", "2026-02-05"));
+        assert_eq!(
+            load_snapshot(&path).unwrap().unwrap().properties(),
+            properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)
+        );
+    }
+
+    #[test]
+    fn early_startup_can_attempt_replay_before_runtime_properties_are_published() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security_patch_defaults.toml");
+        let defaults = properties(DEFAULT_SYSTEM, DEFAULT_VENDOR);
+        persist_snapshot(
+            &path,
+            &SecurityPatchDefaults::new("brand/product/device:17/id/release-keys", &defaults)
+                .unwrap(),
+        )
+        .unwrap();
+        let config = synchronized_config("2026-02-05");
+        let writes = RefCell::new(0_u32);
+
+        prepare_startup_with(
+            &config,
+            &path,
+            None,
+            || Err(anyhow!("property area is not published yet")),
+            || panic!("early replay must not read build.prop defaults"),
+            |expected, desired| {
+                *writes.borrow_mut() += 1;
+                assert_eq!(expected, &defaults);
+                assert_eq!(desired, &properties("2026-02-05", "2026-02-05"));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(*writes.borrow(), 1);
     }
 
     #[test]
@@ -1186,7 +1665,7 @@ mod tests {
         prepare_startup_with(
             &config,
             &path,
-            "brand/product/device:17/new/release-keys",
+            Some("brand/product/device:17/new/release-keys"),
             || Ok(current.borrow().clone()),
             || Ok(properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)),
             |expected, desired| {
@@ -1219,7 +1698,7 @@ mod tests {
         let result = prepare_startup_with(
             &synchronized_config("2026-02-05"),
             &path,
-            "brand/product/device:17/id/release-keys",
+            Some("brand/product/device:17/id/release-keys"),
             || Ok(properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)),
             || Ok(properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)),
             |_, _| {

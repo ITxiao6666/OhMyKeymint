@@ -67,11 +67,21 @@ helper records the current `ro.build.version.security_patch` and
 `/data/misc/keystore/omk/data/security_patch_defaults.toml`. Later syncs keep
 that original snapshot. Each sync writes the selected date to all four
 `[trust]` patch-level fields and applies it to both runtime properties with
-`resetprop`. While that valid snapshot remains, keymint reapplies the paired
-property values at startup. A manually configured exact date without the
-snapshot continues to use the normal configuration behavior. After a
-successful sync, the WebUI reports completion and asks you to reboot; it does
-not reboot the device automatically.
+`resetprop`. While that valid snapshot remains, a standard boot replays the
+paired properties from the blocking `post-fs-data` hook with `resetprop -n`,
+before Zygote/framework processes cache `Build.VERSION.SECURITY_PATCH`. In
+KernelSU late-load mode, `late-load.sh` replaces that stage: it runs the early
+replay, reconciles the managed `system.prop` entry, and finishes before
+KernelSU loads `system.prop`; its `post-mount.sh` hook replays the properties
+again after module mounting. On a standard KernelSU boot, `post-mount.sh`
+replays them after its `system.prop` stage. The KeyMint daemon repeats the
+replay as a fallback if an early hook is unavailable or fails. The early path
+uses the validated snapshot without requiring a build fingerprint; the daemon
+performs the strict fingerprint/OTA refresh later.
+Replay failures are logged and do not block boot. A manually configured exact
+date without the snapshot continues to use the normal configuration behavior.
+After a successful sync, the WebUI reports completion and asks you to reboot;
+it does not reboot the device automatically.
 
 **Restore default security patch** does not use the network. It restores both
 runtime properties from the saved snapshot, sets `security_patch`,

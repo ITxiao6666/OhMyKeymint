@@ -394,12 +394,21 @@ results. After that, it writes the date to `security_patch`, `os_patchlevel`,
 for the current boot, not values visible only to OMK.
 
 While a valid defaults snapshot exists and all four configuration fields still
-contain the same exact date, keymint reapplies that date to both properties at
-startup. The snapshot is the persistent marker for a WebUI synchronization: a
-manually authored exact-date configuration without a snapshot follows the
-normal patch-level path and does not cause an extra vendor-property write. If
-the optional snapshot cannot be read or validated during startup, keymint logs
-the error, skips this paired reapply, and continues its normal initialization.
+contain the same exact date, a standard boot first reapplies that date to both
+properties from its blocking `post-fs-data` hook with `resetprop -n`, before
+Zygote/framework processes cache `Build.VERSION.SECURITY_PATCH`. In KernelSU
+late-load mode, `late-load.sh` replaces that stage: it runs the early replay,
+reconciles the managed `system.prop` entry, and finishes before KernelSU loads
+module properties; `post-mount.sh` then replays the properties again after
+mounting. On a standard KernelSU boot, `post-mount.sh` replays the properties
+after module properties are loaded, and KeyMint repeats the replay at daemon
+startup as a fallback. The early path uses the validated snapshot even if the
+build fingerprint is not available yet; the daemon performs the strict
+fingerprint/OTA refresh later. If an early hook cannot run or the snapshot
+cannot be read, it logs a warning and continues boot. The snapshot is the
+persistent marker for a WebUI synchronization: a manually
+authored exact-date configuration without a snapshot follows the normal
+patch-level path and does not cause an extra vendor-property write.
 
 The WebUI **Restore default security patch** action uses the saved snapshot and
 does not access the network. If the snapshot is absent, the helper records the

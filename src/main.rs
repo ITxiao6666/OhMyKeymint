@@ -312,6 +312,37 @@ fn handle_webui_security_patch_command() -> Option<Result<String, String>> {
     )
 }
 
+fn parse_early_security_patch_args(args: &[String]) -> Option<Result<(), String>> {
+    if args.first()?.as_str() != "--early-security-patch" {
+        return None;
+    }
+    if args.len() != 1 {
+        return Some(Err(
+            "--early-security-patch does not accept arguments".to_string()
+        ));
+    }
+    Some(Ok(()))
+}
+
+fn handle_early_security_patch_command() -> Option<Result<&'static str, String>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let parsed = parse_early_security_patch_args(&args)?;
+    if let Err(error) = parsed {
+        return Some(Err(error));
+    }
+
+    // post-fs-data prepares the surrounding storage before invoking this mode;
+    // the early path itself ensures only the lock parent. Avoid the full daemon
+    // storage bootstrap here: it also seeds/parses the keybox, which is
+    // unrelated to the property replay and can be unavailable while encrypted
+    // data is still being mounted.
+    Some(
+        crate::security_patch::prepare_startup_early()
+            .map(|()| "ok")
+            .map_err(|error| format!("{error:#}")),
+    )
+}
+
 fn handle_webui_security_bulletin_command() -> Option<Result<String, String>> {
     let mut args = std::env::args();
     let _program = args.next();
@@ -393,6 +424,17 @@ fn handle_webui_pif_command() -> Option<Result<String, String>> {
 }
 
 fn main() {
+    if let Some(result) = handle_early_security_patch_command() {
+        match result {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
     if let Some(result) = handle_webui_pif_command() {
         match result {
             Ok(output) => println!("{output}"),
@@ -583,5 +625,28 @@ mod tests {
     fn webui_keybox_payload_rejects_too_many_chunks() {
         let chunks = vec!["YQ==".to_string(); WEBUI_KEYBOX_MAX_CHUNKS + 1];
         assert!(decode_webui_keybox_payload(chunks).is_err());
+    }
+
+    #[test]
+    fn early_security_patch_command_is_one_shot_without_arguments() {
+        // Keep the command contract explicit: post-fs-data invokes this mode
+        // once, and an accidental extra argument must never be ignored.
+        let command = vec!["--early-security-patch".to_string()];
+        assert!(matches!(
+            parse_early_security_patch_args(&command),
+            Some(Ok(()))
+        ));
+
+        let extra = vec![
+            "--early-security-patch".to_string(),
+            "unexpected".to_string(),
+        ];
+        assert!(matches!(
+            parse_early_security_patch_args(&extra),
+            Some(Err(_))
+        ));
+
+        let other = vec!["--webui-sync-security-patch".to_string()];
+        assert!(parse_early_security_patch_args(&other).is_none());
     }
 }

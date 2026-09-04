@@ -1,9 +1,11 @@
 use std::{
     io::{BufRead, BufReader, Write},
+    os::unix::fs::PermissionsExt,
     os::unix::net::UnixStream,
     path::Path,
     process::Command,
     sync::{Mutex, OnceLock},
+    time::Duration,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -64,12 +66,39 @@ impl PhoneIdentifierKind {
 }
 
 const RESETPROP_FALLBACKS: &[(&str, Option<&str>)] = &[
-    ("/system_ext/bin/resetprop", None),
-    ("/system/bin/resetprop", None),
+    // Prefer the binaries owned by the active root implementation.  Some
+    // vendor images ship an unrelated `resetprop` utility under /system; it
+    // accepts different arguments and must not shadow the root tool.
     ("/data/adb/ksu/bin/resetprop", None),
     ("/data/adb/magisk/resetprop", None),
+    // APatch exposes the Magisk-compatible tool both as a symlink and as an
+    // `apd resetprop` multicall entry point.
+    ("/data/adb/ap/bin/resetprop", None),
     ("/data/adb/ksud", Some("resetprop")),
+    ("/data/adb/apd", Some("resetprop")),
+    // Keep system locations as a last-resort fallback for root solutions that
+    // deliberately install their compatible helper there.
+    ("/system_ext/bin/resetprop", None),
+    ("/system/bin/resetprop", None),
 ];
+// Keep early reads independent from the Rust property-area singleton.  The
+// absolute paths avoid inheriting a root implementation's PATH while the
+// property service is still coming up.
+const EARLY_PROPERTY_READ_FALLBACKS: &[(&str, Option<&str>)] = &[
+    ("/system/bin/getprop", None),
+    ("/system_ext/bin/getprop", None),
+    ("/vendor/bin/getprop", None),
+    ("/data/adb/ksu/bin/resetprop", None),
+    ("/data/adb/magisk/resetprop", None),
+    ("/data/adb/ap/bin/resetprop", None),
+    ("/data/adb/ksud", Some("resetprop")),
+    ("/data/adb/apd", Some("resetprop")),
+    ("/system_ext/bin/resetprop", None),
+    ("/system/bin/resetprop", None),
+];
+const MAX_EARLY_PROPERTY_OUTPUT_BYTES: usize = 256;
+const EARLY_SECURITY_PATCH_WRITE_ATTEMPTS: usize = 5;
+const EARLY_SECURITY_PATCH_WRITE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]
 pub struct ResetpropCommand {
@@ -108,11 +137,11 @@ pub fn bootstrap_privileged_helper() -> Result<()> {
         return Ok(());
     }
 
-    let command = match find_resetprop_command() {
-        Ok(command) => Some(command),
+    let commands = match find_resetprop_commands() {
+        Ok(commands) => commands,
         Err(error) => {
             log::warn!("resetprop unavailable to privileged helper: {error:#}");
-            None
+            Vec::new()
         }
     };
 
@@ -123,7 +152,7 @@ pub fn bootstrap_privileged_helper() -> Result<()> {
     }
     if pid == 0 {
         drop(parent);
-        let exit_code = match helper_loop(child, command) {
+        let exit_code = match helper_loop(child, commands) {
             Ok(()) => 0,
             Err(error) => {
                 eprintln!("resetprop helper exiting after fatal error: {error:#}");
@@ -194,20 +223,45 @@ fn with_helper<T>(call: impl FnOnce(&mut ResetpropHelperClient) -> Result<T>) ->
 }
 
 pub fn direct_write_and_verify_property(property: &str, value: &str) -> Result<()> {
-    let command = find_resetprop_command()?;
-    execute_write_and_verify(&command, property, value)
+    let commands = find_resetprop_commands()?;
+    execute_write_and_verify_candidates(&commands, property, value, false)
 }
 
 pub(crate) fn direct_write_and_verify_security_patch_properties(
     expected: &SecurityPatchProperties,
     desired: &SecurityPatchProperties,
 ) -> Result<()> {
-    let command = find_resetprop_command()?;
+    let commands = find_resetprop_commands()?;
     write_security_patch_properties_with_rollback(
-        |property, value| execute_write_and_verify(&command, property, value),
-        read_string_property,
+        |property, value| execute_write_and_verify_candidates(&commands, property, value, false),
+        // Keep the paired precondition/rollback checks on the same fresh
+        // command-backed reader used by the early replay path.  The Rust
+        // property-area view can be stale on vendor builds even after a
+        // resetprop write succeeds.
+        read_early_string_property,
         expected,
         desired,
+    )
+}
+
+/// Update the paired security-patch properties without running property
+/// triggers. This variant is used only from blocking early-boot hooks, where
+/// init may still be publishing the same read-only properties. It retries the
+/// desired pair without rolling either value back: restoring an observed old
+/// value during that race would make the boot-time override less reliable.
+/// Regular runtime updates keep the strict trigger-enabled paired rollback.
+pub(crate) fn direct_write_and_verify_security_patch_properties_no_triggers(
+    expected: &SecurityPatchProperties,
+    desired: &SecurityPatchProperties,
+) -> Result<()> {
+    let commands = find_resetprop_commands()?;
+    write_security_patch_properties_early(
+        |property, value| execute_write_and_verify_candidates(&commands, property, value, true),
+        read_early_string_property,
+        expected,
+        desired,
+        EARLY_SECURITY_PATCH_WRITE_ATTEMPTS,
+        || std::thread::sleep(EARLY_SECURITY_PATCH_WRITE_RETRY_INTERVAL),
     )
 }
 
@@ -216,6 +270,109 @@ pub fn read_string_property(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+/// Read a security-patch property without depending solely on the process's
+/// cached `rsproperties` initialization.  `rsproperties` latches an init
+/// failure for the lifetime of the process, which is common when this mode is
+/// started before init has published `/dev/__properties__`; a fresh getprop or
+/// resetprop process can still read the property area once it is ready.
+pub(crate) fn read_early_string_property(name: &str) -> Option<String> {
+    if !is_security_patch_property(name) {
+        return read_string_property(name);
+    }
+
+    // Prefer a fresh command read so a stale/partially initialized Rust view
+    // cannot hide a value that init has since published.
+    read_property_with_early_command(name).or_else(|| read_string_property(name))
+}
+
+pub(crate) fn read_early_security_patch_properties() -> Result<SecurityPatchProperties> {
+    read_security_patch_properties_with(read_early_string_property)
+}
+
+fn is_security_patch_property(name: &str) -> bool {
+    matches!(
+        name,
+        SYSTEM_SECURITY_PATCH_PROPERTY | VENDOR_SECURITY_PATCH_PROPERTY
+    )
+}
+
+fn read_property_with_early_command(name: &str) -> Option<String> {
+    if !is_security_patch_property(name) {
+        return None;
+    }
+
+    for (program, prepend_arg) in early_property_read_candidates() {
+        let path = Path::new(&program);
+        if !is_executable_file(path) {
+            continue;
+        }
+
+        let mut command = Command::new(path);
+        if let Some(prepend_arg) = &prepend_arg {
+            command.arg(prepend_arg);
+        }
+        let output = match command.arg(name).output() {
+            Ok(output) => output,
+            Err(error) => {
+                log::debug!("failed to execute {program} while reading {name}: {error}");
+                continue;
+            }
+        };
+        if !output.status.success() {
+            log::debug!(
+                "{program} returned status {} while reading {name}",
+                output.status
+            );
+            continue;
+        }
+        if let Some(value) = normalize_early_property_output(&output.stdout) {
+            return Some(value.to_string());
+        }
+        if output.stdout.len() > MAX_EARLY_PROPERTY_OUTPUT_BYTES {
+            log::debug!("{program} returned an oversized value while reading {name}");
+        } else if std::str::from_utf8(&output.stdout).is_err() {
+            log::debug!("{program} returned non-UTF-8 data while reading {name}");
+        } else {
+            log::debug!("{program} returned an empty value while reading {name}");
+        }
+    }
+    None
+}
+
+fn early_property_read_candidates() -> Vec<(String, Option<String>)> {
+    let mut candidates = EARLY_PROPERTY_READ_FALLBACKS
+        .iter()
+        .map(|(program, prepend_arg)| ((*program).to_string(), (*prepend_arg).map(str::to_string)))
+        .collect::<Vec<_>>();
+
+    // Keep PATH as a last-resort read source for root implementations that
+    // install resetprop outside their conventional /data/adb location.  The
+    // explicit platform `getprop` and trusted root paths above always win.
+    if let Some(path) = std::env::var_os("PATH") {
+        for candidate in std::env::split_paths(&path).map(|directory| directory.join("resetprop")) {
+            if !is_executable_file(&candidate) {
+                continue;
+            }
+            let program = candidate.to_string_lossy().into_owned();
+            if !candidates
+                .iter()
+                .any(|(existing, prepend_arg)| existing == &program && prepend_arg.is_none())
+            {
+                candidates.push((program, None));
+            }
+        }
+    }
+    candidates
+}
+
+fn normalize_early_property_output(output: &[u8]) -> Option<&str> {
+    if output.len() > MAX_EARLY_PROPERTY_OUTPUT_BYTES {
+        return None;
+    }
+    let value = std::str::from_utf8(output).ok()?.trim();
+    (!value.is_empty()).then_some(value)
 }
 
 pub(crate) fn read_security_patch_properties() -> Result<SecurityPatchProperties> {
@@ -243,16 +400,7 @@ where
     W: FnMut(&str, &str) -> Result<()>,
     R: Fn(&str) -> Option<String>,
 {
-    for (label, properties) in [("expected", expected), ("desired", desired)] {
-        for (property, value) in [
-            (VENDOR_SECURITY_PATCH_PROPERTY, properties.vendor.as_str()),
-            (SYSTEM_SECURITY_PATCH_PROPERTY, properties.system.as_str()),
-        ] {
-            if value.trim().is_empty() {
-                bail!("refusing to use an empty {label} value for {property}");
-            }
-        }
-    }
+    validate_security_patch_property_values(expected, desired)?;
 
     let current = read_security_patch_properties_with(&reader)?;
     if current != *expected {
@@ -306,6 +454,79 @@ where
             "paired security-patch verification failed: {verification_error:#}; security patch property rollback failed: {rollback_error:#}"
         )),
     }
+}
+
+fn write_security_patch_properties_early<W, R, S>(
+    mut writer: W,
+    reader: R,
+    expected: &SecurityPatchProperties,
+    desired: &SecurityPatchProperties,
+    attempts: usize,
+    mut retry_delay: S,
+) -> Result<()>
+where
+    W: FnMut(&str, &str) -> Result<()>,
+    R: Fn(&str) -> Option<String>,
+    S: FnMut(),
+{
+    validate_security_patch_property_values(expected, desired)?;
+    if attempts == 0 {
+        bail!("early security-patch replay requires at least one write attempt");
+    }
+
+    let desired_values = [
+        (VENDOR_SECURITY_PATCH_PROPERTY, desired.vendor.as_str()),
+        (SYSTEM_SECURITY_PATCH_PROPERTY, desired.system.as_str()),
+    ];
+    let mut last_failure = String::new();
+
+    for attempt in 1..=attempts {
+        let mut failures = Vec::new();
+        for (property, value) in desired_values {
+            match reader(property) {
+                Some(current) if current == value => continue,
+                Some(_) | None => {
+                    if let Err(error) = writer(property, value) {
+                        failures.push(format!("{property} write failed: {error:#}"));
+                    }
+                }
+            }
+        }
+
+        match read_security_patch_properties_with(&reader) {
+            Ok(actual) if actual == *desired => return Ok(()),
+            Ok(actual) => failures.push(format!(
+                "observed system={} vendor={} after attempt {attempt}",
+                actual.system, actual.vendor
+            )),
+            Err(error) => failures.push(format!(
+                "could not verify the property pair after attempt {attempt}: {error:#}"
+            )),
+        }
+        last_failure = failures.join("; ");
+        if attempt < attempts {
+            retry_delay();
+        }
+    }
+
+    bail!("early security-patch replay did not stabilize after {attempts} attempts: {last_failure}")
+}
+
+fn validate_security_patch_property_values(
+    expected: &SecurityPatchProperties,
+    desired: &SecurityPatchProperties,
+) -> Result<()> {
+    for (label, properties) in [("expected", expected), ("desired", desired)] {
+        for (property, value) in [
+            (VENDOR_SECURITY_PATCH_PROPERTY, properties.vendor.as_str()),
+            (SYSTEM_SECURITY_PATCH_PROPERTY, properties.system.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                bail!("refusing to use an empty {label} value for {property}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn write_and_confirm_security_patch_property<W, R>(
@@ -382,46 +603,115 @@ where
     }
 }
 
-pub fn find_resetprop_command() -> Result<ResetpropCommand> {
-    if let Some(program) = std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|directory| directory.join("resetprop"))
-            .find(|candidate| candidate.exists())
-            .map(|candidate| candidate.to_string_lossy().into_owned())
-    }) {
-        return Ok(ResetpropCommand {
-            program,
-            prepend_arg: None,
-        });
+fn append_resetprop_candidate(
+    candidates: &mut Vec<ResetpropCommand>,
+    program: impl Into<String>,
+    prepend_arg: Option<impl Into<String>>,
+) {
+    let program = program.into();
+    let prepend_arg = prepend_arg.map(Into::into);
+    if candidates
+        .iter()
+        .any(|candidate| candidate.program == program && candidate.prepend_arg == prepend_arg)
+    {
+        return;
     }
+    candidates.push(ResetpropCommand {
+        program,
+        prepend_arg,
+    });
+}
 
+/// Return every executable resetprop implementation in trusted preference
+/// order.  Root managers occasionally leave a compatibility wrapper at the
+/// first path that accepts the command but cannot update read-only properties;
+/// callers must be able to continue with the next implementation after a
+/// write/verification failure.
+fn find_resetprop_commands() -> Result<Vec<ResetpropCommand>> {
+    let mut candidates = Vec::new();
     for (program, prepend_arg) in RESETPROP_FALLBACKS {
-        if Path::new(program).exists() {
-            return Ok(ResetpropCommand {
-                program: program.to_string(),
-                prepend_arg: prepend_arg.map(str::to_string),
-            });
+        if is_executable_file(Path::new(program)) {
+            append_resetprop_candidate(
+                &mut candidates,
+                *program,
+                (*prepend_arg).map(str::to_string),
+            );
         }
     }
 
-    Err(anyhow!("no usable resetprop binary found"))
+    // A root implementation may expose a compatible helper only through PATH
+    // (for example a per-session wrapper).  Consult PATH after the explicit
+    // trusted locations so an OEM utility cannot shadow those helpers.
+    if let Some(path) = std::env::var_os("PATH") {
+        for candidate in std::env::split_paths(&path).map(|directory| directory.join("resetprop")) {
+            if is_executable_file(&candidate) {
+                append_resetprop_candidate(
+                    &mut candidates,
+                    candidate.to_string_lossy().into_owned(),
+                    None::<String>,
+                );
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        Err(anyhow!("no usable resetprop binary found"))
+    } else {
+        Ok(candidates)
+    }
+}
+
+pub fn find_resetprop_command() -> Result<ResetpropCommand> {
+    find_resetprop_commands()?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("no usable resetprop binary found"))
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 fn execute_write_and_verify(command: &ResetpropCommand, property: &str, value: &str) -> Result<()> {
+    execute_write_and_verify_with_mode(command, property, value, false)
+}
+
+fn execute_write_and_verify_no_triggers(
+    command: &ResetpropCommand,
+    property: &str,
+    value: &str,
+) -> Result<()> {
+    execute_write_and_verify_with_mode(command, property, value, true)
+}
+
+fn execute_write_and_verify_with_mode(
+    command: &ResetpropCommand,
+    property: &str,
+    value: &str,
+    no_triggers: bool,
+) -> Result<()> {
     let mut process = Command::new(&command.program);
-    if let Some(prepend_arg) = &command.prepend_arg {
-        process.arg(prepend_arg);
-    }
+    let args = resetprop_command_args(command, property, value, no_triggers);
     let status = process
-        .arg(property)
-        .arg(value)
+        .args(args)
         .status()
         .with_context(|| format!("failed to execute resetprop for {property}"))?;
     if !status.success() {
         bail!("resetprop failed for {property} with status {status}");
     }
 
-    let actual = read_string_property(property)
+    // `rsproperties` can retain an early-boot failure or observe a different
+    // property-area mapping from resetprop on vendor builds.  Security-patch
+    // verification therefore uses a fresh command read even for normal
+    // runtime writes; other properties retain the cheaper in-process reader.
+    let read_property = if no_triggers || is_security_patch_property(property) {
+        read_early_string_property
+    } else {
+        read_string_property
+    };
+    let actual = read_property(property)
         .ok_or_else(|| anyhow!("property {property} missing after resetprop write"))?;
     if actual.eq_ignore_ascii_case(value) {
         Ok(())
@@ -431,6 +721,80 @@ fn execute_write_and_verify(command: &ResetpropCommand, property: &str, value: &
             actual
         )
     }
+}
+
+fn execute_write_and_verify_candidates(
+    commands: &[ResetpropCommand],
+    property: &str,
+    value: &str,
+    no_triggers: bool,
+) -> Result<()> {
+    execute_write_and_verify_candidates_with(
+        commands,
+        property,
+        value,
+        no_triggers,
+        |command, property, value, no_triggers| {
+            if no_triggers {
+                execute_write_and_verify_no_triggers(command, property, value)
+            } else {
+                execute_write_and_verify(command, property, value)
+            }
+        },
+    )
+}
+
+fn execute_write_and_verify_candidates_with<E>(
+    commands: &[ResetpropCommand],
+    property: &str,
+    value: &str,
+    no_triggers: bool,
+    mut execute: E,
+) -> Result<()>
+where
+    E: FnMut(&ResetpropCommand, &str, &str, bool) -> Result<()>,
+{
+    if commands.is_empty() {
+        bail!("no usable resetprop binary found");
+    }
+
+    let mut failures = Vec::with_capacity(commands.len());
+    for command in commands {
+        match execute(command, property, value, no_triggers) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                log::debug!(
+                    "resetprop candidate {} failed for {}: {error:#}",
+                    command.program,
+                    property
+                );
+                failures.push(format!("{}: {error:#}", command.program));
+            }
+        }
+    }
+
+    bail!(
+        "all resetprop candidates failed for {property}: {}",
+        failures.join("; ")
+    )
+}
+
+fn resetprop_command_args(
+    command: &ResetpropCommand,
+    property: &str,
+    value: &str,
+    no_triggers: bool,
+) -> Vec<String> {
+    let mut args = Vec::with_capacity(3 + usize::from(command.prepend_arg.is_some()));
+    if let Some(prepend_arg) = &command.prepend_arg {
+        args.push(prepend_arg.clone());
+    }
+    if no_triggers {
+        args.push("-n".to_string());
+    }
+    args.push(property.to_string());
+    args.push(value.to_string());
+    args
 }
 
 struct ResetpropHelperClient {
@@ -678,7 +1042,7 @@ fn helper_error_response(error: &anyhow::Error) -> String {
     }
 }
 
-fn helper_loop(stream: UnixStream, command: Option<ResetpropCommand>) -> Result<()> {
+fn helper_loop(stream: UnixStream, commands: Vec<ResetpropCommand>) -> Result<()> {
     let reader_stream = stream
         .try_clone()
         .context("failed to clone resetprop helper socket")?;
@@ -713,13 +1077,12 @@ fn helper_loop(stream: UnixStream, command: Option<ResetpropCommand>) -> Result<
             }
         } else {
             match parse_request(&line) {
-                Ok((property, value)) => match command.as_ref() {
-                    Some(command) => match execute_write_and_verify(command, &property, &value) {
+                Ok((property, value)) => {
+                    match execute_write_and_verify_candidates(&commands, &property, &value, false) {
                         Ok(()) => "OK\n".to_string(),
                         Err(error) => helper_error_response(&error),
-                    },
-                    None => "ERR\tresetprop is unavailable\n".to_string(),
-                },
+                    }
+                }
                 Err(error) => format!("ERR\t{error:#}\n"),
             }
         };
@@ -768,6 +1131,155 @@ mod tests {
                 values.vendor.clone(),
             ),
         ])
+    }
+
+    #[test]
+    fn resetprop_command_args_preserve_normal_and_no_trigger_forms() {
+        let direct = ResetpropCommand {
+            program: "/system/bin/resetprop".to_string(),
+            prepend_arg: None,
+        };
+        assert_eq!(
+            resetprop_command_args(&direct, "ro.example", "value", false),
+            vec!["ro.example", "value"]
+        );
+        assert_eq!(
+            resetprop_command_args(&direct, "ro.example", "value", true),
+            vec!["-n", "ro.example", "value"]
+        );
+
+        let ksud = ResetpropCommand {
+            program: "/data/adb/ksud".to_string(),
+            prepend_arg: Some("resetprop".to_string()),
+        };
+        assert_eq!(
+            resetprop_command_args(&ksud, "ro.example", "value", true),
+            vec!["resetprop", "-n", "ro.example", "value"]
+        );
+
+        let apd = ResetpropCommand {
+            program: "/data/adb/apd".to_string(),
+            prepend_arg: Some("resetprop".to_string()),
+        };
+        assert_eq!(
+            resetprop_command_args(&apd, "ro.example", "value", true),
+            vec!["resetprop", "-n", "ro.example", "value"]
+        );
+    }
+
+    #[test]
+    fn resetprop_fallbacks_prefer_root_owned_tools_over_system_tools() {
+        let first_system = RESETPROP_FALLBACKS
+            .iter()
+            .position(|(path, _)| path == &"/system_ext/bin/resetprop")
+            .unwrap();
+        let root_tools = [
+            "/data/adb/ksu/bin/resetprop",
+            "/data/adb/magisk/resetprop",
+            "/data/adb/ap/bin/resetprop",
+            "/data/adb/ksud",
+            "/data/adb/apd",
+        ];
+        for root_tool in root_tools {
+            let position = RESETPROP_FALLBACKS
+                .iter()
+                .position(|(path, _)| path == &root_tool)
+                .unwrap();
+            assert!(
+                position < first_system,
+                "root resetprop candidate {root_tool} must precede system candidates"
+            );
+        }
+    }
+
+    #[test]
+    fn resetprop_candidate_execution_continues_after_a_failed_wrapper() {
+        let commands = vec![
+            ResetpropCommand {
+                program: "/data/adb/first/resetprop".to_string(),
+                prepend_arg: None,
+            },
+            ResetpropCommand {
+                program: "/data/adb/working/resetprop".to_string(),
+                prepend_arg: None,
+            },
+        ];
+        let attempted = RefCell::new(Vec::new());
+
+        execute_write_and_verify_candidates_with(
+            &commands,
+            SYSTEM_SECURITY_PATCH_PROPERTY,
+            "2026-08-05",
+            false,
+            |command, property, value, no_triggers| {
+                attempted.borrow_mut().push((
+                    command.program.clone(),
+                    property.to_string(),
+                    value.to_string(),
+                    no_triggers,
+                ));
+                if command.program.contains("first") {
+                    bail!("wrapper cannot update the property")
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            *attempted.borrow(),
+            vec![
+                (
+                    "/data/adb/first/resetprop".to_string(),
+                    SYSTEM_SECURITY_PATCH_PROPERTY.to_string(),
+                    "2026-08-05".to_string(),
+                    false,
+                ),
+                (
+                    "/data/adb/working/resetprop".to_string(),
+                    SYSTEM_SECURITY_PATCH_PROPERTY.to_string(),
+                    "2026-08-05".to_string(),
+                    false,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn append_resetprop_candidate_deduplicates_same_invocation() {
+        let mut candidates = Vec::new();
+        append_resetprop_candidate(&mut candidates, "/data/adb/ksud", Some("resetprop"));
+        append_resetprop_candidate(&mut candidates, "/data/adb/ksud", Some("resetprop"));
+        append_resetprop_candidate(&mut candidates, "/data/adb/ksud", None::<String>);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].program, "/data/adb/ksud");
+        assert_eq!(candidates[0].prepend_arg.as_deref(), Some("resetprop"));
+        assert_eq!(candidates[1].prepend_arg, None);
+    }
+
+    #[test]
+    fn early_property_output_is_trimmed_and_bounded() {
+        assert_eq!(
+            normalize_early_property_output(b"  2026-08-05\n"),
+            Some("2026-08-05")
+        );
+        assert_eq!(normalize_early_property_output(b"\n\t"), None);
+        assert_eq!(
+            normalize_early_property_output(&[b'x'; MAX_EARLY_PROPERTY_OUTPUT_BYTES + 1]),
+            None
+        );
+        assert_eq!(normalize_early_property_output(&[0xff, 0xfe]), None);
+    }
+
+    #[test]
+    fn early_property_reader_is_restricted_to_security_patch_names() {
+        assert!(is_security_patch_property(SYSTEM_SECURITY_PATCH_PROPERTY));
+        assert!(is_security_patch_property(VENDOR_SECURITY_PATCH_PROPERTY));
+        assert!(!is_security_patch_property("ro.build.fingerprint"));
+        assert!(EARLY_PROPERTY_READ_FALLBACKS
+            .iter()
+            .all(|(path, _)| path.starts_with('/')));
     }
 
     #[test]
@@ -957,6 +1469,87 @@ mod tests {
                 .map(String::as_str),
             Some(previous.system.as_str())
         );
+    }
+
+    #[test]
+    fn early_pair_write_retries_after_init_republishes_an_old_value_without_rollback() {
+        let previous = patch_properties("2026-06-05", "2026-05-05");
+        let desired = patch_properties("2026-08-05", "2026-08-05");
+        let properties = RefCell::new(property_map(&previous));
+        let writes = RefCell::new(Vec::new());
+        let init_republished = RefCell::new(false);
+
+        write_security_patch_properties_early(
+            |property, value| {
+                writes
+                    .borrow_mut()
+                    .push((property.to_string(), value.to_string()));
+                properties
+                    .borrow_mut()
+                    .insert(property.to_string(), value.to_string());
+                // Simulate init loading the vendor property again while the
+                // paired system update is in flight. The next attempt must
+                // write the desired vendor value again, rather than rolling
+                // the already-written system value back to `previous`.
+                if property == SYSTEM_SECURITY_PATCH_PROPERTY && !*init_republished.borrow() {
+                    *init_republished.borrow_mut() = true;
+                    properties.borrow_mut().insert(
+                        VENDOR_SECURITY_PATCH_PROPERTY.to_string(),
+                        previous.vendor.clone(),
+                    );
+                }
+                Ok(())
+            },
+            |property| properties.borrow().get(property).cloned(),
+            &previous,
+            &desired,
+            3,
+            || {},
+        )
+        .unwrap();
+
+        assert_eq!(*properties.borrow(), property_map(&desired));
+        assert_eq!(
+            *writes.borrow(),
+            vec![
+                (
+                    VENDOR_SECURITY_PATCH_PROPERTY.to_string(),
+                    desired.vendor.clone()
+                ),
+                (
+                    SYSTEM_SECURITY_PATCH_PROPERTY.to_string(),
+                    desired.system.clone()
+                ),
+                (
+                    VENDOR_SECURITY_PATCH_PROPERTY.to_string(),
+                    desired.vendor.clone()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn early_pair_write_can_create_properties_that_are_not_published_yet() {
+        let previous = patch_properties("2026-06-05", "2026-05-05");
+        let desired = patch_properties("2026-08-05", "2026-08-05");
+        let properties = RefCell::new(HashMap::new());
+
+        write_security_patch_properties_early(
+            |property, value| {
+                properties
+                    .borrow_mut()
+                    .insert(property.to_string(), value.to_string());
+                Ok(())
+            },
+            |property| properties.borrow().get(property).cloned(),
+            &previous,
+            &desired,
+            1,
+            || {},
+        )
+        .unwrap();
+
+        assert_eq!(*properties.borrow(), property_map(&desired));
     }
 
     #[test]

@@ -125,11 +125,20 @@ date with `resetprop`. Before the first sync, it saves both current property
 values in
 `/data/misc/keystore/omk/data/security_patch_defaults.toml`; repeated syncs keep
 the existing defaults snapshot. While that snapshot remains valid and all four
-patch fields still hold one exact date, keymint reapplies the paired properties
-at startup. A manual exact-date configuration without the snapshot does not
-trigger that additional vendor-property write. A snapshot error skips this
-optional startup reapply without preventing keymint from starting. The native
-client validates TLS with embedded WebPKI roots, so the device does not need to
+patch fields still hold one exact date, a standard boot first replays the paired
+properties from `post-fs-data` with `resetprop -n`, before Zygote/framework
+processes cache `Build.VERSION.SECURITY_PATCH`. In KernelSU late-load mode,
+`late-load.sh` replaces that stage: it runs the early replay, reconciles the
+managed `system.prop` entry, and finishes before module properties are loaded;
+`post-mount.sh` then replays the properties again after mounting. On a
+standard KernelSU boot, `post-mount.sh` replays once more after module
+properties are loaded, and KeyMint repeats the replay at daemon startup as a
+fallback. The early path can use the validated snapshot while the build
+fingerprint is still unavailable; the daemon performs the strict fingerprint
+and OTA refresh later. If an early hook cannot run, it logs a warning and continues
+boot; a manual exact-date configuration without the snapshot does not trigger
+this additional vendor-property write. The native client
+validates TLS with embedded WebPKI roots, so the device does not need to
 provide `curl` or `wget`. HTTPS redirects are accepted only when the final URL
 remains the official bulletin page.
 
