@@ -19,7 +19,27 @@ const MAX_PIF_DEVICES = 64
 const MAX_PIF_MODEL_LENGTH = 128
 const MAX_PIF_PRODUCT_LENGTH = 128
 const MAX_PIF_FINGERPRINT_LENGTH = 1024
+const MAX_ACTIVITY_ENTRIES = 30
+const MAX_ACTIVITY_DETAIL_BYTES = 256
+const MAX_ACTIVITY_TIMESTAMP = 253_402_300_799
 const PIF_PRODUCT_RE = /^[a-z0-9][a-z0-9_]*$/
+
+const ACTIVITY_ACTIONS = [
+  'targets_saved',
+  'keybox_changed',
+  'widevine_installed',
+  'security_patch_synced',
+  'security_patch_restored',
+  'pif_enabled',
+  'pif_disabled',
+] as const
+export type ActivityAction = typeof ACTIVITY_ACTIONS[number]
+
+export interface ActivityEntry {
+  action: ActivityAction
+  detail: string
+  timestamp: number
+}
 
 export const MAX_KEYBOX_XML_BYTES = 64 * 1024
 
@@ -39,6 +59,16 @@ export interface EnabledPifFingerprintState {
 export type PifFingerprintState = {
   enabled: false
 } | EnabledPifFingerprintState
+
+export type KeyboxSource = 'google_hardware' | 'google_remote' | 'unknown'
+export type KeyboxLevel = 'tee' | 'strongbox' | 'unknown'
+
+export interface KeyboxState {
+  valid: boolean
+  bundled: boolean
+  source: KeyboxSource
+  level: KeyboxLevel
+}
 
 function parseCanonicalJson(output: string, description: string): unknown {
   let parsed: unknown
@@ -112,6 +142,58 @@ function parsePifState(output: string): PifFingerprintState {
   }
 }
 
+function parseKeyboxState(output: string): KeyboxState {
+  const parsed = parseCanonicalJson(output, 'Keybox state')
+  if (!isRecord(parsed)
+      || !hasOnlyKeys(parsed, ['valid', 'bundled', 'source', 'level'])
+      || typeof parsed.valid !== 'boolean'
+      || typeof parsed.bundled !== 'boolean'
+      || (parsed.source !== 'google_hardware'
+        && parsed.source !== 'google_remote'
+        && parsed.source !== 'unknown')
+      || (parsed.level !== 'tee'
+        && parsed.level !== 'strongbox'
+        && parsed.level !== 'unknown')
+      || (!parsed.valid && parsed.bundled)) {
+    throw new Error('OMK returned an invalid Keybox state')
+  }
+  return {
+    valid: parsed.valid,
+    bundled: parsed.bundled,
+    source: parsed.source,
+    level: parsed.level,
+  }
+}
+
+function parseActivityLog(output: string): ActivityEntry[] {
+  const parsed = parseCanonicalJson(output, 'WebUI activity log')
+  if (!Array.isArray(parsed) || parsed.length > MAX_ACTIVITY_ENTRIES) {
+    throw new Error('OMK returned an invalid WebUI activity log')
+  }
+
+  const actions = new Set<string>(ACTIVITY_ACTIONS)
+  return parsed.map(value => {
+    if (!isRecord(value)
+        || !hasOnlyKeys(value, ['action', 'detail', 'timestamp'])
+        || typeof value.action !== 'string'
+        || !actions.has(value.action)
+        || typeof value.detail !== 'string'
+        || new TextEncoder().encode(value.detail).byteLength > MAX_ACTIVITY_DETAIL_BYTES
+        || /[\u0000-\u001f\u007f]/.test(value.detail)
+        || typeof value.timestamp !== 'number'
+        || !Number.isSafeInteger(value.timestamp)
+        || value.timestamp <= 0
+        || value.timestamp > MAX_ACTIVITY_TIMESTAMP) {
+      throw new Error('OMK returned an invalid WebUI activity entry')
+    }
+    return {
+      action: value.action as ActivityAction,
+      detail: value.detail,
+      timestamp: value.timestamp,
+    }
+  })
+}
+
 function encodeBase64Bytes(bytes: Uint8Array): string {
   let binary = ''
   const chunkSize = 0x8000
@@ -169,6 +251,7 @@ export class Cli {
     const normalized = normalizePackageNames(packages)
     const payload = encodeBase64Utf8(JSON.stringify(normalized))
     await this.#runInject(['--webui-set-scoop', payload])
+    await this.#recordActivity('targets_saved', String(normalized.length))
   }
 
   async installKeybox(contents: Uint8Array): Promise<void> {
@@ -183,6 +266,22 @@ export class Cli {
     }
     const { keymint } = await this.#getHelperPaths()
     await this.#run(keymint, ['--webui-install-keybox', ...chunks])
+    await this.#recordActivity('keybox_changed', '')
+  }
+
+  async getKeyboxState(): Promise<KeyboxState> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-get-keybox-state'], 256)
+    return parseKeyboxState(output)
+  }
+
+  async installWidevineL1(): Promise<void> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-install-widevine-l1'], 256)
+    if (output !== 'widevine_l1_installed') {
+      throw new Error('OMK returned an unexpected Widevine L1 installation result')
+    }
+    await this.#recordActivity('widevine_installed', '')
   }
 
   async syncSecurityPatch(date: string): Promise<string> {
@@ -196,6 +295,7 @@ export class Cli {
     if (output !== date && output !== firstDayFallback) {
       throw new Error('OMK returned an unexpected security-patch date')
     }
+    await this.#recordActivity('security_patch_synced', output)
     return output
   }
 
@@ -205,6 +305,48 @@ export class Cli {
     if (output !== 'auto') {
       throw new Error('OMK returned an unexpected security-patch mode')
     }
+    await this.#recordActivity('security_patch_restored', '')
+  }
+
+  async getSystemSecurityPatch(): Promise<string> {
+    let probe: Awaited<ReturnType<typeof exec>>
+    try {
+      probe = await exec(
+        `/system/bin/sh -c ${shellQuote('/system/bin/getprop ro.build.version.security_patch')}`,
+      )
+    } catch (error) {
+      throw new Error(`Unable to read the system security patch: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (probe.errno !== 0) {
+      throw new Error(
+        `Unable to read the system security patch: ${probe.stderr.trim() || `shell exited with code ${probe.errno}`}`,
+      )
+    }
+
+    const patch = probe.stdout.trim()
+    if (!isSecurityPatchDate(patch)) {
+      throw new Error('Android returned an invalid system security-patch date')
+    }
+    return patch
+  }
+
+  async getTeeStatus(): Promise<void> {
+    const output = await this.#runInject(['--webui-get-tee-status'])
+    if (output !== 'normal') {
+      throw new Error('OMK returned an unexpected TEE status')
+    }
+  }
+
+  async getActivityLog(): Promise<ActivityEntry[]> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-get-activity-log'], 16 * 1024)
+    return parseActivityLog(output)
+  }
+
+  async clearActivityLog(): Promise<void> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-clear-activity-log'], 256)
+    if (output !== 'ok') throw new Error('OMK returned an unexpected activity-log result')
   }
 
   async fetchSecurityBulletin(): Promise<string> {
@@ -265,6 +407,10 @@ export class Cli {
     if (!state.enabled || state.product !== product) {
       throw new Error('OMK returned an unexpected PIF fingerprint state')
     }
+    await this.#recordActivity(
+      'pif_enabled',
+      JSON.stringify({ model: state.model, securityPatch: state.security_patch }),
+    )
     return state
   }
 
@@ -277,7 +423,24 @@ export class Cli {
     )
     const state = parsePifState(output)
     if (state.enabled) throw new Error('OMK did not disable PIF fingerprint spoofing')
+    await this.#recordActivity('pif_disabled', '')
     return state
+  }
+
+  async #recordActivity(action: ActivityAction, detail: string): Promise<void> {
+    try {
+      const { keymint } = await this.#getHelperPaths()
+      const encodedDetail = encodeBase64Utf8(detail)
+      const output = await this.#run(
+        keymint,
+        ['--webui-record-activity', action, encodedDetail],
+        256,
+      )
+      if (output !== 'ok') throw new Error('OMK returned an unexpected activity-log result')
+    } catch (error) {
+      // Activity history is supplementary and must not turn a completed operation into a failure.
+      console.error('Unable to record WebUI activity:', error)
+    }
   }
 
   async #runInject(args: string[]): Promise<string> {

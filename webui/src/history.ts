@@ -42,6 +42,7 @@ export class History {
   #boundPopState: (event: PopStateEvent) => void
 
   constructor() {
+    window.history.replaceState(null, '')
     this.#boundPopState = this.#onPopState.bind(this)
     window.addEventListener('popstate', this.#boundPopState)
   }

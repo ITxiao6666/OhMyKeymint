@@ -1,7 +1,8 @@
 @scope (.dialog-content) {
   #keybox-dialog,
   #pif-fingerprint-dialog,
-  #system-app-dialog {
+  #system-app-dialog,
+  #widevine-dialog {
     max-height: min(
       560px,
       calc(
@@ -46,6 +47,33 @@
     }
   }
 
+  #widevine-dialog {
+    max-width: min(
+      440px,
+      calc(
+        100vw - max(var(--left-inset), var(--right-inset)) -
+          max(var(--left-inset), var(--right-inset)) - 32px
+      )
+    );
+
+    .widevine-dialog-content {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+
+      md-icon {
+        flex: none;
+        color: var(--md-sys-color-error);
+      }
+
+      p {
+        margin: 0;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+      }
+    }
+  }
+
   #pif-fingerprint-dialog {
     max-width: min(
       480px,
@@ -65,12 +93,7 @@
             max(var(--left-inset), var(--right-inset)) - 80px
         )
       );
-      height: min(56vh, 520px);
-      height: min(56dvh, 520px);
-      min-height: min(300px, 56vh);
-      min-height: min(300px, 56dvh);
       gap: 12px;
-      overflow: hidden;
     }
 
     .pif-enable-row {
@@ -134,9 +157,6 @@
     }
 
     .pif-device-panel {
-      flex: 1;
-      min-height: 0;
-      overflow: hidden;
       border-radius: 8px;
       background-color: var(--md-sys-color-surface-container-low);
     }
@@ -177,12 +197,8 @@
     }
 
     .pif-device-list {
-      height: 100%;
-      overflow-y: auto;
-      overscroll-behavior: contain;
-      scrollbar-gutter: stable;
       box-sizing: border-box;
-      padding: 4px;
+      padding: 4px 4px 12px;
     }
 
     .pif-device-option {
@@ -259,12 +275,38 @@
       width: 100%;
     }
 
+    .system-app-content {
+      position: relative;
+      min-height: min(300px, 45vh);
+      min-height: min(300px, 45dvh);
+    }
+
+    .system-app-loading {
+      position: absolute;
+      z-index: 2;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: var(--md-sys-color-primary);
+      background-color: var(--md-sys-color-surface-container-high);
+    }
+
+    .system-app-loading[hidden] {
+      display: none;
+    }
+
     #system-app-list {
+      min-height: inherit;
       display: flex;
       flex-direction: column;
       gap: 2px;
       border-radius: 20px;
       overflow: hidden;
+
+      .card-box {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 60px;
+      }
 
       .card {
         position: relative;
@@ -300,10 +342,26 @@
       .loader {
         position: absolute;
         inset: 0;
-        background: linear-gradient(90deg, var(--md-sys-color-surface-container), var(--md-sys-color-surface-container-high), var(--md-sys-color-surface-container));
-        background-size: 200% 100%;
-        animation: shimmer 1.2s infinite linear;
+        overflow: hidden;
+        background-color: var(--md-sys-color-surface-container-high);
         border-radius: 6px;
+      }
+
+      .loader::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent),
+          transparent
+        );
+        transform: translateX(-100%);
+      }
+
+      .app-icon-container.icon-loading .loader::after {
+        animation: app-icon-shimmer 1.1s infinite linear;
       }
 
       .app-icon {
@@ -352,7 +410,8 @@
   }
 }
 
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+@media (prefers-reduced-motion: reduce) {
+  .dialog-content #system-app-dialog .loader::after {
+    animation: none;
+  }
 }

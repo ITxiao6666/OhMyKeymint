@@ -28,6 +28,7 @@ export interface SelectedFile {
 interface PendingSelection {
   token: number
   resolve: (value: SelectedFile | null) => void
+  reject: (reason?: unknown) => void
 }
 
 function shellQuote(value: string): string {
@@ -227,6 +228,7 @@ export class FileSelector {
   #systemInput: HTMLInputElement | null = null
   #systemInputCleanup: (() => void) | null = null
   #systemPickerActive = false
+  #systemPickerDirect = false
   #currentPath = STORAGE_ROOT
   #pathStack: string[] = [STORAGE_ROOT]
   #extension = 'xml'
@@ -308,7 +310,19 @@ export class FileSelector {
     if (this.#dialog) applyDialogAnimation(this.#dialog)
   }
 
-  async getFileContent(extension: string, maxBytes = MAX_KEYBOX_XML_BYTES): Promise<SelectedFile | null> {
+  /** Open Android's document picker without first showing the in-WebView list. */
+  getSystemFileContent(
+    extension: string,
+    maxBytes = MAX_KEYBOX_XML_BYTES,
+  ): Promise<SelectedFile | null> {
+    return this.getFileContent(extension, maxBytes, true)
+  }
+
+  async getFileContent(
+    extension: string,
+    maxBytes = MAX_KEYBOX_XML_BYTES,
+    preferSystemPicker = false,
+  ): Promise<SelectedFile | null> {
     const normalizedExtension = extension.trim().replace(/^\./, '').toLowerCase()
     if (!/^[a-z0-9]{1,16}$/.test(normalizedExtension)) {
       return Promise.reject(new Error('Invalid file extension'))
@@ -335,14 +349,26 @@ export class FileSelector {
     // users can navigate back and choose a keybox from another folder.
     this.#pathStack = [STORAGE_ROOT, INITIAL_PATH]
     const token = ++this.#generation
-    const promise = new Promise<SelectedFile | null>(resolve => {
-      this.#pending = { token, resolve }
+    const promise = new Promise<SelectedFile | null>((resolve, reject) => {
+      this.#pending = { token, resolve, reject }
     })
+
+    if (preferSystemPicker) {
+      // The system document picker is the primary path for callers that need
+      // access to providers such as MT Manager. If the WebView cannot open a
+      // native picker at all, continue with the existing in-WebView browser.
+      this.#systemPickerDirect = true
+      if (this.#openSystemPicker()) return promise
+      this.#systemPickerDirect = false
+      this.#finish(null)
+      return this.getFileContent(extension, maxBytes)
+    }
 
     if (!this.#dialog) {
       this.#finish(null)
       return promise
     }
+
     this.#renderLoading()
     void this.#showDialog(token)
     void this.#loadInitialPath(token)
@@ -512,9 +538,10 @@ export class FileSelector {
     void this.#listDirectory(this.#currentPath, pending.token)
   }
 
-  #openSystemPicker(): void {
+  #openSystemPicker(): boolean {
     const pending = this.#pending
-    if (pending === null || this.#systemPickerActive || this.#systemInput !== null) return
+    if (pending === null || this.#systemPickerActive || this.#systemInput !== null) return false
+    const directRequest = this.#systemPickerDirect
 
     const input = document.createElement('input')
     input.type = 'file'
@@ -548,13 +575,18 @@ export class FileSelector {
       // A stale callback from an older picker must not clear the state of a
       // newer picker that has already taken ownership of these fields.
       const ownsInput = this.#systemInput === input && this.#systemInputCleanup === cleanup
+      const finishDirectRequest = ownsInput && directRequest
       if (ownsInput) {
         this.#systemInput = null
         this.#systemInputCleanup = null
         this.#systemPickerActive = false
+        this.#systemPickerDirect = false
         if (this.#pending !== null) this.#setInteractive(true)
       }
       input.remove()
+      // Direct callers have no selector dialog to retry from. Resolve their
+      // request when the user cancels or when file validation/read fails.
+      if (finishDirectRequest && this.#pending?.token === pending.token) this.#finish(null)
     }
 
     const handleSelectedFile = (): void => {
@@ -568,7 +600,7 @@ export class FileSelector {
       // Keep the input attached until the File has been read. Some Android
       // providers expose a temporary URI whose grant lasts for the chooser
       // input's lifetime.
-      void this.#handleSystemFile(file, pending.token).then(cleanup, cleanup)
+      void this.#handleSystemFile(file, pending.token, directRequest).then(cleanup, cleanup)
     }
 
     const cleanupAfterReturn = (): void => {
@@ -617,22 +649,28 @@ export class FileSelector {
     document.addEventListener('visibilitychange', onVisibilityChange)
     try {
       input.click()
+      return true
     } catch (error) {
       cleanup()
       console.error('Unable to open the system file picker:', error)
       this.#renderStatus(i18n.t('replace_keybox_storage_error'))
+      return false
     }
   }
 
-  async #handleSystemFile(file: File, token: number): Promise<void> {
+  async #handleSystemFile(file: File, token: number, directRequest = false): Promise<void> {
     if (!this.#isActive(token)) return
     const request = ++this.#requestGeneration
     if (!hasFileExtension(file.name, this.#extension)) {
-      this.#renderStatus(i18n.t('prompt_keybox_xml_required'))
+      const message = i18n.t('prompt_keybox_xml_required')
+      if (directRequest) this.#fail(new Error(message))
+      else this.#renderStatus(message)
       return
     }
     if (file.size > this.#maxBytes) {
-      this.#renderStatus(i18n.t('prompt_keybox_too_large'))
+      const message = i18n.t('prompt_keybox_too_large')
+      if (directRequest) this.#fail(new Error(message))
+      else this.#renderStatus(message)
       return
     }
 
@@ -641,14 +679,18 @@ export class FileSelector {
       const contents = new Uint8Array(await file.slice(0, this.#maxBytes + 1).arrayBuffer())
       if (!this.#isRequestActive(token, request)) return
       if (contents.byteLength > this.#maxBytes) {
-        this.#renderStatus(i18n.t('prompt_keybox_too_large'))
+        const message = i18n.t('prompt_keybox_too_large')
+        if (directRequest) this.#fail(new Error(message))
+        else this.#renderStatus(message)
         return
       }
       this.#finish({ name: file.name, contents })
     } catch (error) {
       if (!this.#isActive(token)) return
       console.error('Unable to read selected file:', error)
-      this.#renderStatus(i18n.t('replace_keybox_storage_error'))
+      const message = i18n.t('replace_keybox_storage_error')
+      if (directRequest) this.#fail(new Error(message))
+      else this.#renderStatus(message)
     }
   }
 
@@ -681,6 +723,19 @@ export class FileSelector {
     void this.#requestDialogClose().then(
       () => pending.resolve(value),
       () => pending.resolve(value),
+    )
+  }
+
+  #fail(error: Error): void {
+    const pending = this.#pending
+    if (pending === null) return
+    this.#pending = null
+    this.#generation += 1
+    this.#requestGeneration += 1
+    this.#removeSystemInput()
+    void this.#requestDialogClose().then(
+      () => pending.reject(error),
+      () => pending.reject(error),
     )
   }
 
@@ -740,6 +795,7 @@ export class FileSelector {
     const input = this.#systemInput
     this.#systemInput = null
     this.#systemPickerActive = false
+    this.#systemPickerDirect = false
     input?.remove()
   }
 }

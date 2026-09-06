@@ -24,11 +24,12 @@ The keybox file must contain at least one complete RSA or EC entry, and every
 private key present must match its certificate chain. A keybox may contain both
 algorithms or only one; RKP-extracted keyboxes are legitimately EC-only. Keep
 the XML free of extra content such as watermarks or invisible characters. The
-embedded WebUI can browse shared storage and install a replacement. Its folder
-button also opens Android's generic file chooser, so another installed storage
-app such as MT Manager can provide the file when the default picker does not
-expose it. The chooser requests all MIME types; the WebUI still requires an
-`.xml` file and the native helper performs the complete validation.
+embedded WebUI opens Android's system document picker when installing a
+replacement, so the default file manager or another installed storage app such
+as MT Manager can provide the file. The picker requests all MIME types; the
+WebUI still requires an `.xml` file and the native helper performs the complete
+validation. If the system picker cannot be opened, the WebUI falls back to its
+shared-storage browser.
 
 The active files are `/data/misc/keystore/omk/config.toml` and
 `/data/misc/keystore/omk/injector.toml`. Read the
@@ -44,7 +45,9 @@ comma-separated TOML form remains accepted.
 
 The module includes a WebUI for choosing the exact packages in `scoop`,
 installing a local keybox, managing the Android security patch level, and
-applying a Pixel PIF fingerprint through OMK's own Zygisk payload:
+applying a Pixel PIF fingerprint through OMK's own Zygisk payload. It also
+offers an explicitly confirmed Widevine provisioning action on devices that
+ship a compatible vendor `KmInstallKeybox` utility:
 
 - In KernelSU, open Oh My Keymint from the module list and select its WebUI.
 - In Magisk, open an installed KSUWebUIStandalone or WebUI X host and select
@@ -105,11 +108,27 @@ properties, and do not change OMK's `[device]` identity. Disabling the action
 removes the OMK profile and restarts the affected processes so their next
 instances use the original values.
 
-Both network actions use the bundled native HTTPS client and require neither
-`curl` nor `wget`. Other WebUI operations remain local. The WebUI can also read
-and replace `scoop` and select a local XML file from shared storage or through
-another installed file app to replace the active keybox. The security-patch actions do not change
-secrets, identity fields, or other settings.
+**Widevine L1** first locates a compatible vendor `KmInstallKeybox` utility,
+then downloads the fixed `https://rawbin.dpejoh.com/clips/attestation` resource,
+reverses that feed's documented substitution alphabet, and accepts only a
+bounded, well-formed `AndroidAttestation` XML document. The native helper places
+the document in a private temporary file and invokes the utility with
+`<temporary-file> attestation true`. It attempts to remove the temporary file
+before returning and reports cleanup failures. This vendor path is normally
+available only on some Qualcomm devices. It changes vendor-backed attestation
+provisioning, may affect DRM or device certification, and therefore requires
+confirmation. A successful utility exit does not by itself guarantee that
+Widevine reports L1. The remote payload is protected by HTTPS and an exact
+host/path allowlist, but it is a server-managed value rather than a locally
+pinned key.
+
+The security-patch, PIF, and Widevine network actions use the bundled native
+HTTPS client and require neither `curl` nor `wget`. Other WebUI operations
+remain local. The WebUI can also read and replace `scoop` and select a local XML
+file from shared storage or through another installed file app to replace the
+active OMK keybox. The security-patch actions do not change secrets, identity
+fields, or other settings; the separate Widevine action has the provisioning
+effects described above.
 
 When the module is uninstalled from KernelSU, its bundled uninstaller removes
 exactly `/data/adb/omk` and `/data/misc/keystore/omk`, including OMK-created key

@@ -12,6 +12,7 @@ use kmr_common::rpc;
 use kmr_common::selinux::{clear_sockcreate_con, set_sockcreate_con};
 use log::{debug, error, info, warn, LevelFilter};
 use rsbinder::rpc::{PeerIdentity, RpcServer};
+use serde::Serialize;
 
 use crate::{
     consts::RPC_SOCKET_CONTEXT,
@@ -38,7 +39,9 @@ pub mod security_patch;
 pub mod selinux;
 pub mod utils;
 pub mod watchdog;
+pub mod webui_activity;
 pub mod webui_http;
+pub mod widevine;
 
 include!(concat!(env!("OUT_DIR"), "/aidl.rs"));
 // include!( "./aidl.rs"); // for development only
@@ -267,19 +270,66 @@ fn decode_webui_keybox_payload(chunks: Vec<String>) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("invalid keybox payload encoding: {error}"))
 }
 
-fn handle_webui_keybox_command() -> Option<Result<&'static str, String>> {
+#[derive(Serialize)]
+struct WebUiKeyboxState {
+    valid: bool,
+    bundled: bool,
+    source: &'static str,
+    level: &'static str,
+}
+
+fn webui_keybox_state() -> Result<String, String> {
+    let (state, metadata) =
+        keybox::installed_keybox_state_and_metadata().map_err(|error| format!("{error:#}"))?;
+    let response = WebUiKeyboxState {
+        valid: !matches!(state, keybox::KeyboxFileState::Invalid),
+        bundled: matches!(state, keybox::KeyboxFileState::Bundled),
+        source: metadata.source.as_str(),
+        level: metadata.level.as_str(),
+    };
+    serde_json::to_string(&response)
+        .map_err(|error| format!("failed to serialize keybox state: {error}"))
+}
+
+fn handle_webui_keybox_command() -> Option<Result<String, String>> {
     let mut args = std::env::args();
     let _program = args.next();
-    if args.next()?.as_str() != "--webui-install-keybox" {
+    match args.next()?.as_str() {
+        "--webui-install-keybox" => Some(
+            decode_webui_keybox_payload(args.collect())
+                .and_then(|contents| {
+                    keybox::install_keybox_xml(&contents).map_err(|e| format!("{e:#}"))
+                })
+                .map(|()| "ok".to_string()),
+        ),
+        "--webui-get-keybox-state" => {
+            if args.next().is_some() {
+                return Some(Err(
+                    "--webui-get-keybox-state does not accept arguments".to_string()
+                ));
+            }
+            Some(webui_keybox_state())
+        }
+        _ => None,
+    }
+}
+
+fn handle_webui_widevine_command() -> Option<Result<&'static str, String>> {
+    let mut args = std::env::args();
+    let _program = args.next();
+    if args.next()?.as_str() != "--webui-install-widevine-l1" {
         return None;
+    }
+    if args.next().is_some() {
+        return Some(Err(
+            "--webui-install-widevine-l1 does not accept arguments".to_string()
+        ));
     }
 
     Some(
-        decode_webui_keybox_payload(args.collect())
-            .and_then(|contents| {
-                keybox::install_keybox_xml(&contents).map_err(|e| format!("{e:#}"))
-            })
-            .map(|()| "ok"),
+        widevine::install_widevine_l1_attestation()
+            .map(|()| "widevine_l1_installed")
+            .map_err(|error| format!("{error:#}")),
     )
 }
 
@@ -392,7 +442,97 @@ fn handle_webui_pif_command() -> Option<Result<String, String>> {
     }
 }
 
+fn handle_webui_activity_command() -> Option<Result<String, String>> {
+    let mut args = std::env::args();
+    let _program = args.next();
+    let command = args.next()?;
+
+    match command.as_str() {
+        "--webui-get-activity-log" => {
+            if args.next().is_some() {
+                return Some(Err(
+                    "--webui-get-activity-log does not accept arguments".to_string()
+                ));
+            }
+            prepare_android_storage();
+            Some(webui_activity::list_json().map_err(|error| format!("{error:#}")))
+        }
+        "--webui-record-activity" => {
+            let Some(action) = args.next() else {
+                return Some(Err(
+                    "--webui-record-activity requires an action and base64 detail".to_string(),
+                ));
+            };
+            let Some(encoded_detail) = args.next() else {
+                return Some(Err(
+                    "--webui-record-activity requires an action and base64 detail".to_string(),
+                ));
+            };
+            if args.next().is_some() {
+                return Some(Err(
+                    "--webui-record-activity accepts exactly two arguments".to_string()
+                ));
+            }
+            let max_encoded_bytes = webui_activity::MAX_ACTIVITY_DETAIL_BYTES.div_ceil(3) * 4;
+            if encoded_detail.len() > max_encoded_bytes {
+                return Some(Err(
+                    "--webui-record-activity detail exceeds the byte limit".to_string()
+                ));
+            }
+            let result = BASE64_STANDARD
+                .decode(encoded_detail)
+                .map_err(|error| format!("invalid WebUI activity detail encoding: {error}"))
+                .and_then(|bytes| {
+                    String::from_utf8(bytes)
+                        .map_err(|error| format!("WebUI activity detail is not UTF-8: {error}"))
+                })
+                .and_then(|detail| {
+                    prepare_android_storage();
+                    webui_activity::record(&action, &detail).map_err(|error| format!("{error:#}"))
+                })
+                .map(|()| "ok".to_string());
+            Some(result)
+        }
+        "--webui-clear-activity-log" => {
+            if args.next().is_some() {
+                return Some(Err(
+                    "--webui-clear-activity-log does not accept arguments".to_string()
+                ));
+            }
+            prepare_android_storage();
+            Some(
+                webui_activity::clear()
+                    .map(|()| "ok".to_string())
+                    .map_err(|error| format!("{error:#}")),
+            )
+        }
+        _ => None,
+    }
+}
+
 fn main() {
+    if let Some(result) = handle_webui_activity_command() {
+        match result {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
+    if let Some(result) = handle_webui_widevine_command() {
+        match result {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
     if let Some(result) = handle_webui_pif_command() {
         match result {
             Ok(output) => println!("{output}"),

@@ -25,10 +25,67 @@ use kmr_wire::keymint;
 use log::{debug, error, info, warn};
 use regex::Regex;
 use x509_cert::der as x509_der;
-use x509_cert::Certificate;
+use x509_cert::{ext::pkix::name::DirectoryString, Certificate};
+use x509_parser::parse_x509_certificate;
 
 pub const KEYBOX_PATH: &str = "/data/misc/keystore/omk/keybox.xml";
 pub const MAX_KEYBOX_XML_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyboxFileState {
+    Bundled,
+    Custom,
+    Invalid,
+}
+
+/// Origin of the attestation key material represented by a keybox.
+///
+/// The value is intentionally conservative: a certificate chain is only
+/// identified as a Google key when its root public key matches the pinned
+/// Google root key.  Certificate subjects alone are not sufficient evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeyboxSource {
+    GoogleHardware,
+    GoogleRemote,
+    #[default]
+    Unknown,
+}
+
+impl KeyboxSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::GoogleHardware => "google_hardware",
+            Self::GoogleRemote => "google_remote",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Hardware-backed level advertised by the active keybox certificate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeyboxLevel {
+    Tee,
+    Strongbox,
+    #[default]
+    Unknown,
+}
+
+impl KeyboxLevel {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tee => "tee",
+            Self::Strongbox => "strongbox",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Non-sensitive information derived from the public certificate chains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct KeyboxMetadata {
+    pub source: KeyboxSource,
+    pub level: KeyboxLevel,
+}
 
 const BUNDLED_KEYBOX_XML: &str = include_str!("../template/keybox.xml");
 
@@ -43,11 +100,53 @@ lazy_static::lazy_static! {
         Regex::new(r#"(?s)<NumberOfCertificates>\s*(\d+)\s*</NumberOfCertificates>"#).unwrap();
     static ref CERT_RE: Regex =
         Regex::new(r#"(?s)<Certificate(?:\s+[^>]*)?>\s*(.*?)\s*</Certificate>"#).unwrap();
+    // These are the DER SubjectPublicKeyInfo values published by Google's
+    // attestation-root endpoint. Keep all supported roots pinned and compare
+    // the complete SPKI, rather than relying on a free-form subject or issuer
+    // string.
+    static ref GOOGLE_HARDWARE_ROOT_SPKI_DER: Vec<u8> = STANDARD
+        .decode(GOOGLE_HARDWARE_ROOT_SPKI_B64)
+        .expect("pinned Google root SPKI must be valid base64");
+    static ref GOOGLE_EC_ROOT_SPKI_DER: Vec<u8> = STANDARD
+        .decode(GOOGLE_EC_ROOT_SPKI_B64)
+        .expect("pinned Google EC root SPKI must be valid base64");
 }
 
 static KEYBOX_WATCHER: OnceLock<()> = OnceLock::new();
 static KEYBOX_DB_RETIRE_ALLOWED: AtomicBool = AtomicBool::new(false);
 static KEYBOX_RUNTIME_LOADED: AtomicBool = AtomicBool::new(false);
+
+const RKP_PROVISIONING_OID: x509_der::asn1::ObjectIdentifier =
+    x509_der::asn1::ObjectIdentifier::new_unwrap("1.3.6.1.4.1.11129.2.1.30");
+const TITLE_OID: x509_der::asn1::ObjectIdentifier =
+    x509_der::asn1::ObjectIdentifier::new_unwrap("2.5.4.12");
+const SERIAL_NUMBER_OID: x509_der::asn1::ObjectIdentifier =
+    x509_der::asn1::ObjectIdentifier::new_unwrap("2.5.4.5");
+
+const GOOGLE_HARDWARE_ROOT_SPKI_B64: &str = concat!(
+    "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAr7bHgiuxpwHsK7Qui8xU",
+    "FmOr75gvMsd/dTEDDJdSSxtf6An7xyqpRR90PL2abxM1dEqlXnf2tqw1Ne4Xwl5j",
+    "lRfdnJLmN0pTy/4lj4/7tv0Sk3iiKkypnEUtR6WfMgH0QZfKHM1+di+y9TFRtv6y",
+    "//0rb+T+W8a9nsNL/ggjnar86461qO0rOs2cXjp3kOG1FEJ5MVmFmBGtnrKpa73X",
+    "pXyTqRxB/M0n1n/W9nGqC4FSYa04T6N5RIZGBN2z2MT5IKGbFlbC8UrW0DxW7AYI",
+    "mQQcHtGl/m00QLVWutHQoVJYnFPlXTcHYvASLu+RhhsbDmxMgJJ0mcDpvsC4PjvB",
+    "+TxywElgS70vE0XmLD+OJtvsBslHZvPBKCOdT0MS+tgSOIfga+z1Z1g7+DVagf7q",
+    "uvmag8jfPioyKvxnK/EgsTUVi2ghzq8wm27ud/mIM7AY2qEORR8Go3TVB4HzWQgp",
+    "Zrt3i5MIlCaY504LzSRiigHCzAPlHws+W0rB5N+er5/2pJKnfBSDiCiFAVtCLOZ7",
+    "gLiMm0jhO2B6tUXHI/+MRPjy02i59lINMRRev56GKtcd9qO/0kUJWdZTdA2XoS82",
+    "ixPvZtXQpUpuL12ab+9EaDK8Z4RHJYYfCT3Q5vNAXaiWQ+8PTWm2QgBR/bkwSWc+",
+    "NpUFgNPN9PvQi8WEg5UmAGMCAwEAAQ==",
+);
+
+// Google added this EC attestation root during the 2025 root-certificate
+// rotation. It can anchor both factory- and remotely-provisioned chains, so
+// the ProvisioningInfo extension, rather than the root algorithm, determines
+// the provisioning source.
+const GOOGLE_EC_ROOT_SPKI_B64: &str = concat!(
+    "MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEI9ojcU7fPlsFCjxy6IRqzgeOoK0b+YsV",
+    "9FPQywiyw8EQRTkJ9u3qwfnI4DGoSLlBqClTXJfgfCcZvs60FikNMHnu4fkRzObf",
+    "gDkU2KNXezT9/RQ+XvNslxPHrHCowhGr",
+);
 
 #[derive(Clone)]
 pub struct CertSignAlgoInfo {
@@ -191,6 +290,20 @@ impl KeyBox {
         self.identity_digest
     }
 
+    /// Returns non-sensitive metadata derived from the keybox certificate
+    /// chains.  Parsing failures are treated as unknown metadata because the
+    /// keybox itself has already passed the normal private-key/leaf check and
+    /// this informational path must never prevent KeyMint startup.
+    pub fn metadata(&self) -> KeyboxMetadata {
+        let chains = [self.ec_info.as_ref(), self.rsa_info.as_ref()];
+        combine_chain_metadata(
+            chains
+                .into_iter()
+                .flatten()
+                .map(|info| metadata_for_chain(&info.chain)),
+        )
+    }
+
     fn signing_info(&self, key_type: SigningKeyType) -> Result<SigningInfoSnapshot, Error> {
         // Prefer the subject key's algorithm, but use the sole available key for a single-algorithm
         // keybox. The TA derives the leaf signature algorithm from this returned key material.
@@ -306,6 +419,51 @@ impl KeyBox {
             cert_count = info.chain.len(),
             certificates = certificates,
         )
+    }
+}
+
+fn combine_chain_metadata(chains: impl IntoIterator<Item = ChainMetadata>) -> KeyboxMetadata {
+    let mut source = None;
+    let mut source_unknown = false;
+    let mut level = KeyboxLevel::Unknown;
+    let mut saw_level = false;
+    let mut conflicting_levels = false;
+
+    for chain_metadata in chains {
+        // The keybox can contain independent RSA and EC chains.  Do not
+        // let one chain hide an unknown or contradictory result from the
+        // other chain: the label describes the complete keybox, not just
+        // whichever algorithm happens to be queried first.
+        match chain_metadata.source {
+            KeyboxSource::Unknown => source_unknown = true,
+            known => match source {
+                None => source = Some(known),
+                Some(existing) if existing != known => source_unknown = true,
+                Some(_) => {}
+            },
+        }
+
+        if chain_metadata.level != KeyboxLevel::Unknown {
+            if !saw_level {
+                level = chain_metadata.level;
+                saw_level = true;
+            } else if level != chain_metadata.level {
+                conflicting_levels = true;
+            }
+        }
+    }
+
+    if conflicting_levels {
+        level = KeyboxLevel::Unknown;
+    }
+
+    KeyboxMetadata {
+        source: if source_unknown {
+            KeyboxSource::Unknown
+        } else {
+            source.unwrap_or_default()
+        },
+        level,
     }
 }
 
@@ -428,6 +586,155 @@ fn validate_chain_matches_key(
     Ok(())
 }
 
+#[derive(Clone, Copy, Default)]
+struct ChainMetadata {
+    source: KeyboxSource,
+    level: KeyboxLevel,
+}
+
+fn metadata_for_chain(chain: &[keymint::Certificate]) -> ChainMetadata {
+    metadata_for_chain_with_roots(
+        chain,
+        &[
+            GOOGLE_HARDWARE_ROOT_SPKI_DER.as_slice(),
+            GOOGLE_EC_ROOT_SPKI_DER.as_slice(),
+        ],
+    )
+}
+
+fn metadata_for_chain_with_roots(
+    chain: &[keymint::Certificate],
+    pinned_root_spkis: &[&[u8]],
+) -> ChainMetadata {
+    // Keep certificate positions intact. Silently dropping a malformed middle
+    // certificate could turn an invalid chain into a plausible leaf/root pair
+    // and produce misleading metadata in the WebUI.
+    let mut parsed_chain = Vec::with_capacity(chain.len());
+    for certificate in chain {
+        let Ok(parsed) =
+            <Certificate as x509_der::Decode>::from_der(&certificate.encoded_certificate)
+        else {
+            return ChainMetadata::default();
+        };
+        parsed_chain.push(parsed);
+    }
+    let Some(leaf) = parsed_chain.first() else {
+        return ChainMetadata::default();
+    };
+    let Some(root) = parsed_chain.last() else {
+        return ChainMetadata::default();
+    };
+
+    let has_pinned_root =
+        x509_der::Encode::to_der(root.tbs_certificate().subject_public_key_info())
+            .ok()
+            .is_some_and(|spki| pinned_root_spkis.contains(&spki.as_slice()));
+
+    // A pinned root key alone is not enough: an unrelated leaf can otherwise
+    // be followed by a copied Google root certificate and look authentic in
+    // the WebUI. Verify every child signature with the next certificate's
+    // public key before reporting a Google source. This is intentionally kept
+    // in the informational metadata path; KeyMint's existing key/leaf
+    // validation remains unchanged.
+    if has_pinned_root && !chain_signatures_are_valid(chain) {
+        return ChainMetadata {
+            level: keybox_level_from_subject(leaf.tbs_certificate().subject()),
+            ..ChainMetadata::default()
+        };
+    }
+
+    let has_rkp_extension = leaf
+        .tbs_certificate()
+        .extensions()
+        .is_some_and(|extensions| {
+            extensions
+                .iter()
+                .any(|extension| extension.extn_id == RKP_PROVISIONING_OID)
+        });
+    let root_adjacent = parsed_chain.iter().rev().nth(1);
+    let has_factory_serial = root_adjacent.is_some_and(|certificate| {
+        certificate
+            .tbs_certificate()
+            .subject()
+            .iter()
+            .any(|attribute| attribute.oid == SERIAL_NUMBER_OID)
+    });
+    let has_droid_ca2 = root_adjacent.is_some_and(|certificate| {
+        let subject = certificate.tbs_certificate().subject();
+        let common_name = subject.common_name().ok().flatten();
+        let organization = subject.organization().ok().flatten();
+        common_name.is_some_and(|value| value.value().as_ref() == "Droid CA2")
+            && organization.is_some_and(|value| value.value().as_ref() == "Google LLC")
+    });
+
+    // Google attestation roots can anchor both factory- and remotely-
+    // provisioned keys. Match the factory serial-number and remote Droid CA2
+    // structures used by Android's official verifier. ProvisioningInfo is an
+    // additional positive indication for extracted RKP chains.
+    let source = if has_pinned_root && has_factory_serial {
+        KeyboxSource::GoogleHardware
+    } else if has_pinned_root && (has_rkp_extension || has_droid_ca2) {
+        KeyboxSource::GoogleRemote
+    } else {
+        KeyboxSource::Unknown
+    };
+
+    let level = keybox_level_from_subject(leaf.tbs_certificate().subject());
+
+    ChainMetadata { source, level }
+}
+
+/// Verify the signatures linking a leaf-first certificate chain.
+///
+/// The verifier supports the RSA PKCS#1, RSA-PSS, ECDSA, and Ed25519
+/// algorithms used by Android attestation chains. Unsupported algorithms are
+/// rejected conservatively so a future chain is shown as unknown until the
+/// verifier supports it.
+fn chain_signatures_are_valid(chain: &[keymint::Certificate]) -> bool {
+    chain.windows(2).all(|pair| {
+        certificate_signature_is_valid(&pair[0].encoded_certificate, &pair[1].encoded_certificate)
+    })
+}
+
+fn certificate_signature_is_valid(child_der: &[u8], issuer_der: &[u8]) -> bool {
+    let Ok((child_remainder, child)) = parse_x509_certificate(child_der) else {
+        return false;
+    };
+    let Ok((issuer_remainder, issuer)) = parse_x509_certificate(issuer_der) else {
+        return false;
+    };
+    if !child_remainder.is_empty() || !issuer_remainder.is_empty() {
+        return false;
+    }
+    child.verify_signature(Some(issuer.public_key())).is_ok()
+}
+
+fn keybox_level_from_subject(subject: &x509_cert::name::Name) -> KeyboxLevel {
+    // Newer RKP certificates use O=TEE/StrongBox. Older factory keyboxes
+    // commonly encode the same value as the X.520 title attribute (T=TEE),
+    // so use title only as a compatibility fallback when O is absent or
+    // contains an unrelated value.
+    let parse_value = |value: &str| match value.trim().to_ascii_lowercase().as_str() {
+        "tee" => KeyboxLevel::Tee,
+        "strongbox" => KeyboxLevel::Strongbox,
+        _ => KeyboxLevel::Unknown,
+    };
+
+    if let Ok(Some(organization)) = subject.organization() {
+        let level = parse_value(organization.value().as_ref());
+        if level != KeyboxLevel::Unknown {
+            return level;
+        }
+    }
+
+    subject
+        .by_oid::<DirectoryString>(TITLE_OID)
+        .ok()
+        .flatten()
+        .map(|title| parse_value(title.value().as_ref()))
+        .unwrap_or(KeyboxLevel::Unknown)
+}
+
 fn decode_pem(pem: &str) -> Result<Vec<u8>> {
     let base64_body = pem
         .lines()
@@ -475,6 +782,48 @@ fn validate_keybox_xml(contents: &[u8]) -> Result<()> {
     let xml = str::from_utf8(contents).context("keybox.xml is not valid UTF-8")?;
     KeyBox::from_xml_str(xml).context("keybox.xml validation failed")?;
     Ok(())
+}
+
+fn classify_keybox_xml(contents: &[u8]) -> KeyboxFileState {
+    if validate_keybox_xml(contents).is_err() {
+        return KeyboxFileState::Invalid;
+    }
+    let xml = str::from_utf8(contents).expect("validated keybox.xml is UTF-8");
+    if is_bundled_keybox_xml(xml) {
+        KeyboxFileState::Bundled
+    } else {
+        KeyboxFileState::Custom
+    }
+}
+
+pub fn installed_keybox_state() -> Result<KeyboxFileState> {
+    let contents = fs::read(KEYBOX_PATH)
+        .with_context(|| format!("failed to read keybox.xml from {KEYBOX_PATH}"))?;
+    Ok(classify_keybox_xml(&contents))
+}
+
+/// Reads the installed keybox once and returns both its validation state and
+/// the non-sensitive metadata derived from its certificate chains. Invalid
+/// XML is represented as `Invalid` with unknown metadata so an informational
+/// WebUI query cannot prevent the rest of the service from starting.
+pub fn installed_keybox_state_and_metadata() -> Result<(KeyboxFileState, KeyboxMetadata)> {
+    let contents = fs::read(KEYBOX_PATH)
+        .with_context(|| format!("failed to read keybox.xml from {KEYBOX_PATH}"))?;
+    if contents.len() > MAX_KEYBOX_XML_BYTES {
+        return Ok((KeyboxFileState::Invalid, KeyboxMetadata::default()));
+    }
+    let Ok(xml) = str::from_utf8(&contents) else {
+        return Ok((KeyboxFileState::Invalid, KeyboxMetadata::default()));
+    };
+    let Ok(keybox) = KeyBox::from_xml_str(xml) else {
+        return Ok((KeyboxFileState::Invalid, KeyboxMetadata::default()));
+    };
+    let state = if is_bundled_keybox_xml(xml) {
+        KeyboxFileState::Bundled
+    } else {
+        KeyboxFileState::Custom
+    };
+    Ok((state, keybox.metadata()))
 }
 
 pub fn install_keybox_xml(contents: &[u8]) -> Result<()> {
@@ -688,6 +1037,9 @@ impl RetrieveCertSigningInfo for KeyboxManager {
 mod tests {
     use super::*;
     use kmr_ta::device::SigningKey;
+    use rcgen::{
+        BasicConstraints, CertificateParams, CustomExtension, DnType, IsCa, Issuer, KeyPair,
+    };
 
     fn write_temp_keybox(name: &str, contents: &str) -> std::path::PathBuf {
         let mut path = std::env::temp_dir();
@@ -725,6 +1077,376 @@ mod tests {
         let oversized = vec![b' '; MAX_KEYBOX_XML_BYTES + 1];
         let error = validate_keybox_xml(&oversized).unwrap_err();
         assert!(error.to_string().contains("exceeds"));
+    }
+
+    #[test]
+    fn metadata_reads_tee_and_strongbox_from_leaf_organization() {
+        let tee = metadata_for_chain(&[keymint::Certificate {
+            encoded_certificate: certificate_with_organization("TEE", false),
+        }]);
+        assert_eq!(tee.source, KeyboxSource::Unknown);
+        assert_eq!(tee.level, KeyboxLevel::Tee);
+
+        let strongbox = metadata_for_chain(&[keymint::Certificate {
+            encoded_certificate: certificate_with_organization("StrongBox", false),
+        }]);
+        assert_eq!(strongbox.source, KeyboxSource::Unknown);
+        assert_eq!(strongbox.level, KeyboxLevel::Strongbox);
+    }
+
+    #[test]
+    fn metadata_rejects_unknown_leaf_organization() {
+        let metadata = metadata_for_chain(&[keymint::Certificate {
+            encoded_certificate: certificate_with_organization("Google LLC", false),
+        }]);
+        assert_eq!(metadata.level, KeyboxLevel::Unknown);
+    }
+
+    #[test]
+    fn metadata_accepts_legacy_title_level_when_organization_is_absent() {
+        let metadata = metadata_for_chain(&[keymint::Certificate {
+            encoded_certificate: certificate_with_title("TEE"),
+        }]);
+        assert_eq!(metadata.level, KeyboxLevel::Tee);
+    }
+
+    #[test]
+    fn rkp_extension_without_pinned_google_root_is_not_remote() {
+        let metadata = metadata_for_chain(&[keymint::Certificate {
+            // A matching name and the RKP OID are not sufficient to establish
+            // that this is a Google-issued chain.
+            encoded_certificate: certificate_with_organization("Google LLC", true),
+        }]);
+        assert_eq!(metadata.source, KeyboxSource::Unknown);
+        assert_eq!(metadata.level, KeyboxLevel::Unknown);
+    }
+
+    #[test]
+    fn rejects_spliced_google_ec_root() {
+        let leaf = certificate_with_organization("TEE", true);
+        let root = decode_pem(GOOGLE_EC_ROOT_CERT_PEM).unwrap();
+        let metadata = metadata_for_chain(&[
+            keymint::Certificate {
+                encoded_certificate: leaf,
+            },
+            keymint::Certificate {
+                encoded_certificate: root,
+            },
+        ]);
+        assert_eq!(metadata.source, KeyboxSource::Unknown);
+        assert_eq!(metadata.level, KeyboxLevel::Tee);
+    }
+
+    #[test]
+    fn recognizes_signed_chain_anchored_by_pinned_root() {
+        let (hardware_chain, hardware_root_spki) = generated_signed_chain("StrongBox", false, true);
+        let hardware =
+            metadata_for_chain_with_roots(&hardware_chain, &[hardware_root_spki.as_slice()]);
+        assert_eq!(hardware.source, KeyboxSource::GoogleHardware);
+        assert_eq!(hardware.level, KeyboxLevel::Strongbox);
+
+        let (remote_chain, remote_root_spki) = generated_signed_chain("TEE", true, false);
+        let remote = metadata_for_chain_with_roots(&remote_chain, &[remote_root_spki.as_slice()]);
+        assert_eq!(remote.source, KeyboxSource::GoogleRemote);
+        assert_eq!(remote.level, KeyboxLevel::Tee);
+
+        let (unknown_chain, unknown_root_spki) = generated_signed_chain("TEE", false, false);
+        let unknown =
+            metadata_for_chain_with_roots(&unknown_chain, &[unknown_root_spki.as_slice()]);
+        assert_eq!(unknown.source, KeyboxSource::Unknown);
+    }
+
+    #[test]
+    fn recognizes_droid_ca2_chain_without_provisioning_extension() {
+        let (chain, root_spki) = generated_droid_ca2_chain();
+        let metadata = metadata_for_chain_with_roots(&chain, &[root_spki.as_slice()]);
+        assert_eq!(metadata.source, KeyboxSource::GoogleRemote);
+        assert_eq!(metadata.level, KeyboxLevel::Tee);
+    }
+
+    #[test]
+    fn rejects_tampered_chain_anchored_by_pinned_root() {
+        let (mut chain, root_spki) = generated_signed_chain("TEE", true, false);
+        let signature_byte = chain[0].encoded_certificate.last_mut().unwrap();
+        *signature_byte ^= 1;
+
+        let metadata = metadata_for_chain_with_roots(&chain, &[root_spki.as_slice()]);
+        assert_eq!(metadata.source, KeyboxSource::Unknown);
+        assert_eq!(metadata.level, KeyboxLevel::Tee);
+    }
+
+    #[test]
+    fn pinned_google_ec_root_without_provisioning_cert_is_unknown() {
+        let root = decode_pem(GOOGLE_EC_ROOT_CERT_PEM).unwrap();
+        let metadata = metadata_for_chain(&[keymint::Certificate {
+            encoded_certificate: root,
+        }]);
+        assert_eq!(metadata.source, KeyboxSource::Unknown);
+    }
+
+    #[test]
+    fn pinned_legacy_google_root_without_provisioning_cert_is_unknown() {
+        let root = decode_pem(GOOGLE_HARDWARE_ROOT_CERT_PEM).unwrap();
+        let metadata = metadata_for_chain(&[keymint::Certificate {
+            encoded_certificate: root,
+        }]);
+        assert_eq!(metadata.source, KeyboxSource::Unknown);
+    }
+
+    #[test]
+    fn rejects_spliced_legacy_google_root() {
+        let leaf = certificate_with_organization("TEE", true);
+        let root = decode_pem(GOOGLE_HARDWARE_ROOT_CERT_PEM).unwrap();
+        let metadata = metadata_for_chain(&[
+            keymint::Certificate {
+                encoded_certificate: leaf,
+            },
+            keymint::Certificate {
+                encoded_certificate: root,
+            },
+        ]);
+        assert_eq!(metadata.source, KeyboxSource::Unknown);
+        assert_eq!(metadata.level, KeyboxLevel::Tee);
+    }
+
+    #[test]
+    fn verifies_pinned_google_root_self_signatures() {
+        for root_pem in [GOOGLE_EC_ROOT_CERT_PEM, GOOGLE_HARDWARE_ROOT_CERT_PEM] {
+            let root_der = decode_pem(root_pem).unwrap();
+            assert!(certificate_signature_is_valid(&root_der, &root_der));
+        }
+    }
+
+    #[test]
+    fn mixed_or_unknown_algorithm_sources_are_unknown() {
+        let hardware = ChainMetadata {
+            source: KeyboxSource::GoogleHardware,
+            level: KeyboxLevel::Tee,
+        };
+        let remote = ChainMetadata {
+            source: KeyboxSource::GoogleRemote,
+            level: KeyboxLevel::Tee,
+        };
+        let unknown = ChainMetadata {
+            source: KeyboxSource::Unknown,
+            level: KeyboxLevel::Tee,
+        };
+
+        assert_eq!(
+            combine_chain_metadata([hardware, remote]).source,
+            KeyboxSource::Unknown
+        );
+        assert_eq!(
+            combine_chain_metadata([hardware, unknown]).source,
+            KeyboxSource::Unknown
+        );
+        assert_eq!(
+            combine_chain_metadata([hardware, hardware]).source,
+            KeyboxSource::GoogleHardware
+        );
+        assert_eq!(
+            combine_chain_metadata([remote]).source,
+            KeyboxSource::GoogleRemote
+        );
+        assert_eq!(
+            combine_chain_metadata([remote, remote]).source,
+            KeyboxSource::GoogleRemote
+        );
+    }
+
+    const GOOGLE_EC_ROOT_CERT_PEM: &str = r"-----BEGIN CERTIFICATE-----
+MIICIjCCAaigAwIBAgIRAISp0Cl7DrWK5/8OgN52BgUwCgYIKoZIzj0EAwMwUjEc
+MBoGA1UEAwwTS2V5IEF0dGVzdGF0aW9uIENBMTEQMA4GA1UECwwHQW5kcm9pZDET
+MBEGA1UECgwKR29vZ2xlIExMQzELMAkGA1UEBhMCVVMwHhcNMjUwNzE3MjIzMjE4
+WhcNMzUwNzE1MjIzMjE4WjBSMRwwGgYDVQQDDBNLZXkgQXR0ZXN0YXRpb24gQ0Ex
+MRAwDgYDVQQLDAdBbmRyb2lkMRMwEQYDVQQKDApHb29nbGUgTExDMQswCQYDVQQG
+EwJVUzB2MBAGByqGSM49AgEGBSuBBAAiA2IABCPaI3FO3z5bBQo8cuiEas4HjqCt
+G/mLFfRT0MsIssPBEEU5Cfbt6sH5yOAxqEi5QagpU1yX4HwnGb7OtBYpDTB57uH5
+Eczm34A5FNijV3s0/f0UPl7zbJcTx6xwqMIRq6NCMEAwDwYDVR0TAQH/BAUwAwEB
+/zAOBgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYEFFIyuyz7RkOb3NaBqQ5lZuA0QepA
+MAoGCCqGSM49BAMDA2gAMGUCMETfjPO/HwqReR2CS7p0ZWoD/LHs6hDi422opifH
+EUaYLxwGlT9SLdjkVpz0UUOR5wIxAIoGyxGKRHVTpqpGRFiJtQEOOTp/+s1GcxeY
+uR2zh/80lQyu9vAFCj6E4AXc+osmRg==
+-----END CERTIFICATE-----";
+
+    const GOOGLE_HARDWARE_ROOT_CERT_PEM: &str = r"-----BEGIN CERTIFICATE-----
+MIIFHDCCAwSgAwIBAgIJAPHBcqaZ6vUdMA0GCSqGSIb3DQEBCwUAMBsxGTAXBgNV
+BAUTEGY5MjAwOWU4NTNiNmIwNDUwHhcNMjIwMzIwMTgwNzQ4WhcNNDIwMzE1MTgw
+NzQ4WjAbMRkwFwYDVQQFExBmOTIwMDllODUzYjZiMDQ1MIICIjANBgkqhkiG9w0B
+AQEFAAOCAg8AMIICCgKCAgEAr7bHgiuxpwHsK7Qui8xUFmOr75gvMsd/dTEDDJdS
+Sxtf6An7xyqpRR90PL2abxM1dEqlXnf2tqw1Ne4Xwl5jlRfdnJLmN0pTy/4lj4/7
+tv0Sk3iiKkypnEUtR6WfMgH0QZfKHM1+di+y9TFRtv6y//0rb+T+W8a9nsNL/ggj
+nar86461qO0rOs2cXjp3kOG1FEJ5MVmFmBGtnrKpa73XpXyTqRxB/M0n1n/W9nGq
+C4FSYa04T6N5RIZGBN2z2MT5IKGbFlbC8UrW0DxW7AYImQQcHtGl/m00QLVWutHQ
+oVJYnFPlXTcHYvASLu+RhhsbDmxMgJJ0mcDpvsC4PjvB+TxywElgS70vE0XmLD+O
+JtvsBslHZvPBKCOdT0MS+tgSOIfga+z1Z1g7+DVagf7quvmag8jfPioyKvxnK/Eg
+sTUVi2ghzq8wm27ud/mIM7AY2qEORR8Go3TVB4HzWQgpZrt3i5MIlCaY504LzSRi
+igHCzAPlHws+W0rB5N+er5/2pJKnfBSDiCiFAVtCLOZ7gLiMm0jhO2B6tUXHI/+M
+RPjy02i59lINMRRev56GKtcd9qO/0kUJWdZTdA2XoS82ixPvZtXQpUpuL12ab+9E
+aDK8Z4RHJYYfCT3Q5vNAXaiWQ+8PTWm2QgBR/bkwSWc+NpUFgNPN9PvQi8WEg5Um
+AGMCAwEAAaNjMGEwHQYDVR0OBBYEFDZh4QB8iAUJUYtEbEf/GkzJ6k8SMB8GA1Ud
+IwQYMBaAFDZh4QB8iAUJUYtEbEf/GkzJ6k8SMA8GA1UdEwEB/wQFMAMBAf8wDgYD
+VR0PAQH/BAQDAgIEMA0GCSqGSIb3DQEBCwUAA4ICAQB8cMqTllHc8U+qCrOlg3H7
+174lmaCsbo/bJ0C17JEgMLb4kvrqsXZs01U3mB/qABg/1t5Pd5AORHARs1hhqGIC
+W/nKMav574f9rZN4PC2ZlufGXb7sIdJpGiO9ctRhiLuYuly10JccUZGEHpHSYM2G
+tkgYbZba6lsCPYAAP83cyDV+1aOkTf1RCp/lM0PKvmxYN10RYsK631jrleGdcdkx
+oSK//mSQbgcWnmAEZrzHoF1/0gso1HZgIn0YLzVhLSA/iXCX4QT2h3J5z3znluKG
+1nv8NQdxei2DIIhASWfu804CA96cQKTTlaae2fweqXjdN1/v2nqOhngNyz1361mF
+mr4XmaKH/ItTwOe72NI9ZcwS1lVaCvsIkTDCEXdm9rCNPAY10iTunIHFXRh+7KPz
+lHGewCq/8TOohBRn0/NNfh7uRslOSZ/xKbN9tMBtw37Z8d2vvnXq/YWdsm1+JLVw
+n6yYD/yacNJBlwpddla8eaVMjsF6nBnIgQOf9zKSe06nSTqvgwUHosgOECZJZ1Eu
+zbH4yswbt02tKtKEFhx+v+OTge/06V+jGsqTWLsfrOCNLuA8H++z+pUENmpqnnHo
+vaI47gC+TNpkgYGkkBT6B/m/U01BuOBBTzhIlMEZq9qkDWuM2cA5kW5V3FJUcfHn
+w1IdYIg2Wxg7yHcQZemFQg==
+-----END CERTIFICATE-----";
+
+    fn certificate_with_organization(organization: &str, rkp_extension: bool) -> Vec<u8> {
+        let mut params = CertificateParams::new(Vec::new()).unwrap();
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, organization);
+        if rkp_extension {
+            params
+                .custom_extensions
+                .push(CustomExtension::from_oid_content(
+                    &[1, 3, 6, 1, 4, 1, 11129, 2, 1, 30],
+                    Vec::new(),
+                ));
+        }
+        let key_pair = KeyPair::generate().unwrap();
+        params.self_signed(&key_pair).unwrap().der().to_vec()
+    }
+
+    fn certificate_with_title(title: &str) -> Vec<u8> {
+        let mut params = CertificateParams::new(Vec::new()).unwrap();
+        params
+            .distinguished_name
+            .push(DnType::CustomDnType(vec![2, 5, 4, 12]), title);
+        let key_pair = KeyPair::generate().unwrap();
+        params.self_signed(&key_pair).unwrap().der().to_vec()
+    }
+
+    fn generated_signed_chain(
+        organization: &str,
+        rkp_extension: bool,
+        factory_serial: bool,
+    ) -> (Vec<keymint::Certificate>, Vec<u8>) {
+        let mut root_params = CertificateParams::new(Vec::new()).unwrap();
+        root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        root_params
+            .distinguished_name
+            .push(DnType::CommonName, "Metadata test root");
+        let root_key = KeyPair::generate().unwrap();
+        let root_certificate = root_params.self_signed(&root_key).unwrap();
+        let root_issuer = Issuer::new(root_params, root_key);
+
+        let mut leaf_params = CertificateParams::new(Vec::new()).unwrap();
+        leaf_params
+            .distinguished_name
+            .push(DnType::OrganizationName, organization);
+        if factory_serial {
+            leaf_params
+                .distinguished_name
+                .push(DnType::CustomDnType(vec![2, 5, 4, 5]), "factory-key-id");
+        }
+        if rkp_extension {
+            leaf_params
+                .custom_extensions
+                .push(CustomExtension::from_oid_content(
+                    &[1, 3, 6, 1, 4, 1, 11129, 2, 1, 30],
+                    Vec::new(),
+                ));
+        }
+        let leaf_key = KeyPair::generate().unwrap();
+        let leaf_certificate = leaf_params.signed_by(&leaf_key, &root_issuer).unwrap();
+        let root_der = root_certificate.der().to_vec();
+        let parsed_root = <Certificate as x509_der::Decode>::from_der(&root_der).unwrap();
+        let root_spki = parsed_root
+            .tbs_certificate()
+            .subject_public_key_info()
+            .to_der()
+            .unwrap();
+
+        (
+            vec![
+                keymint::Certificate {
+                    encoded_certificate: leaf_certificate.der().to_vec(),
+                },
+                keymint::Certificate {
+                    encoded_certificate: root_der,
+                },
+            ],
+            root_spki,
+        )
+    }
+
+    fn generated_droid_ca2_chain() -> (Vec<keymint::Certificate>, Vec<u8>) {
+        let mut root_params = CertificateParams::new(Vec::new()).unwrap();
+        root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        root_params
+            .distinguished_name
+            .push(DnType::CommonName, "Metadata test root");
+        let root_key = KeyPair::generate().unwrap();
+        let root_certificate = root_params.self_signed(&root_key).unwrap();
+        let root_issuer = Issuer::new(root_params, root_key);
+
+        let mut ca2_params = CertificateParams::new(Vec::new()).unwrap();
+        ca2_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca2_params
+            .distinguished_name
+            .push(DnType::CommonName, "Droid CA2");
+        ca2_params
+            .distinguished_name
+            .push(DnType::OrganizationName, "Google LLC");
+        let ca2_key = KeyPair::generate().unwrap();
+        let ca2_certificate = ca2_params.signed_by(&ca2_key, &root_issuer).unwrap();
+        let ca2_issuer = Issuer::new(ca2_params, ca2_key);
+
+        let mut leaf_params = CertificateParams::new(Vec::new()).unwrap();
+        leaf_params
+            .distinguished_name
+            .push(DnType::OrganizationName, "TEE");
+        let leaf_key = KeyPair::generate().unwrap();
+        let leaf_certificate = leaf_params.signed_by(&leaf_key, &ca2_issuer).unwrap();
+        let root_der = root_certificate.der().to_vec();
+        let parsed_root = <Certificate as x509_der::Decode>::from_der(&root_der).unwrap();
+        let root_spki = parsed_root
+            .tbs_certificate()
+            .subject_public_key_info()
+            .to_der()
+            .unwrap();
+
+        (
+            vec![
+                keymint::Certificate {
+                    encoded_certificate: leaf_certificate.der().to_vec(),
+                },
+                keymint::Certificate {
+                    encoded_certificate: ca2_certificate.der().to_vec(),
+                },
+                keymint::Certificate {
+                    encoded_certificate: root_der,
+                },
+            ],
+            root_spki,
+        )
+    }
+
+    #[test]
+    fn classifies_installed_keybox_contents_without_modifying_them() {
+        assert_eq!(
+            classify_keybox_xml(BUNDLED_KEYBOX_XML.as_bytes()),
+            KeyboxFileState::Bundled
+        );
+        let custom = format!("{BUNDLED_KEYBOX_XML}\n<!-- selected by user -->\n");
+        assert_eq!(
+            classify_keybox_xml(custom.as_bytes()),
+            KeyboxFileState::Custom
+        );
+        assert_eq!(
+            classify_keybox_xml(b"<AndroidAttestation/>"),
+            KeyboxFileState::Invalid
+        );
     }
 
     #[test]

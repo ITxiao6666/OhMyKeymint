@@ -41,9 +41,26 @@ its WebUI or Autopif implementation; it independently validates the generated
 `device_list.json` and `device_prop/*.prop` data protocol before rendering the
 OMK PIF profile.
 
+## Specter interface and Widevine workflow reference
+
+The WebUI information architecture and the vendor Widevine provisioning
+workflow were checked against
+[dpejoh/specter](https://github.com/dpejoh/specter) commit
+[`829c4fa95ab5a08e4cd7e18dd686e73896d90a24`](https://github.com/dpejoh/specter/commit/829c4fa95ab5a08e4cd7e18dd686e73896d90a24).
+That project is licensed under GPL-3.0. Oh My Keymint does not include or run
+Specter's WebUI or shell scripts. Its WebUI and Rust implementation are
+independent; they reproduce only the documented interaction with the fixed
+attestation feed and the vendor `KmInstallKeybox` command contract.
+
+The Widevine action downloads its server-managed attestation document from
+`https://rawbin.dpejoh.com/clips/attestation`. The document is not bundled with
+Oh My Keymint. OMK restricts the request to that exact HTTPS host and path,
+validates the decoded XML envelope, and attempts to delete its temporary copy
+after the vendor command exits, reporting cleanup failures.
+
 ## Native HTTPS client
 
-The security-patch and PIF fingerprint WebUI actions use the Rust
+The security-patch, PIF fingerprint, and Widevine WebUI actions use the Rust
 [ureq](https://github.com/algesten/ureq) HTTP client (version 3.4.0), licensed
 under the MIT or Apache License 2.0. Its HTTPS implementation uses
 [rustls](https://github.com/rustls/rustls) and

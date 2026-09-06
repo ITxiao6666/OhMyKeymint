@@ -2,6 +2,8 @@ interface Translations {
   [key: string]: string
 }
 
+const LANGUAGE_STORAGE_KEY = 'omk-language'
+
 export class I18nManager {
   static readonly #RTL_LANGUAGES: ReadonlySet<string> = new Set([
     'ar', 'fa', 'he', 'ur', 'ps', 'sd', 'ku', 'yi', 'dv',
@@ -64,6 +66,11 @@ export class I18nManager {
   }
 
   setLanguage(lang: string): void {
+    try {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang)
+    } catch {
+      // Continue with URL-based language selection when storage is unavailable.
+    }
     const url = new URL(window.location.href)
     if (lang !== 'default' && this.#availableLanguages.includes(lang)) {
       url.searchParams.set('lang', lang)
@@ -98,7 +105,13 @@ export class I18nManager {
       this.#languages = await response.json() as Record<string, string>
       this.#availableLanguages = Object.keys(this.#languages)
 
-      const requested = new URL(window.location.href).searchParams.get('lang')
+      let stored: string | null = null
+      try {
+        stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
+      } catch {
+        stored = null
+      }
+      const requested = new URL(window.location.href).searchParams.get('lang') ?? stored
       if (requested !== null && this.#availableLanguages.includes(requested)) {
         this.#preference = requested
         return requested
@@ -119,6 +132,7 @@ export class I18nManager {
 
   #applyDirection(): void {
     const baseCode = this.#currentLang.split('-')[0]
+    document.documentElement.lang = this.#currentLang
     document.documentElement.setAttribute(
       'dir',
       I18nManager.#RTL_LANGUAGES.has(baseCode) ? 'rtl' : 'ltr',

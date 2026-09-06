@@ -10,6 +10,7 @@ import './dialog.scss'
 export class KeyboxDialog {
   #dialog: MdDialog | null = null
   #selectedFile: SelectedFile | null = null
+  #choosing = false
   #busy = false
   readonly #cli: Cli
   readonly #snackbar: Snackbar
@@ -66,7 +67,8 @@ export class KeyboxDialog {
   }
 
   choose(): void {
-    if (this.#busy || this.#dialog?.open) return
+    if (this.#choosing || this.#busy || this.#dialog?.open) return
+    this.#choosing = true
     void this.#chooseFile()
   }
 
@@ -79,11 +81,16 @@ export class KeyboxDialog {
   async #chooseFile(): Promise<void> {
     let selected: SelectedFile | null
     try {
-      selected = await this.#fileSelector.getFileContent('xml', MAX_KEYBOX_XML_BYTES)
+      // Open Android's document picker first so files from external storage
+      // providers (for example MT Manager) can be selected directly.
+      selected = await this.#fileSelector.getSystemFileContent('xml', MAX_KEYBOX_XML_BYTES)
     } catch (error) {
       console.error('Unable to open the keybox file selector:', error)
-      this.#snackbar.show(i18n.t('replace_keybox_storage_error'), false, 6000)
+      const detail = error instanceof Error ? error.message : String(error)
+      this.#snackbar.show(detail || i18n.t('replace_keybox_storage_error'), false, 6000)
       return
+    } finally {
+      this.#choosing = false
     }
     if (!selected || this.#busy) return
 

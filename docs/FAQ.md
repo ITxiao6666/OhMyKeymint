@@ -113,8 +113,8 @@ My Keymint. Install one of those WebUI hosts separately if neither is present.
 ### Does the WebUI use the network, and what can it change?
 
 Its application code, icons, and language files are bundled with OMK. Normal
-local operations do not use the network. **Sync security patch** is the one
-exception: it invokes the module's native HTTPS client to request Google's
+local operations do not use the network. **Sync security patch** invokes the
+module's native HTTPS client to request Google's
 official `source.android.com` Android Security Bulletin overview, with the
 official Chinese mirror as a fallback. It extracts the newest published patch
 month. If the saved default `ro.build.version.security_patch` uses day `01`,
@@ -154,13 +154,33 @@ to restore the preceding property values. A failed restore keeps the snapshot
 available for another attempt and reports the error in the WebUI.
 
 The WebUI also reads and replaces `scoop` and can install a local XML file
-selected from shared storage as the active keybox. Its built-in selector has a
-folder action that opens Android's generic chooser, allowing another installed
-app such as MT Manager to provide the file. That chooser requests all MIME
-types because providers may label XML as `text/plain` or
-`application/octet-stream`; the WebUI still requires an `.xml` filename. It
-does not change `[crypto]`, device identity, or unrelated configuration settings.
+selected through Android's system document picker as the active keybox. The
+picker can use another installed storage app such as MT Manager and requests
+all MIME types because providers may label XML as `text/plain` or
+`application/octet-stream`; the WebUI still requires an `.xml` filename. If the
+system picker cannot be opened, the WebUI falls back to its shared-storage
+browser. It does not change `[crypto]`, device identity, or unrelated
+configuration settings.
+
+The Home page's Keybox summary uses `L1`/`Valid` for a valid Keybox with
+identified Google source and hardware level, `L2`/`Soft-banned` when the file
+is valid but metadata is incomplete, and `L3`/`Revoked` when validation fails.
+This is a local Keybox classification; it is not a live result read from a
+third-party Play Integrity checker.
 Continue to manage those settings through the documented active files.
+
+**Spoof PIF fingerprint** and **Widevine L1** are the other network-backed
+actions. PIF uses only the documented Pixel profile feed described below. The
+Widevine action first locates a compatible vendor `KmInstallKeybox` utility,
+then requests exactly `https://rawbin.dpejoh.com/clips/attestation`, decodes and
+validates its bounded `AndroidAttestation` XML response, and passes a private
+temporary file to the utility as `<file> attestation true`. It attempts to
+remove the temporary file before returning and reports cleanup failures. The
+action normally works only on some Qualcomm devices, changes vendor-backed
+provisioning, and may affect DRM or device certification, so the WebUI requires
+confirmation. A successful vendor utility call does not guarantee that a DRM
+client will report L1. OMK restricts the HTTPS host and path, but the payload
+remains a server-managed value rather than a locally pinned key.
 
 ### What happens when the WebUI saves the app list?
 
@@ -172,7 +192,9 @@ for new requests.
 
 If loading, parsing, validation, or writing fails, the WebUI reports the error
 and the existing file is not replaced. Saving is unavailable when the current
-list could not be loaded.
+list could not be loaded. The package selector refreshes installed apps when it
+opens and when the WebUI returns to the foreground, while preserving unsaved
+selections.
 
 ### Where are the active settings?
 
@@ -350,12 +372,13 @@ tools accept damaged or incomplete XML that OMK correctly rejects.
 
 ### How should I replace `keybox.xml`?
 
-In the WebUI, choose **Change Keybox**. You can browse shared storage in the
-built-in selector, or tap its folder action to open Android's generic chooser
-and select the file with another installed app such as MT Manager. The generic
-chooser requests all MIME types because providers may label XML as
-`text/plain` or `application/octet-stream`; the WebUI still requires an
-`.xml` filename. The native `keymint` helper checks the input size, decodes it
+In the WebUI, choose **Change Keybox**. Android's system document picker opens
+directly so you can select the file with the default file manager or another
+installed storage app such as MT Manager. The picker requests all MIME types
+because providers may label XML as `text/plain` or `application/octet-stream`;
+the WebUI still requires an `.xml` filename. If the system picker cannot be
+opened, the WebUI falls back to its shared-storage browser. The native
+`keymint` helper checks the input size, decodes it
 as UTF-8, and performs the complete in-memory `KeyBox` validation, including
 private-key and certificate-chain matching. It atomically replaces the canonical lowercase
 `/data/misc/keystore/omk/keybox.xml` only after every check succeeds. A read,

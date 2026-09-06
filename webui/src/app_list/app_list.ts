@@ -1,6 +1,7 @@
 import { getPackagesInfo, listPackages } from 'kernelsu-alt'
 import type { PackagesInfo } from 'kernelsu-alt'
 import type { Config } from '../config'
+import { i18n } from '../i18n'
 import { isValidPackageName } from '../package_name'
 import { isDev } from '../utils/dev'
 import './app_list.scss'
@@ -11,7 +12,27 @@ const DEFAULT_VISIBLE_SYSTEM_APPS = [
   'com.android.vending',
 ]
 
+const PACKAGE_INFO_BATCH_SIZE = 32
+const SYSTEM_APP_RENDER_BATCH_SIZE = 16
+
+function nextFrame(): Promise<void> {
+  return new Promise(resolve => window.requestAnimationFrame(() => resolve()))
+}
+
+function afterPaint(): Promise<void> {
+  return new Promise(resolve => {
+    window.requestAnimationFrame(() => window.setTimeout(resolve, 0))
+  })
+}
+
+function i18nText(key: string, fallback: string): string {
+  const value = i18n.t(key)
+  return value === key ? fallback : value
+}
+
 type CheckboxElement = HTMLElement & { checked: boolean }
+
+export type SelectionFilter = 'all' | 'selected' | 'unselected'
 
 export interface AppEntry {
   packageName: string
@@ -23,48 +44,96 @@ export class AppList {
   readonly #config: Config
   #entries: AppEntry[] = []
   #visibleSystemApps = new Set(DEFAULT_VISIBLE_SYSTEM_APPS)
+  #packageInfoCache = new Map<string, PackagesInfo>()
   #iconObserver: IntersectionObserver | null = null
   #systemAppIconObserver: IntersectionObserver | null = null
+  #entriesVersion = 0
+  #systemAppRenderedVersion = -1
+  #systemAppRenderGeneration = 0
+  #systemAppContainer: HTMLElement | null = null
   #container: HTMLElement | null = null
+  #searchQuery = ''
+  #selectionFilter: SelectionFilter = 'all'
+  #selectionCallbacks: Array<(count: number) => void> = []
   menuOpen = false
 
   constructor(config: Config) {
     this.#config = config
   }
 
-  async fetch(): Promise<void> {
+  async fetch(): Promise<boolean> {
     if (isDev()) {
+      const hadEntries = this.#entries.length !== 0
       this.#initDevMode()
-      return
+      if (!hadEntries) this.#entriesVersion++
+      return !hadEntries
     }
 
+    // KernelSU's package APIs cross a synchronous WebView bridge internally.
+    // Yield first so navigation and progress animations can paint before it runs.
+    await afterPaint()
     const rawPackages = await listPackages('all').catch(() => [])
-    const packages = [...new Set(rawPackages.filter(isValidPackageName))]
-    let infos: PackagesInfo[] = []
-    try {
-      infos = await getPackagesInfo(packages) as PackagesInfo[]
-    } catch {
-      // Package names remain usable when labels or system metadata are unavailable.
+    const packages = [...new Set(rawPackages.filter(isValidPackageName))].sort()
+    const installedPackages = new Set(packages)
+    for (const packageName of this.#packageInfoCache.keys()) {
+      if (!installedPackages.has(packageName)) this.#packageInfoCache.delete(packageName)
     }
 
-    const infoByPackage = new Map(
-      infos
-        .filter(info => isValidPackageName(info.packageName))
-        .map(info => [info.packageName, info]),
-    )
+    const missingPackages = packages.filter(packageName => !this.#packageInfoCache.has(packageName))
+    for (let offset = 0; offset < missingPackages.length; offset += PACKAGE_INFO_BATCH_SIZE) {
+      await afterPaint()
+      const batch = missingPackages.slice(offset, offset + PACKAGE_INFO_BATCH_SIZE)
+      try {
+        const infos = await getPackagesInfo(batch) as PackagesInfo[]
+        for (const info of infos) {
+          if (isValidPackageName(info.packageName) && installedPackages.has(info.packageName)) {
+            this.#packageInfoCache.set(info.packageName, info)
+          }
+        }
+      } catch {
+        // Package names remain usable when labels or system metadata are unavailable.
+      }
+    }
 
-    this.#entries = packages.map(packageName => {
-      const info = infoByPackage.get(packageName)
+    const entries = packages.map(packageName => {
+      const info = this.#packageInfoCache.get(packageName)
       return {
         packageName,
         appName: typeof info?.appLabel === 'string' && info.appLabel ? info.appLabel : packageName,
         isSystem: info?.isSystem ?? false,
       }
     })
+
+    const previousEntries = new Map(this.#entries.map(entry => [entry.packageName, entry]))
+    const changed = entries.length !== this.#entries.length || entries.some(entry => {
+      const previous = previousEntries.get(entry.packageName)
+      return previous?.appName !== entry.appName || previous.isSystem !== entry.isSystem
+    })
+    this.#entries = entries
+    if (changed) this.#entriesVersion++
+    return changed
   }
 
   getEntries(): AppEntry[] {
     return this.#entries
+  }
+
+  getSelectedCount(): number {
+    return new Set(this.#config.get('target')).size
+  }
+
+  onSelectionChange(callback: (count: number) => void): void {
+    this.#selectionCallbacks.push(callback)
+  }
+
+  setSearchQuery(query: string): void {
+    this.#searchQuery = query.trim().toLocaleLowerCase()
+    this.#applyFilters()
+  }
+
+  setSelectionFilter(filter: SelectionFilter): void {
+    this.#selectionFilter = filter
+    this.#applyFilters()
   }
 
   async save(): Promise<void> {
@@ -79,7 +148,6 @@ export class AppList {
     }
     if (this.#container) {
       this.renderAppList(this.#container)
-      if (force) window.scrollTo(0, 0)
     }
   }
 
@@ -101,11 +169,15 @@ export class AppList {
     })
     this.#config.set('target', [...target])
     this.#syncCheckboxes()
+    this.#applyFilters()
+    this.#emitSelectionChange()
   }
 
   deselectAll(): void {
     this.#config.set('target', [])
     this.#syncCheckboxes()
+    this.#applyFilters()
+    this.#emitSelectionChange()
   }
 
   renderAppList(container: HTMLElement): void {
@@ -125,17 +197,44 @@ export class AppList {
 
     const fragment = document.createDocumentFragment()
     for (const entry of displayed) {
-      fragment.appendChild(this.#createCard(entry, target.has(entry.packageName)))
+      fragment.appendChild(this.#createCard(entry, target.has(entry.packageName), 'target'))
     }
+    const empty = document.createElement('div')
+    empty.className = 'app-list-empty'
+    empty.textContent = i18nText('app_targets_empty', 'No matching apps')
+    empty.hidden = true
+    fragment.appendChild(empty)
     container.appendChild(fragment)
     this.#setupCardListeners(container)
+    this.#applyFilters()
 
     this.#iconObserver?.disconnect()
     this.#iconObserver = this.#setupIconObserver(container)
   }
 
-  renderSystemAppList(container: HTMLElement): void {
+  isSystemAppListReady(container: HTMLElement): boolean {
+    return this.#systemAppContainer === container
+      && this.#systemAppRenderedVersion === this.#entriesVersion
+  }
+
+  cancelSystemAppRender(): void {
+    this.#systemAppRenderGeneration++
+    this.#systemAppIconObserver?.disconnect()
+  }
+
+  async renderSystemAppList(container: HTMLElement): Promise<boolean> {
+    const generation = ++this.#systemAppRenderGeneration
+    this.#systemAppIconObserver?.disconnect()
+
+    if (this.isSystemAppListReady(container)) {
+      this.#syncSystemAppCheckboxes(container)
+      this.#setupSystemAppListeners(container)
+      this.#systemAppIconObserver = this.#setupIconObserver(container)
+      return true
+    }
+
     container.replaceChildren()
+    const target = new Set(this.#config.get('target'))
     const systemEntries = this.#entries.filter(entry => entry.isSystem)
     systemEntries.sort((left, right) => {
       const leftVisible = this.#visibleSystemApps.has(left.packageName)
@@ -144,20 +243,29 @@ export class AppList {
       return left.appName.localeCompare(right.appName)
     })
 
-    const fragment = document.createDocumentFragment()
-    for (const entry of systemEntries) {
-      fragment.appendChild(this.#createCard(entry, this.#visibleSystemApps.has(entry.packageName)))
+    for (let offset = 0; offset < systemEntries.length; offset += SYSTEM_APP_RENDER_BATCH_SIZE) {
+      if (generation !== this.#systemAppRenderGeneration) return false
+      const fragment = document.createDocumentFragment()
+      const batch = systemEntries.slice(offset, offset + SYSTEM_APP_RENDER_BATCH_SIZE)
+      for (const entry of batch) {
+        fragment.appendChild(this.#createCard(entry, target.has(entry.packageName), 'system'))
+      }
+      container.appendChild(fragment)
+      if (offset + SYSTEM_APP_RENDER_BATCH_SIZE < systemEntries.length) await nextFrame()
     }
-    container.appendChild(fragment)
-    this.#setupSystemAppListeners(container)
+    if (generation !== this.#systemAppRenderGeneration) return false
 
-    this.#systemAppIconObserver?.disconnect()
+    this.#setupSystemAppListeners(container)
     this.#systemAppIconObserver = this.#setupIconObserver(container)
+    this.#systemAppContainer = container
+    this.#systemAppRenderedVersion = this.#entriesVersion
+    return true
   }
 
   async saveSystemAppSelection(checkedApps: string[]): Promise<void> {
     const checked = new Set(checkedApps.filter(isValidPackageName))
     this.#visibleSystemApps = new Set([...DEFAULT_VISIBLE_SYSTEM_APPS, ...checked])
+    this.#systemAppRenderedVersion = -1
 
     const target = new Set(this.#config.get('target'))
     for (const entry of this.#entries) {
@@ -170,17 +278,20 @@ export class AppList {
     }
     this.#config.set('target', [...target])
     await this.refresh(false)
+    this.#emitSelectionChange()
   }
 
-  #createCard(entry: AppEntry, checked: boolean): HTMLElement {
+  #createCard(entry: AppEntry, checked: boolean, mode: 'target' | 'system'): HTMLElement {
     const cardBox = document.createElement('div')
     cardBox.className = 'card-box'
 
     const card = document.createElement('div')
     card.className = `card card-alpha content${checked ? ' selected' : ''}`
     card.dataset.package = entry.packageName
+    card.dataset.selected = String(checked)
+    card.dataset.search = `${entry.appName}\n${entry.packageName}`.toLocaleLowerCase()
 
-    card.appendChild(document.createElement('md-ripple'))
+    if (mode === 'target') card.appendChild(document.createElement('md-ripple'))
 
     const label = document.createElement('label')
     label.className = 'name'
@@ -195,9 +306,6 @@ export class AppList {
     image.draggable = false
     const fallback = document.createElement('div')
     fallback.className = 'app-icon-fallback'
-    const fallbackIcon = document.createElement('md-icon')
-    fallbackIcon.textContent = 'android'
-    fallback.appendChild(fallbackIcon)
     iconContainer.append(loader, image, fallback)
 
     const info = document.createElement('div')
@@ -211,11 +319,24 @@ export class AppList {
     info.append(appName, packageName)
     label.append(iconContainer, info)
 
-    const checkbox = document.createElement('md-checkbox') as CheckboxElement
-    checkbox.className = 'checkbox'
-    checkbox.checked = checked
-    checkbox.setAttribute('touch-target', 'wrapper')
-    card.append(label, checkbox)
+    if (mode === 'system') {
+      const checkbox = document.createElement('md-checkbox') as CheckboxElement
+      checkbox.className = 'checkbox'
+      checkbox.checked = checked
+      checkbox.setAttribute('touch-target', 'wrapper')
+      card.append(label, checkbox)
+    } else {
+      card.tabIndex = 0
+      card.setAttribute('role', 'checkbox')
+      card.setAttribute('aria-checked', String(checked))
+      const selection = document.createElement('span')
+      selection.className = 'selection-indicator'
+      const selectionIcon = document.createElement('md-icon')
+      selectionIcon.textContent = 'check'
+      selectionIcon.setAttribute('aria-hidden', 'true')
+      selection.appendChild(selectionIcon)
+      card.append(label, selection)
+    }
     cardBox.appendChild(card)
     return cardBox
   }
@@ -233,18 +354,37 @@ export class AppList {
         else target.add(packageName)
         this.#config.set('target', [...target])
         this.#syncCard(card, target.has(packageName))
+        this.#applyFilters()
+        this.#emitSelectionChange()
+      }
+      card.onkeydown = event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        card.click()
       }
     })
   }
 
   #setupSystemAppListeners(container: HTMLElement): void {
+    container.onclick = event => {
+      const eventPath = event.composedPath()
+      const card = eventPath.find((element): element is HTMLElement => (
+        element instanceof HTMLElement && element.classList.contains('card')
+      ))
+      if (!card || !container.contains(card)) return
+      const checkbox = card.querySelector<CheckboxElement>('md-checkbox')
+      if (!checkbox) return
+      const clickedCheckbox = eventPath.includes(checkbox)
+      if (!clickedCheckbox) event.preventDefault()
+      this.#syncCard(card, clickedCheckbox ? checkbox.checked : !checkbox.checked)
+    }
+  }
+
+  #syncSystemAppCheckboxes(container: HTMLElement): void {
+    const target = new Set(this.#config.get('target'))
     container.querySelectorAll<HTMLElement>('.card').forEach(card => {
-      card.onclick = event => {
-        event.preventDefault()
-        const checkbox = card.querySelector<CheckboxElement>('md-checkbox')
-        if (!checkbox) return
-        this.#syncCard(card, !checkbox.checked)
-      }
+      const packageName = card.dataset.package
+      this.#syncCard(card, packageName !== undefined && target.has(packageName))
     })
   }
 
@@ -261,6 +401,34 @@ export class AppList {
     const checkbox = card.querySelector<CheckboxElement>('md-checkbox')
     if (checkbox) checkbox.checked = checked
     card.classList.toggle('selected', checked)
+    card.dataset.selected = String(checked)
+    if (card.getAttribute('role') === 'checkbox') {
+      card.setAttribute('aria-checked', String(checked))
+    }
+  }
+
+  #applyFilters(): void {
+    if (!this.#container) return
+    let visible = 0
+    this.#container.querySelectorAll<HTMLElement>('.card-box').forEach(box => {
+      const card = box.querySelector<HTMLElement>('.card')
+      const selected = card?.dataset.selected === 'true'
+      const selectionMatches = this.#selectionFilter === 'all'
+        || (this.#selectionFilter === 'selected' && selected)
+        || (this.#selectionFilter === 'unselected' && !selected)
+      const searchMatches = !this.#searchQuery
+        || (card?.dataset.search ?? '').includes(this.#searchQuery)
+      const matches = selectionMatches && searchMatches
+      box.hidden = !matches
+      if (matches) visible++
+    })
+    const empty = this.#container.querySelector<HTMLElement>('.app-list-empty')
+    if (empty) empty.hidden = visible !== 0
+  }
+
+  #emitSelectionChange(): void {
+    const count = this.getSelectedCount()
+    this.#selectionCallbacks.forEach(callback => callback(count))
   }
 
   #setupIconObserver(container: HTMLElement): IntersectionObserver {
@@ -280,17 +448,29 @@ export class AppList {
   }
 
   #loadIcon(container: HTMLElement, packageName: string): void {
+    if (container.dataset.iconState) return
     const image = container.querySelector<HTMLImageElement>('.app-icon')
     const loader = container.querySelector<HTMLElement>('.loader')
     const fallback = container.querySelector<HTMLElement>('.app-icon-fallback')
     if (!image) return
 
+    container.dataset.iconState = 'loading'
+    container.classList.add('icon-loading')
     image.onload = () => {
+      container.dataset.iconState = 'loaded'
+      container.classList.remove('icon-loading')
       if (loader) loader.style.display = 'none'
       image.style.opacity = '1'
     }
     image.onerror = () => {
+      container.dataset.iconState = 'error'
+      container.classList.remove('icon-loading')
       image.style.display = 'none'
+      if (fallback && !fallback.hasChildNodes()) {
+        const fallbackIcon = document.createElement('md-icon')
+        fallbackIcon.textContent = 'android'
+        fallback.appendChild(fallbackIcon)
+      }
       fallback?.classList.add('visible')
       if (loader) loader.style.display = 'none'
     }

@@ -1,6 +1,6 @@
 [package]
 name = "OhMyKeymint"
-version = "1.3.1"
+version = "1.3.4"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 
@@ -31,6 +31,7 @@ thiserror = "2.0.20"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 x509-cert = "0.3.0"
+x509-parser = { version = "0.18.1", features = ["verify"] }
 watchdog_rs = { path = "watchdog", version = "0.1.0" }
 nix = { version = "0.31.3", features = ["fs", "mman"] }
 rsproperties = { version = "0.6.0", features = ["builder"] }

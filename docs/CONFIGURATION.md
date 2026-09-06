@@ -63,17 +63,64 @@ change does not require a keymint restart.
 
 The module includes a WebUI for selecting packages in `scoop`, installing a
 local keybox, managing the Android security patch level, and applying a Pixel
-PIF fingerprint through OMK's own Zygisk payload. Open it from the Oh My
-Keymint module page in
+PIF fingerprint through OMK's own Zygisk payload. On supported vendor devices,
+it also exposes an explicitly confirmed Widevine provisioning action through
+`KmInstallKeybox`. Open it from the Oh My Keymint module page in
 KernelSU. With Magisk, open an installed KSUWebUIStandalone or WebUI X host and
 select Oh My Keymint; the module does not install either host.
 
+The Home page reads each identity item independently. The Keybox card parses
+the installed XML and checks the private key against its leaf certificate
+without rewriting the file. Source classification also verifies every
+leaf-to-issuer signature link in leaf-to-root order. A chain is recognized as a
+Google key only when that verification reaches a final certificate with one
+of Google's pinned attestation-root public keys. The supported RSA root and
+the newer EC attestation root are pinned separately. A verified chain ending
+in one of these roots is shown as a Google hardware key when its root-adjacent
+certificate Subject contains the factory `serialNumber` attribute. It is shown
+as a Google remote key when it carries the RKP ProvisioningInfo extension or
+its root-adjacent certificate identifies `CN=Droid CA2, O=Google LLC`. A chain
+without either verified provisioning marker is shown as unknown. The root's key
+algorithm and certificate name are not used to infer the provisioning source.
+When a Keybox contains multiple algorithm chains, every chain must resolve to the same known source;
+an unknown or conflicting chain makes the Keybox source unknown. The `Level`
+value normally comes
+from the leaf certificate Subject organization (`O=TEE` or `O=StrongBox`);
+older factory keyboxes that use the X.520 title attribute (`T=TEE` or
+`T=StrongBox`) are supported as a compatibility fallback. Valid chains that
+do not match either source or level are shown as unknown. The
+security-patch card reads the current
+`ro.build.version.security_patch` runtime property. **TEE: Normal** is shown
+only after the injector reaches OMK and obtains the Trusted Environment
+security level. The spoofed-device value is the Pixel model in OMK's active PIF
+profile; it describes the configured target and is not a separate live check of
+a Google Play services process.
+
+The Keybox card summarizes the locally validated Keybox as `L1` when its
+Google source and hardware level are both identified, `L2` when the Keybox is
+valid but that metadata is incomplete, and `L3` when the Keybox is invalid.
+These labels are a local Keybox classification; the WebUI does not claim to
+read the result of a third-party Play Integrity checker application.
+
+The Home page also keeps the 30 most recent successful WebUI changes in
+`/data/misc/keystore/omk/data/webui_activity.json`. The list covers saved app
+targets, Keybox changes, Widevine provisioning, security-patch synchronization
+and restore, and PIF enable or disable actions. It stores only the action type,
+a short non-secret result such as an entry count, patch date, or Pixel model,
+and the completion time. It never stores package-name lists, Keybox contents or
+filenames, Widevine key material, downloaded response bodies, or a PIF
+fingerprint. The Home page initially shows the newest four entries, can expand
+the complete retained list, and provides controls to copy an entry or clear the
+activity file. Activity recording is supplementary: failure to update this file
+does not change the result of a completed WebUI operation.
+
 The WebUI can read and replace the `scoop` package list and can install a local
-keybox selected from shared storage. The built-in selector's folder action also
-opens Android's generic file chooser, allowing another installed storage app
-such as MT Manager to provide the XML. The chooser requests all MIME types so
-providers that label XML as `text/plain` or `application/octet-stream` remain
-available; the WebUI still requires an `.xml` filename. Its **Sync security
+keybox selected through Android's system document picker. The picker can use
+any installed storage provider, including MT Manager, and requests all MIME
+types so providers that label XML as `text/plain` or `application/octet-stream`
+remain available; the WebUI still requires an `.xml` filename. If the system
+picker cannot be opened, the WebUI falls back to its shared-storage browser.
+Its **Sync security
 patch** action uses the root WebUI bridge to make an HTTPS request to the
 official `https://source.android.com/docs/security/bulletin/asb-overview` page,
 falling back to Google's official Chinese mirror when the primary host is
@@ -160,8 +207,29 @@ process refresh. The spoof is process-local: it does not call `resetprop`,
 change global Android properties, or change values under OMK's `[device]`
 section.
 
+The **Widevine L1** tool first searches the applicable vendor library
+directories and `/vendor/bin` for a compatible `KmInstallKeybox` utility. When
+found, it uses the native HTTPS client to request exactly
+`https://rawbin.dpejoh.com/clips/attestation`, reverses the source's fixed
+substitution alphabet, and rejects an oversized, malformed, or invalid
+`AndroidAttestation` XML response. It writes the decoded value to a private
+temporary file and invokes the utility with `<temporary-file> attestation true`.
+The helper attempts to remove the temporary file before returning and treats a
+cleanup failure as an error.
+
+`KmInstallKeybox` is a proprietary vendor utility rather than a portable
+Android or KeyMint API. The tool is normally present only on some Qualcomm
+devices, and different vendor implementations may reject the same input. The
+WebUI requires confirmation because this operation changes vendor-backed
+attestation provisioning and may affect DRM or device certification. A zero
+exit status reports that the utility accepted the operation; it does not
+guarantee that a DRM client will subsequently report Widevine L1. The remote
+resource is constrained by TLS and an exact URL allowlist but is server-managed
+and does not have a key pinned by OMK.
+
 All other WebUI assets are bundled and no network request is made for normal
-local operations.
+local operations. None of the WebUI network paths requires a device-provided
+`curl` or `wget`.
 
 The WebUI does not parse or rewrite `injector.toml` itself. It sends the package
 list to the native `inject` helper. The helper first parses the current complete
@@ -678,7 +746,9 @@ generate suffix is not interpreted; enter the exact package name only.
 The embedded WebUI presents installed package names and saves the selected
 ones through the native helper described above. A WebUI save replaces only the
 normalized `scoop` list; `[main]`, `[filter]`, `[intercept]`, and preserved
-per-package tables retain their current values.
+per-package tables retain their current values. Opening the package selector,
+returning to it from another app, or using its refresh action reloads installed
+packages without discarding selections that have not yet been saved.
 
 Android can assign several packages the same identity. In that case, listing
 any one of those packages allows the shared identity, unless a filter rule
@@ -853,8 +923,10 @@ until the file is corrected.
 
 The embedded WebUI can change `scoop`, install a locally selected keybox,
 synchronize the four `[trust]` patch-level fields from the official Android
-Security Bulletin, or restore those fields to `"auto"`. Security-patch sync and
-restore also manage the two global runtime properties and the defaults snapshot
-described above. Its native save paths validate the complete candidate before
-writing and use atomic replacement. Successful saves enter the applicable
-watcher hot-reload path.
+Security Bulletin, restore those fields to `"auto"`, manage the validated PIF
+profile, and invoke the separately confirmed vendor Widevine provisioning
+action. Security-patch sync and restore also manage the two global runtime
+properties and the defaults snapshot described above. Persistent native save
+paths validate the complete candidate before writing and use atomic
+replacement. Successful saves enter the applicable watcher hot-reload path;
+the Widevine action instead uses only a private temporary file.
