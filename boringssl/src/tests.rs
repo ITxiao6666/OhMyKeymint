@@ -55,6 +55,11 @@ fn test_aes_gcm() {
 }
 
 #[test]
+fn test_aes_gcm_chunked() {
+    kmr_tests::test_aes_gcm_chunked(aes::BoringAes {});
+}
+
+#[test]
 fn test_des() {
     kmr_tests::test_des(des::BoringDes {});
 }

@@ -498,6 +498,68 @@ pub fn test_aes_gcm<A: Aes>(aes: A) {
     }
 }
 
+/// Verify that GCM decryption keeps the authentication tag intact when input is delivered in
+/// multiple chunks. Android keystore clients commonly split update() calls at arbitrary
+/// boundaries, including boundaries inside the final tag.
+pub fn test_aes_gcm_chunked<A: Aes>(aes: A) {
+    let key = aes::Key::Aes256([0x37; 32]);
+    let nonce = [0x91; aes::GCM_NONCE_SIZE];
+    let aad = b"chunked-aes-gcm-aad";
+    let plaintext: Vec<u8> = (0..37).map(|v| v as u8).collect();
+
+    for tag_len in 12..=16 {
+        let mode = |tag_len| match tag_len {
+            12 => aes::GcmMode::GcmTag12 { nonce },
+            13 => aes::GcmMode::GcmTag13 { nonce },
+            14 => aes::GcmMode::GcmTag14 { nonce },
+            15 => aes::GcmMode::GcmTag15 { nonce },
+            16 => aes::GcmMode::GcmTag16 { nonce },
+            _ => unreachable!(),
+        };
+
+        let mut encrypt = aes
+            .begin_aead(
+                key.clone().into(),
+                mode(tag_len),
+                SymmetricOperation::Encrypt,
+            )
+            .unwrap();
+        encrypt.update_aad(aad).unwrap();
+        let mut ciphertext_and_tag = encrypt.update(&plaintext).unwrap();
+        ciphertext_and_tag.extend_from_slice(&encrypt.finish().unwrap());
+        assert_eq!(ciphertext_and_tag.len(), plaintext.len() + tag_len);
+
+        let mut decrypt = aes
+            .begin_aead(
+                key.clone().into(),
+                mode(tag_len),
+                SymmetricOperation::Decrypt,
+            )
+            .unwrap();
+        decrypt.update_aad(aad).unwrap();
+        // Exercise an empty update and boundaries before, at, and inside the tag.
+        let mut recovered = decrypt.update(&[]).unwrap();
+        let chunks = [1usize, 2, 7, 3, 11, 5, 13];
+        let mut offset = 0;
+        for chunk_len in chunks {
+            if offset == ciphertext_and_tag.len() {
+                break;
+            }
+            let end = (offset + chunk_len).min(ciphertext_and_tag.len());
+            recovered.extend_from_slice(&decrypt.update(&ciphertext_and_tag[offset..end]).unwrap());
+            offset = end;
+        }
+        if offset < ciphertext_and_tag.len() {
+            recovered.extend_from_slice(&decrypt.update(&ciphertext_and_tag[offset..]).unwrap());
+        }
+        recovered.extend_from_slice(&decrypt.finish().unwrap());
+        assert_eq!(
+            recovered, plaintext,
+            "chunked GCM failed for tag length {tag_len}"
+        );
+    }
+}
+
 /// Test basic triple-DES functionality.
 pub fn test_des<D: Des>(des: D) {
     struct TestCase {

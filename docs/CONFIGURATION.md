@@ -251,6 +251,9 @@ then does it atomically replace the canonical lowercase
 `/data/misc/keystore/omk/keybox.xml`. A read, size, UTF-8, validation, or write
 failure leaves the active keybox unchanged. The keybox watcher loads a
 successful replacement automatically, so a restart is normally unnecessary.
+The reload preserves ordinary application signing keys, including passkey
+credentials. Only dedicated `ATTEST_KEY` entries tied to the previous keybox
+are retired.
 
 ## `config.toml`
 

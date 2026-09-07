@@ -19,7 +19,8 @@ use crate::android::hardware::security::keymint::{
     HardwareAuthenticatorType::HardwareAuthenticatorType, IKeyMintDevice::IKeyMintDevice,
     KeyCreationResult::KeyCreationResult, KeyFormat::KeyFormat,
     KeyMintHardwareInfo::KeyMintHardwareInfo, KeyOrigin::KeyOrigin, KeyParameter::KeyParameter,
-    KeyParameterValue::KeyParameterValue, SecurityLevel::SecurityLevel, Tag::Tag,
+    KeyParameterValue::KeyParameterValue, KeyPurpose::KeyPurpose, SecurityLevel::SecurityLevel,
+    Tag::Tag,
 };
 use crate::android::security::metrics::OperationType::OperationType;
 use crate::android::system::keystore2::{
@@ -199,7 +200,7 @@ impl KeystoreSecurityLevel {
         //    KeyMint, or
         //  - `certificate_chain[1]`: a single `Certificate` that actually (and confusingly) holds
         //    the DER-encoded certs of the chain concatenated together.
-        let keybox_attested = keybox_attestation_allowed && certificate_chain.len() > 1;
+        let has_attestation_chain = certificate_chain.len() > 1;
         let mut cert_info: CertificateInfo = CertificateInfo::new(
             // Leaf is always a single cert in the first entry, if present.
             match certificate_chain.len() {
@@ -221,6 +222,11 @@ impl KeystoreSecurityLevel {
         );
 
         let mut key_parameters = key_characteristics_to_internal(key_characteristics);
+        let keybox_attested = is_keybox_bound_attestation_key(
+            keybox_attestation_allowed,
+            has_attestation_chain,
+            &key_parameters,
+        );
 
         key_parameters.push(KsKeyParam::new(
             KsKeyParamValue::UserID(user.0),
@@ -1212,6 +1218,21 @@ impl KeystoreSecurityLevel {
     }
 }
 
+fn is_keybox_bound_attestation_key(
+    keybox_attestation_allowed: bool,
+    has_attestation_chain: bool,
+    key_parameters: &[KsKeyParam],
+) -> bool {
+    keybox_attestation_allowed
+        && has_attestation_chain
+        && key_parameters.iter().any(|parameter| {
+            matches!(
+                parameter.key_parameter_value(),
+                KsKeyParamValue::KeyPurpose(purpose) if *purpose == KeyPurpose::ATTEST_KEY
+            )
+        })
+}
+
 fn caller_uid(ctx: Option<&CallerInfo>) -> AppUid {
     AppUid(
         ctx.map(|ctx| ctx.uid)
@@ -1591,6 +1612,23 @@ mod tests {
             Ok(_) => panic!("expected service-specific error"),
             Err(error) => into_logged_binder(error).service_specific_error(),
         }
+    }
+
+    #[test]
+    fn only_dedicated_keybox_attestation_keys_are_rotation_bound() {
+        let attest_key = [KsKeyParam::new(
+            KsKeyParamValue::KeyPurpose(KeyPurpose::ATTEST_KEY),
+            SecurityLevel::TRUSTED_ENVIRONMENT,
+        )];
+        let signing_key = [KsKeyParam::new(
+            KsKeyParamValue::KeyPurpose(KeyPurpose::SIGN),
+            SecurityLevel::TRUSTED_ENVIRONMENT,
+        )];
+
+        assert!(is_keybox_bound_attestation_key(true, true, &attest_key));
+        assert!(!is_keybox_bound_attestation_key(true, true, &signing_key));
+        assert!(!is_keybox_bound_attestation_key(false, true, &attest_key));
+        assert!(!is_keybox_bound_attestation_key(true, false, &attest_key));
     }
 
     #[test]

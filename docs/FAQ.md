@@ -385,7 +385,9 @@ private-key and certificate-chain matching. It atomically replaces the canonical
 size, UTF-8, validation, or write failure leaves the current keybox unchanged.
 
 The keybox watcher loads a successful replacement automatically, so a restart
-is normally unnecessary. Check `keymint.log` afterward.
+is normally unnecessary. Replacing the keybox preserves ordinary application
+signing keys, including passkey credentials; only dedicated `ATTEST_KEY`
+entries tied to the previous keybox are retired. Check `keymint.log` afterward.
 
 ### Why does a detector say that the certificate is expired or revoked?
 

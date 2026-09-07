@@ -54,7 +54,7 @@ use crate::impl_metadata;
 use crate::keymaster::crypto::ZVec;
 use crate::keymaster::database::{perboot, utils, versioning};
 use crate::keymaster::gc::Gc;
-use crate::keymaster::key_parameter::{KeyParameter, KeyParameterValue, Tag};
+use crate::keymaster::key_parameter::{KeyParameter, KeyParameterValue, KeyPurpose, Tag};
 use crate::keymaster::permission::KeyPermSet;
 use crate::keymaster::utils::{
     get_current_time_in_milliseconds, watchdog as wd, AndroidUserId, AppUid, Challenge,
@@ -1133,7 +1133,7 @@ impl KeystoreDB {
         Ok(2)
     }
 
-    // Record keybox identity prefixes for legacy client keys with a device attestation chain.
+    // Record keybox identity prefixes for legacy dedicated attestation keys.
     fn from_2_to_3(tx: &Transaction) -> Result<u32> {
         Self::init_tables(tx)?;
 
@@ -1156,7 +1156,13 @@ impl KeystoreDB {
                    AND k.state != ?
                    AND (
                        SELECT b.state FROM persistent.blobentry AS b WHERE b.keyentryid = k.id AND b.subcomponent_type = ? ORDER BY b.id DESC LIMIT 1
-                   ) = ?;",
+                   ) = ?
+                   AND EXISTS (
+                       SELECT 1 FROM persistent.keyparameter AS p
+                       WHERE p.keyentryid = k.id
+                         AND p.tag = ?
+                         AND p.data = ?
+                   );",
             )
             .context("Trying to prepare keybox attestation metadata backfill query")?;
 
@@ -1168,6 +1174,8 @@ impl KeystoreDB {
                 KeyLifeCycle::Unreferenced,
                 SubComponentType::KEY_BLOB,
                 BlobState::Current,
+                Tag::PURPOSE.0,
+                KeyPurpose::ATTEST_KEY.0,
             ])
             .context("Trying to query keybox attestation metadata backfill candidates")?;
 
@@ -1716,7 +1724,13 @@ impl KeystoreDB {
                        ON m.keyentryid = k.id
                       AND m.tag = ?
                      WHERE k.key_type = ?
-                       AND k.state != ?;",
+                       AND k.state != ?
+                       AND EXISTS (
+                           SELECT 1 FROM persistent.keyparameter AS p
+                           WHERE p.keyentryid = k.id
+                             AND p.tag = ?
+                             AND p.data = ?
+                       );",
                 )
                 .context("Failed to prepare keybox-bound stale key query.")?;
 
@@ -1724,7 +1738,9 @@ impl KeystoreDB {
                 .query(params![
                     KeyMetaData::KeyboxAttestationUuidPrefix,
                     KeyType::Client,
-                    KeyLifeCycle::Unreferenced
+                    KeyLifeCycle::Unreferenced,
+                    Tag::PURPOSE.0,
+                    KeyPurpose::ATTEST_KEY.0,
                 ])
                 .context("Failed to query keybox-bound stale keys.")?;
 
@@ -3789,6 +3805,25 @@ mod tests {
         .unwrap();
     }
 
+    fn add_key_purpose(tx: &Transaction, key_id: i64, purpose: KeyPurpose) {
+        let param = KeyParameter::new(
+            KeyParameterValue::KeyPurpose(purpose),
+            SecurityLevel::TRUSTED_ENVIRONMENT,
+        );
+        tx.execute(
+            "INSERT INTO persistent.keyparameter
+                (keyentryid, tag, data, security_level)
+                VALUES (?, ?, ?, ?);",
+            params![
+                key_id,
+                param.get_tag().0,
+                param.key_parameter_value(),
+                param.security_level().0
+            ],
+        )
+        .unwrap();
+    }
+
     fn add_super_encryption_metadata(tx: &Transaction, key_id: i64) {
         let mut metadata = BlobMetaData::new();
         metadata.add(BlobMetaEntry::EncryptedBy(EncryptedBy::KeyId(42)));
@@ -3915,7 +3950,7 @@ mod tests {
     }
 
     #[test]
-    fn retire_stale_keybox_bound_entries_keeps_current_and_keystore_entries() {
+    fn retire_stale_keybox_bound_entries_only_retires_stale_attest_keys() {
         let current_digest = [0x11; 32];
         let stale_digest = [0x22; 32];
         let current_uuid =
@@ -3932,9 +3967,17 @@ mod tests {
             insert_live_client_key(&tx, 3, current_uuid, "current-keybox");
             insert_live_client_key(&tx, 4, KEYSTORE_UUID, "keystore");
             insert_live_client_key(&tx, 5, stale_tee_uuid, "stale-without-metadata");
+            insert_live_client_key(&tx, 6, stale_tee_uuid, "stale-signing-key");
+            add_key_purpose(&tx, 1, KeyPurpose::ATTEST_KEY);
+            add_key_purpose(&tx, 2, KeyPurpose::ATTEST_KEY);
+            add_key_purpose(&tx, 3, KeyPurpose::ATTEST_KEY);
+            add_key_purpose(&tx, 4, KeyPurpose::ATTEST_KEY);
+            add_key_purpose(&tx, 5, KeyPurpose::ATTEST_KEY);
+            add_key_purpose(&tx, 6, KeyPurpose::SIGN);
             add_keybox_attestation_metadata(&tx, 1, stale_tee_uuid);
             add_keybox_attestation_metadata(&tx, 2, stale_strongbox_uuid);
             add_keybox_attestation_metadata(&tx, 3, current_uuid);
+            add_keybox_attestation_metadata(&tx, 6, stale_tee_uuid);
             tx.commit().unwrap();
         }
 
@@ -3949,11 +3992,13 @@ mod tests {
         assert_eq!(1, key_entry_count(&db, 3));
         assert_eq!(1, key_entry_count(&db, 4));
         assert_eq!(1, key_entry_count(&db, 5));
+        assert_eq!(1, key_entry_count(&db, 6));
         assert_eq!(BlobState::Orphaned, blob_state(&db, 1));
         assert_eq!(BlobState::Orphaned, blob_state(&db, 2));
         assert_eq!(BlobState::Current, blob_state(&db, 3));
         assert_eq!(BlobState::Current, blob_state(&db, 4));
         assert_eq!(BlobState::Current, blob_state(&db, 5));
+        assert_eq!(BlobState::Current, blob_state(&db, 6));
     }
 
     #[test]
@@ -3968,6 +4013,7 @@ mod tests {
         {
             let tx = db.conn.transaction().unwrap();
             insert_live_client_key(&tx, 1, stale_uuid, "shared-alias");
+            add_key_purpose(&tx, 1, KeyPurpose::ATTEST_KEY);
             add_keybox_attestation_metadata(&tx, 1, stale_uuid);
             tx.commit().unwrap();
         }
