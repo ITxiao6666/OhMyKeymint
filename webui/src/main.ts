@@ -76,17 +76,50 @@ pageStack.append(...pages.values())
 root.appendChild(navigation.getElement())
 root.querySelector<HTMLElement>('.overlay-content')!.appendChild(targetsPage.getElement())
 
+const HOME_NAVIGATION_REFRESH_DELAY_MS = 420
+const HOME_REFRESH_MIN_INTERVAL_MS = 2_000
+// The list is network-backed; keep it short-lived while avoiding a request on
+// every tab switch. A Keybox replacement always invalidates this cache.
+const KEYBOX_REVOCATION_CACHE_MS = 60_000
+
 let pageHistoryActive = false
+let homeNavigationRefreshTimer: number | null = null
+let lastHomeIdentityRefreshAt = Number.NEGATIVE_INFINITY
+let lastHomeActivityRefreshAt = Number.NEGATIVE_INFINITY
+let homeIdentityLoaded = false
+
+function cancelScheduledHomeRefresh(): void {
+  if (homeNavigationRefreshTimer === null) return
+  window.clearTimeout(homeNavigationRefreshTimer)
+  homeNavigationRefreshTimer = null
+}
+
+function scheduleHomeRefresh(): void {
+  cancelScheduledHomeRefresh()
+  const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ? 0
+    : HOME_NAVIGATION_REFRESH_DELAY_MS
+  homeNavigationRefreshTimer = window.setTimeout(() => {
+    homeNavigationRefreshTimer = null
+    if (navigation.activePage !== 'home') return
+    void refreshHomeIdentity()
+    void refreshHomeActivity()
+  }, delay)
+}
+
 function showPage(page: PageId): void {
-  for (const [id, element] of pages) element.hidden = id !== page
+  // Reset the document scroll before revealing the next page. Reading scrollY
+  // after changing `hidden` would synchronously measure the newly visible page.
   window.scrollTo(0, 0)
+  for (const [id, element] of pages) element.hidden = id !== page
 }
 
 navigation.onChange(page => {
   showPage(page)
   if (page === 'home') {
-    void refreshHomeIdentity()
-    void refreshHomeActivity()
+    scheduleHomeRefresh()
+  } else {
+    cancelScheduledHomeRefresh()
   }
   if (page !== 'home' && !pageHistoryActive) {
     pageHistoryActive = true
@@ -94,6 +127,7 @@ navigation.onChange(page => {
       pageHistoryActive = false
       navigation.select('home', false)
       showPage('home')
+      scheduleHomeRefresh()
     })
   } else if (page === 'home' && pageHistoryActive) {
     pageHistoryActive = false
@@ -210,7 +244,7 @@ async function saveTarget(): Promise<boolean> {
   targetsPage.setApplyEnabled(false)
   try {
     await appList.save()
-    await refreshHomeActivity()
+    await refreshHomeActivity(true)
     snackbar.show(i18n.t('prompt_saved_target'))
     return true
   } catch (error) {
@@ -251,8 +285,8 @@ toolsPage.on('tool-install-keybox', () => keyboxDialog.choose())
 dialogContent.querySelector('#keybox-dialog')?.addEventListener(
   'closed',
   () => {
-    void refreshHomeIdentity(true)
-    void refreshHomeActivity()
+    void refreshHomeIdentity(true, true)
+    void refreshHomeActivity(true)
   },
 )
 
@@ -263,22 +297,35 @@ toolsPage.on('tool-spoof-pif', () => pifFingerprintDialog.show())
 dialogContent.querySelector('#pif-fingerprint-dialog')?.addEventListener(
   'closed',
   () => {
-    void refreshHomeIdentity()
-    void refreshHomeActivity()
+    void refreshHomeIdentity(false, true)
+    void refreshHomeActivity(true)
   },
 )
 
 let homeRefreshGeneration = 0
+let homeIdentityRequest: Promise<void> | null = null
+let homeActivityRequest: Promise<void> | null = null
 let keyboxRevocationRequest: Promise<KeyboxRevocationStatus> | null = null
+let keyboxRevocationCache: {
+  status: KeyboxRevocationStatus
+  checkedAt: number
+} | null = null
+let keyboxRevocationIdentity: string | null = null
 
 function requestKeyboxRevocation(force: boolean): Promise<KeyboxRevocationStatus> {
   if (!force && keyboxRevocationRequest !== null) return keyboxRevocationRequest
+  if (!force && keyboxRevocationCache !== null
+    && performance.now() - keyboxRevocationCache.checkedAt < KEYBOX_REVOCATION_CACHE_MS) {
+    return Promise.resolve(keyboxRevocationCache.status)
+  }
 
   const request = cli.checkKeyboxRevocation()
   keyboxRevocationRequest = request
   request.then(
-    () => {
-      if (keyboxRevocationRequest === request) keyboxRevocationRequest = null
+    status => {
+      if (keyboxRevocationRequest !== request) return
+      keyboxRevocationCache = { status, checkedAt: performance.now() }
+      keyboxRevocationRequest = null
     },
     () => {
       if (keyboxRevocationRequest === request) keyboxRevocationRequest = null
@@ -298,8 +345,32 @@ async function refreshKeyboxRevocation(generation: number, force: boolean): Prom
   }
 }
 
-async function refreshHomeIdentity(forceKeyboxRevocation = false): Promise<void> {
+function refreshHomeIdentity(
+  forceKeyboxRevocation = false,
+  forceRefresh = false,
+): Promise<void> {
+  if (!forceKeyboxRevocation && !forceRefresh && homeIdentityRequest !== null) {
+    return homeIdentityRequest
+  }
+  const request = refreshHomeIdentityInternal(forceKeyboxRevocation, forceRefresh)
+  let trackedRequest: Promise<void>
+  trackedRequest = request.finally(() => {
+    if (homeIdentityRequest === trackedRequest) homeIdentityRequest = null
+  })
+  homeIdentityRequest = trackedRequest
+  return trackedRequest
+}
+
+async function refreshHomeIdentityInternal(
+  forceKeyboxRevocation: boolean,
+  forceRefresh: boolean,
+): Promise<void> {
+  const now = performance.now()
+  if (!forceKeyboxRevocation && !forceRefresh
+    && now - lastHomeIdentityRefreshAt < HOME_REFRESH_MIN_INTERVAL_MS) return
+  lastHomeIdentityRefreshAt = now
   if (forceKeyboxRevocation) keyboxRevocationRequest = null
+  if (forceKeyboxRevocation) keyboxRevocationCache = null
   const generation = ++homeRefreshGeneration
 
   if (isDev()) {
@@ -307,10 +378,14 @@ async function refreshHomeIdentity(forceKeyboxRevocation = false): Promise<void>
     homePage.setTeeStatus('normal')
     homePage.setSecurityPatch('2026-08-01')
     homePage.setSpoofedDevice('Google Pixel 9 Pro')
+    homeIdentityLoaded = true
     return
   }
 
-  homePage.setKeyboxLoading()
+  // Keep the last valid overview visible while a background refresh runs.
+  // Showing the loading state is useful only for the first load and causes a
+  // full card relayout when returning from another page.
+  if (!homeIdentityLoaded) homePage.setKeyboxLoading()
 
   const [keyboxResult, patchResult, teeResult, pifResult] = await Promise.allSettled([
     cli.getKeyboxState(),
@@ -322,13 +397,23 @@ async function refreshHomeIdentity(forceKeyboxRevocation = false): Promise<void>
 
   if (keyboxResult.status === 'fulfilled') {
     const state = keyboxResult.value
+    const identity = `${state.valid}:${state.bundled}:${state.source}:${state.level}`
+    const identityChanged = keyboxRevocationIdentity !== null
+      && keyboxRevocationIdentity !== identity
+    if (identityChanged) {
+      keyboxRevocationRequest = null
+      keyboxRevocationCache = null
+    }
+    keyboxRevocationIdentity = identity
     homePage.setKeyboxStatus(
       state.valid ? (state.bundled ? 'bundled' : 'custom') : 'invalid',
       state.source,
       state.level,
       state.valid ? 'checking' : state.revocation,
     )
-    if (state.valid) void refreshKeyboxRevocation(generation, forceKeyboxRevocation)
+    if (state.valid) {
+      void refreshKeyboxRevocation(generation, forceKeyboxRevocation || identityChanged)
+    }
   } else {
     homePage.setKeyboxStatus('error')
     console.error('Unable to load the current Keybox state:', keyboxResult.reason)
@@ -356,10 +441,25 @@ async function refreshHomeIdentity(forceKeyboxRevocation = false): Promise<void>
   } else {
     console.error('Unable to load the current PIF fingerprint:', pifResult.reason)
   }
+  homeIdentityLoaded = true
 }
 
 let homeActivityGeneration = 0
-async function refreshHomeActivity(): Promise<void> {
+function refreshHomeActivity(force = false): Promise<void> {
+  if (!force && homeActivityRequest !== null) return homeActivityRequest
+  const request = refreshHomeActivityInternal(force)
+  let trackedRequest: Promise<void>
+  trackedRequest = request.finally(() => {
+    if (homeActivityRequest === trackedRequest) homeActivityRequest = null
+  })
+  homeActivityRequest = trackedRequest
+  return trackedRequest
+}
+
+async function refreshHomeActivityInternal(force: boolean): Promise<void> {
+  const now = performance.now()
+  if (!force && now - lastHomeActivityRefreshAt < HOME_REFRESH_MIN_INTERVAL_MS) return
+  lastHomeActivityRefreshAt = now
   const generation = ++homeActivityGeneration
   if (isDev()) {
     const now = Math.floor(Date.now() / 1000)
@@ -438,7 +538,7 @@ async function installWidevineL1(): Promise<void> {
   snackbar.showLoading(i18n.t('widevine_installing'))
   try {
     if (!isDev()) await cli.installWidevineL1()
-    await refreshHomeActivity()
+    await refreshHomeActivity(true)
     snackbar.show(i18n.t('prompt_widevine_installed'))
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
@@ -473,7 +573,7 @@ async function syncSecurityPatch(): Promise<void> {
     const date = await fetchLatestSecurityPatch(() => cli.fetchSecurityBulletin())
     const appliedDate = await cli.syncSecurityPatch(date)
     homePage.setSecurityPatch(appliedDate)
-    await refreshHomeActivity()
+    await refreshHomeActivity(true)
     snackbar.show(i18n.t('prompt_security_patch_sync_complete', appliedDate))
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
@@ -494,8 +594,8 @@ async function restoreDefaultSecurityPatch(): Promise<void> {
   try {
     if (!isDev()) {
       await cli.restoreDefaultSecurityPatch()
-      await refreshHomeIdentity()
-      await refreshHomeActivity()
+      await refreshHomeIdentity(false, true)
+      await refreshHomeActivity(true)
     }
     snackbar.show(i18n.t('prompt_security_patch_restored_default'))
   } catch (error) {

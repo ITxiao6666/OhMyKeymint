@@ -32,6 +32,7 @@ export class HomePage {
   #activityStatus: 'loading' | 'ready' | 'error' = 'loading'
   #activitiesExpanded = false
   #activityClearBusy = false
+  #deviceOverviewFrame: number | null = null
   #clearActivitiesCallback: (() => void) | null = null
 
   getElement(): HTMLElement {
@@ -140,7 +141,7 @@ export class HomePage {
     this.#keyboxSource = source
     this.#keyboxLevel = level
     this.#keyboxRevocation = revocation
-    this.#renderDeviceOverview()
+    this.#queueDeviceOverviewRender()
   }
 
   setKeyboxLoading(): void {
@@ -148,34 +149,42 @@ export class HomePage {
     this.#keyboxSource = 'unknown'
     this.#keyboxLevel = 'unknown'
     this.#keyboxRevocation = 'checking'
-    this.#renderDeviceOverview()
+    this.#queueDeviceOverviewRender()
   }
 
   setKeyboxRevocation(value: KeyboxRevocationStatus): void {
     this.#keyboxRevocation = value
-    this.#renderDeviceOverview()
+    this.#queueDeviceOverviewRender()
   }
 
   setTeeStatus(value: Exclude<TeeStatus, 'loading'>): void {
     this.#teeStatus = value
-    this.#renderDeviceOverview()
+    this.#queueDeviceOverviewRender()
   }
 
   setSecurityPatch(value: string): void {
     this.#securityPatch = value
-    this.#renderDeviceOverview()
+    this.#queueDeviceOverviewRender()
   }
 
   setSpoofedDevice(value: string | null): void {
     this.#spoofedDevice = value
-    this.#renderDeviceOverview()
+    this.#queueDeviceOverviewRender()
   }
 
   setActivities(entries: ActivityEntry[]): void {
-    this.#activities = [...entries].reverse()
+    const next = [...entries].reverse()
+    const changed = next.length !== this.#activities.length || next.some((entry, index) => {
+      const previous = this.#activities[index]
+      return previous?.action !== entry.action
+        || previous.detail !== entry.detail
+        || previous.timestamp !== entry.timestamp
+    })
+    const statusChanged = this.#activityStatus !== 'ready'
+    this.#activities = next
     this.#activityStatus = 'ready'
-    this.#activitiesExpanded = false
-    this.#renderActivities()
+    if (changed) this.#activitiesExpanded = false
+    if (changed || statusChanged) this.#renderActivities()
   }
 
   setActivityError(): void {
@@ -192,6 +201,14 @@ export class HomePage {
 
   onClearActivities(callback: () => void): void {
     this.#clearActivitiesCallback = callback
+  }
+
+  #queueDeviceOverviewRender(): void {
+    if (this.#deviceOverviewFrame !== null) return
+    this.#deviceOverviewFrame = window.requestAnimationFrame(() => {
+      this.#deviceOverviewFrame = null
+      this.#renderDeviceOverview()
+    })
   }
 
   #renderStatus(): void {

@@ -36,6 +36,9 @@ export class BottomNavigation {
   #pointerTabWidth = FLOATING_TAB_WIDTH
   #ignoreNextClick = false
   #globalPointerFallbacksAttached = false
+  #pointerFrame: number | null = null
+  #pendingPointerX: number | null = null
+  #pressedVisualIndex: number | null = null
 
   getElement(): HTMLElement {
     const navigation = document.createElement('nav')
@@ -148,6 +151,7 @@ export class BottomNavigation {
     const bounds = this.#element.getBoundingClientRect()
     const tabWidth = FLOATING_TAB_WIDTH
 
+    this.#cancelPointerFrame()
     this.#activePointer = event.pointerId
     this.#pointerStartX = event.clientX
     this.#pointerBoundsLeft = bounds.left
@@ -180,13 +184,13 @@ export class BottomNavigation {
     if (Math.abs(event.clientX - this.#pointerStartX) > 1) {
       this.#element.classList.add('is-dragging')
     }
-    if (this.#isPointerWithinBounds(event.clientX)) this.#updatePointerPosition(event.clientX)
+    if (this.#isPointerWithinBounds(event.clientX)) this.#queuePointerPosition(event.clientX)
     event.preventDefault()
   }
 
   #onPointerUp(event: PointerEvent): void {
     if (this.#activePointer !== event.pointerId || !this.#element) return
-    if (this.#isPointerWithinBounds(event.clientX)) this.#updatePointerPosition(event.clientX)
+    this.#flushPointerPosition(event.clientX)
     const target = ITEMS.find(item => item.id === this.#element?.dataset.pressedPage)?.id
     this.#finishPointer(event.pointerId)
     if (target) this.select(target)
@@ -205,9 +209,11 @@ export class BottomNavigation {
 
   #finishPointer(pointerId: number): void {
     if (!this.#element) return
+    this.#cancelPointerFrame()
     this.#activePointer = null
     this.#element.classList.remove('is-pressing', 'is-dragging')
     delete this.#element.dataset.pressedPage
+    this.#pressedVisualIndex = null
     this.#element.querySelectorAll(
       '.bottom-navigation-item.is-pressed, .bottom-navigation-accent-item.is-pressed',
     ).forEach(item => {
@@ -253,8 +259,41 @@ export class BottomNavigation {
     )
   }
 
+  #queuePointerPosition(clientX: number): void {
+    this.#pendingPointerX = clientX
+    if (this.#pointerFrame !== null) return
+    this.#pointerFrame = window.requestAnimationFrame(() => {
+      this.#pointerFrame = null
+      const pendingX = this.#pendingPointerX
+      this.#pendingPointerX = null
+      if (
+        pendingX === null
+        || this.#activePointer === null
+        || !this.#isPointerWithinBounds(pendingX)
+      ) return
+      this.#updatePointerPosition(pendingX)
+    })
+  }
+
+  #flushPointerPosition(clientX: number): void {
+    const pendingX = this.#pendingPointerX
+    this.#cancelPointerFrame()
+    const nextX = this.#isPointerWithinBounds(clientX)
+      ? clientX
+      : pendingX
+    if (nextX !== null && this.#isPointerWithinBounds(nextX)) this.#updatePointerPosition(nextX)
+  }
+
+  #cancelPointerFrame(): void {
+    if (this.#pointerFrame !== null) window.cancelAnimationFrame(this.#pointerFrame)
+    this.#pointerFrame = null
+    this.#pendingPointerX = null
+  }
+
   #setPressedVisualIndex(visualIndex: number): void {
     if (!this.#element) return
+    if (this.#pressedVisualIndex === visualIndex) return
+    this.#pressedVisualIndex = visualIndex
     const logicalIndex = document.documentElement.dir === 'rtl'
       ? ITEMS.length - 1 - visualIndex
       : visualIndex

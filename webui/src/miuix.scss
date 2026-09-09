@@ -1787,21 +1787,6 @@ html,
   }
 }
 
-@media (max-width: 400px) {
-  :root .home-identity-grid {
-    grid-template-columns: 1fr;
-  }
-
-  :root .identity-card {
-    min-height: 156px;
-    grid-template-rows: repeat(3, auto);
-  }
-
-  :root .home-heading h1 {
-    font-size: 20px;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   :root .page-heading,
   :root .targets-overlay,
