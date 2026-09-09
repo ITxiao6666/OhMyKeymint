@@ -129,6 +129,13 @@ fn prepare_android_storage() {
         ));
     }
 
+    if let Err(e) = crate::keybox::ensure_google_attestation_status_cache() {
+        storage_warn(format!(
+            "Failed to seed Google attestation status cache {}: {e:?}",
+            crate::keybox::GOOGLE_ATTESTATION_STATUS_CACHE_PATH
+        ));
+    }
+
     for file in [
         root_path!("keymint.log.lock"),
         root_path!("injector.log.lock"),
@@ -146,6 +153,7 @@ fn prepare_android_storage() {
         root_path!("config.toml"),
         root_path!("config.toml.bak"),
         root_path!("keybox.xml"),
+        root_path!("data/google_attestation_status.json"),
         root_path!("crash_count"),
         root_path!("logs/keymint.log"),
         root_path!("logs/keymint.log.1"),
@@ -156,7 +164,11 @@ fn prepare_android_storage() {
             continue;
         }
 
-        let mode = if file.ends_with(".xml") { 0o600 } else { 0o660 };
+        let mode = if file.ends_with(".xml") || file.ends_with("google_attestation_status.json") {
+            0o600
+        } else {
+            0o660
+        };
 
         if let Err(e) = std::fs::set_permissions(file, std::fs::Permissions::from_mode(mode)) {
             storage_warn(format!("Failed to chmod OMK file {file}: {e:?}"));
@@ -276,19 +288,55 @@ struct WebUiKeyboxState {
     bundled: bool,
     source: &'static str,
     level: &'static str,
+    play_integrity: &'static str,
+    revocation: &'static str,
 }
 
 fn webui_keybox_state() -> Result<String, String> {
-    let (state, metadata) =
+    let (state, metadata, _) =
         keybox::installed_keybox_state_and_metadata().map_err(|error| format!("{error:#}"))?;
+    let valid = !matches!(state, keybox::KeyboxFileState::Invalid);
     let response = WebUiKeyboxState {
-        valid: !matches!(state, keybox::KeyboxFileState::Invalid),
+        valid,
         bundled: matches!(state, keybox::KeyboxFileState::Bundled),
         source: metadata.source.as_str(),
         level: metadata.level.as_str(),
+        // A static Keybox cannot provide a Play Integrity verdict. A real
+        // verdict must come from an enrolled app and its trusted server.
+        play_integrity: "not_checked",
+        // The online lookup is a separate command so local Home data does not
+        // wait for a slow or unreachable network.
+        revocation: keybox::KeyboxRevocationStatus::NotChecked.as_str(),
     };
     serde_json::to_string(&response)
         .map_err(|error| format!("failed to serialize keybox state: {error}"))
+}
+
+fn webui_keybox_revocation_status() -> Result<String, String> {
+    let (state, _, serials) =
+        keybox::installed_keybox_state_and_metadata().map_err(|error| format!("{error:#}"))?;
+    if matches!(state, keybox::KeyboxFileState::Invalid) {
+        return Ok(keybox::KeyboxRevocationStatus::NotChecked
+            .as_str()
+            .to_string());
+    }
+    let serials = serials.ok_or_else(|| {
+        "failed to read every certificate serial number from the installed Keybox".to_string()
+    })?;
+    let status =
+        keybox::check_google_attestation_status(&serials).map_err(|error| format!("{error:#}"))?;
+
+    let (current_state, _, current_serials) =
+        keybox::installed_keybox_state_and_metadata().map_err(|error| format!("{error:#}"))?;
+    if matches!(current_state, keybox::KeyboxFileState::Invalid)
+        || current_serials.as_ref() != Some(&serials)
+    {
+        return Err(
+            "installed Keybox changed while its certificate status was checked".to_string(),
+        );
+    }
+
+    Ok(status.as_str().to_string())
 }
 
 fn handle_webui_keybox_command() -> Option<Result<String, String>> {
@@ -309,6 +357,14 @@ fn handle_webui_keybox_command() -> Option<Result<String, String>> {
                 ));
             }
             Some(webui_keybox_state())
+        }
+        "--webui-check-keybox-revocation" => {
+            if args.next().is_some() {
+                return Some(Err(
+                    "--webui-check-keybox-revocation does not accept arguments".to_string(),
+                ));
+            }
+            Some(webui_keybox_revocation_status())
         }
         _ => None,
     }

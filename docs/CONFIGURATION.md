@@ -69,6 +69,15 @@ it also exposes an explicitly confirmed Widevine provisioning action through
 KernelSU. With Magisk, open an installed KSUWebUIStandalone or WebUI X host and
 select Oh My Keymint; the module does not install either host.
 
+The Settings page keeps the selected language, theme mode, accent, and visual
+effects in the WebUI's local storage. Monet and the accent selection are
+independent. When Monet is enabled, **Default** uses the system's dynamic
+colors; selecting a fixed accent uses that color as the seed while Monet stays
+enabled. When Monet is disabled, the selected fixed accent is used, and
+**Default** falls back to the application's default blue. Bar blur, floating
+navigation, and liquid glass are optional and remain disabled until selected;
+liquid glass uses the floating navigation layout automatically.
+
 The Home page reads each identity item independently. The Keybox card parses
 the installed XML and checks the private key against its leaf certificate
 without rewriting the file. Source classification also verifies every
@@ -82,11 +91,12 @@ as a Google remote key when it carries the RKP ProvisioningInfo extension or
 its root-adjacent certificate identifies `CN=Droid CA2, O=Google LLC`. A chain
 without either verified provisioning marker is shown as unknown. The root's key
 algorithm and certificate name are not used to infer the provisioning source.
-When a Keybox contains multiple algorithm chains, every chain must resolve to the same known source;
-an unknown or conflicting chain makes the Keybox source unknown. The `Level`
-value normally comes
-from the leaf certificate Subject organization (`O=TEE` or `O=StrongBox`);
-older factory keyboxes that use the X.520 title attribute (`T=TEE` or
+When a Keybox contains multiple algorithm chains, every chain must resolve to
+the same known source; an unknown or conflicting chain makes the Keybox source
+unknown. The Home page shows only this source classification. The hardware
+level is read from the leaf certificate Subject organization (`O=TEE` or
+`O=StrongBox`) and shown separately as **Security Level**. Older factory
+keyboxes that use the X.520 title attribute (`T=TEE` or
 `T=StrongBox`) are supported as a compatibility fallback. Valid chains that
 do not match either source or level are shown as unknown. The
 security-patch card reads the current
@@ -96,11 +106,21 @@ security level. The spoofed-device value is the Pixel model in OMK's active PIF
 profile; it describes the configured target and is not a separate live check of
 a Google Play services process.
 
-The Keybox card summarizes the locally validated Keybox as `L1` when its
-Google source and hardware level are both identified, `L2` when the Keybox is
-valid but that metadata is incomplete, and `L3` when the Keybox is invalid.
-These labels are a local Keybox classification; the WebUI does not claim to
-read the result of a third-party Play Integrity checker application.
+The Keybox card checks every certificate serial number from both presented
+algorithm chains against Google's attestation status list at
+`https://android.googleapis.com/attestation/status`. A successful online
+lookup is atomically cached at
+`/data/misc/keystore/omk/data/google_attestation_status.json`. If the endpoint
+cannot be reached, the WebUI uses that locally validated cache; a first install
+is seeded from the validated snapshot shipped in the module. A lookup is shown
+as **Not revoked** when no serial is present. If any serial has a Google status
+of `SUSPENDED` or `REVOKED`, the card shows **Revoked**. A network, HTTP,
+certificate-parsing, or response-parsing failure is never treated as
+**Not revoked** when neither local source is valid. The cache and bundled
+snapshot contain public Google data and can become stale, so **Not revoked**
+does not prove that Play Integrity will accept the Keybox. The online lookup
+runs separately so an unavailable endpoint does not delay local Home-page
+values.
 
 The Home page also keeps the 30 most recent successful WebUI changes in
 `/data/misc/keystore/omk/data/webui_activity.json`. The list covers saved app

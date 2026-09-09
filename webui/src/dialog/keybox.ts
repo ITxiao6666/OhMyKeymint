@@ -25,7 +25,7 @@ export class KeyboxDialog {
   getElement(): DocumentFragment {
     const template = document.createElement('template')
     template.innerHTML = /* html */ `
-      <md-dialog id="keybox-dialog">
+      <md-dialog id="keybox-dialog" class="miuix-dialog">
         <div slot="headline"></div>
         <div slot="content" class="keybox-dialog-content">
           <div class="keybox-selected-file"></div>

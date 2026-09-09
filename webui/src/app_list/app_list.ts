@@ -30,8 +30,6 @@ function i18nText(key: string, fallback: string): string {
   return value === key ? fallback : value
 }
 
-type CheckboxElement = HTMLElement & { checked: boolean }
-
 export type SelectionFilter = 'all' | 'selected' | 'unselected'
 
 export interface AppEntry {
@@ -286,7 +284,7 @@ export class AppList {
     cardBox.className = 'card-box'
 
     const card = document.createElement('div')
-    card.className = `card card-alpha content${checked ? ' selected' : ''}`
+    card.className = `card miuix-card card-alpha content${checked ? ' selected' : ''}`
     card.dataset.package = entry.packageName
     card.dataset.selected = String(checked)
     card.dataset.search = `${entry.appName}\n${entry.packageName}`.toLocaleLowerCase()
@@ -319,16 +317,23 @@ export class AppList {
     info.append(appName, packageName)
     label.append(iconContainer, info)
 
+    card.tabIndex = 0
+    card.setAttribute('role', 'checkbox')
+    card.setAttribute('aria-checked', String(checked))
+
     if (mode === 'system') {
-      const checkbox = document.createElement('md-checkbox') as CheckboxElement
-      checkbox.className = 'checkbox'
-      checkbox.checked = checked
-      checkbox.setAttribute('touch-target', 'wrapper')
+      cardBox.classList.add('system-app-item')
+      card.classList.add('system-app-card', 'miuix-preference-row')
+      const checkbox = document.createElement('span')
+      checkbox.className = 'system-app-checkbox'
+      checkbox.setAttribute('aria-hidden', 'true')
+      checkbox.innerHTML = /* html */ `
+        <svg viewBox="0 0 26 26" focusable="false">
+          <path d="M8.576 13.660 L11.643 16.843 L17.500 9.291" pathLength="1"></path>
+        </svg>
+      `
       card.append(label, checkbox)
     } else {
-      card.tabIndex = 0
-      card.setAttribute('role', 'checkbox')
-      card.setAttribute('aria-checked', String(checked))
       const selection = document.createElement('span')
       selection.className = 'selection-indicator'
       const selectionIcon = document.createElement('md-icon')
@@ -372,11 +377,17 @@ export class AppList {
         element instanceof HTMLElement && element.classList.contains('card')
       ))
       if (!card || !container.contains(card)) return
-      const checkbox = card.querySelector<CheckboxElement>('md-checkbox')
-      if (!checkbox) return
-      const clickedCheckbox = eventPath.includes(checkbox)
-      if (!clickedCheckbox) event.preventDefault()
-      this.#syncCard(card, clickedCheckbox ? checkbox.checked : !checkbox.checked)
+      event.preventDefault()
+      this.#syncCard(card, card.dataset.selected !== 'true')
+    }
+    container.onkeydown = event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      const card = event.target instanceof HTMLElement
+        ? event.target.closest<HTMLElement>('.card')
+        : null
+      if (!card || !container.contains(card)) return
+      event.preventDefault()
+      card.click()
     }
   }
 
@@ -398,8 +409,6 @@ export class AppList {
   }
 
   #syncCard(card: HTMLElement, checked: boolean): void {
-    const checkbox = card.querySelector<CheckboxElement>('md-checkbox')
-    if (checkbox) checkbox.checked = checked
     card.classList.toggle('selected', checked)
     card.dataset.selected = String(checked)
     if (card.getAttribute('role') === 'checkbox') {

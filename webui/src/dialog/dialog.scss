@@ -1,4 +1,4 @@
-@scope (.dialog-content) {
+.dialog-content {
   #keybox-dialog,
   #pif-fingerprint-dialog,
   #system-app-dialog,
@@ -6,22 +6,19 @@
     max-height: min(
       560px,
       calc(
-        100vh - max(var(--top-inset), var(--bottom-inset)) -
-          max(var(--top-inset), var(--bottom-inset)) - 48px
+        100vh - var(--top-inset) - var(--bottom-inset) - 48px
       )
     );
     max-height: min(
       560px,
       calc(
-        100dvh - max(var(--top-inset), var(--bottom-inset)) -
-          max(var(--top-inset), var(--bottom-inset)) - 48px
+        100dvh - var(--top-inset) - var(--bottom-inset) - 48px
       )
     );
     max-width: min(
       560px,
       calc(
-        100vw - max(var(--left-inset), var(--right-inset)) -
-          max(var(--left-inset), var(--right-inset)) - 48px
+        100vw - var(--left-inset) - var(--right-inset) - 48px
       )
     );
   }
@@ -30,8 +27,7 @@
     max-width: min(
       420px,
       calc(
-        100vw - max(var(--left-inset), var(--right-inset)) -
-          max(var(--left-inset), var(--right-inset)) - 32px
+        100vw - var(--left-inset) - var(--right-inset) - 32px
       )
     );
 
@@ -51,8 +47,7 @@
     max-width: min(
       440px,
       calc(
-        100vw - max(var(--left-inset), var(--right-inset)) -
-          max(var(--left-inset), var(--right-inset)) - 32px
+        100vw - var(--left-inset) - var(--right-inset) - 32px
       )
     );
 
@@ -76,61 +71,108 @@
 
   #pif-fingerprint-dialog {
     max-width: min(
-      480px,
+      420px,
       calc(
         100vw - max(var(--left-inset), var(--right-inset)) -
           max(var(--left-inset), var(--right-inset)) - 24px
       )
     );
+    --md-dialog-container-color: var(--miuix-background);
+    --md-dialog-container-shape: 32px;
+    --pif-selection-secondary: #e6e6e6;
+
+    .pif-dialog-headline {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .pif-dialog-title {
+      color: var(--miuix-on-surface);
+      font-size: 18px;
+      font-weight: 500;
+      line-height: 24px;
+      text-align: center;
+    }
 
     .pif-dialog-content {
+      min-width: 0;
       display: flex;
       flex-direction: column;
       width: min(
-        400px,
+        372px,
         calc(
-          100vw - max(var(--left-inset), var(--right-inset)) -
-            max(var(--left-inset), var(--right-inset)) - 80px
+          100vw - var(--left-inset) - var(--right-inset) - 72px
         )
       );
-      gap: 12px;
+      gap: 10px;
+      color: var(--miuix-on-surface);
+      overflow: hidden;
     }
 
     .pif-enable-row {
-      min-height: 52px;
+      min-height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 16px;
+      border-radius: 16px;
+      box-sizing: border-box;
+      background: var(--miuix-surface-container);
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .pif-enable-copy,
+    .pif-current-copy {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .pif-enable-title {
+      font-size: 16px;
+      font-weight: 500;
+      line-height: 20px;
+    }
+
+    .pif-enable-summary {
+      color: var(--miuix-summary);
+      font-size: 13px;
+      line-height: 18px;
+      overflow-wrap: anywhere;
+    }
+
+    #pif-enabled {
+      flex: 0 0 auto;
+      --md-switch-selected-track-color: var(--miuix-primary);
+      --md-switch-selected-hover-track-color: var(--miuix-primary);
+      --md-switch-selected-focus-track-color: var(--miuix-primary);
+      --md-switch-selected-pressed-track-color: var(--miuix-primary);
+      --md-switch-selected-handle-color: #ffffff;
+      --md-switch-unselected-track-color: var(--pif-selection-secondary);
+      --md-switch-unselected-hover-track-color: var(--pif-selection-secondary);
+      --md-switch-unselected-focus-track-color: var(--pif-selection-secondary);
+      --md-switch-unselected-pressed-track-color: var(--pif-selection-secondary);
+      --md-switch-unselected-handle-color: #ffffff;
+      --md-switch-unselected-track-outline-color: transparent;
+      --md-switch-unselected-hover-track-outline-color: transparent;
+      --md-switch-unselected-focus-track-outline-color: transparent;
+      --md-switch-unselected-pressed-track-outline-color: transparent;
+    }
+
+    .pif-current-config {
+      min-height: 56px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding: 0 4px;
-      font-weight: 500;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .pif-requirement {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      padding: 0 4px;
-      color: var(--md-sys-color-on-surface-variant);
-      font-size: 0.8rem;
-      line-height: 1.35;
-
-      md-icon {
-        flex-shrink: 0;
-        font-size: 18px;
-      }
-    }
-
-    .pif-current-config {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: baseline;
-      column-gap: 12px;
-      row-gap: 2px;
-      padding: 10px 4px 12px;
-      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+      padding: 10px 16px;
+      border-radius: 16px;
+      box-sizing: border-box;
+      background: var(--miuix-surface-container);
 
       &.hide {
         display: none;
@@ -139,31 +181,61 @@
 
     .pif-current-label,
     .pif-current-patch {
-      color: var(--md-sys-color-on-surface-variant);
-      font-size: 0.85rem;
+      overflow-wrap: anywhere;
+    }
+
+    .pif-current-label {
+      color: var(--miuix-on-surface);
+      font-size: 15px;
+      font-weight: 500;
+      line-height: 20px;
+    }
+
+    .pif-current-patch {
+      color: var(--miuix-summary);
+      font-size: 12px;
+      line-height: 17px;
     }
 
     .pif-current-value {
       min-width: 0;
-      max-width: 55vw;
+      max-width: 48%;
       overflow-wrap: anywhere;
+      color: var(--miuix-primary);
+      font-size: 14px;
       font-weight: 500;
-      text-align: end;
-    }
-
-    .pif-current-patch {
-      grid-column: 1 / -1;
+      line-height: 19px;
       text-align: end;
     }
 
     .pif-device-panel {
-      border-radius: 8px;
-      background-color: var(--md-sys-color-surface-container-low);
+      min-height: 0;
+      max-height: min(
+        232px,
+        max(
+          124px,
+          calc(100vh - var(--top-inset) - var(--bottom-inset) - 360px)
+        )
+      );
+      max-height: min(
+        232px,
+        max(
+          124px,
+          calc(100dvh - var(--top-inset) - var(--bottom-inset) - 360px)
+        )
+      );
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: none;
+    }
+
+    .pif-device-panel::-webkit-scrollbar {
+      display: none;
     }
 
     .pif-panel-status {
       width: 100%;
-      height: 100%;
+      min-height: 124px;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -171,20 +243,22 @@
       gap: 12px;
       box-sizing: border-box;
       padding: 20px;
-      color: var(--md-sys-color-on-surface-variant);
+      border-radius: 16px;
+      color: var(--miuix-summary);
+      background: var(--miuix-surface-container);
       text-align: center;
 
       md-icon {
-        font-size: 32px;
+        font-size: 28px;
       }
     }
 
     .pif-panel-error md-icon {
-      color: var(--md-sys-color-error);
+      color: var(--miuix-error);
     }
 
     .pif-error-title {
-      color: var(--md-sys-color-on-surface);
+      color: var(--miuix-on-surface);
       font-weight: 500;
     }
 
@@ -196,34 +270,85 @@
       font-size: 0.8rem;
     }
 
+    .pif-error-detail[hidden] {
+      display: none;
+    }
+
+    .pif-loading-spinner,
+    .pif-apply-progress {
+      width: 22px;
+      height: 22px;
+      border: 2px solid rgba(128, 128, 128, 0.28);
+      border-top-color: currentColor;
+      border-radius: 50%;
+      box-sizing: border-box;
+      animation: pif-spin 700ms linear infinite;
+    }
+
+    .pif-loading-spinner {
+      color: var(--miuix-primary);
+    }
+
+    .pif-device-heading {
+      display: block;
+      padding: 2px 16px 8px;
+      color: var(--miuix-summary);
+      font-size: 13px;
+      line-height: 18px;
+    }
+
     .pif-device-list {
       box-sizing: border-box;
-      padding: 4px 4px 12px;
+      border-radius: 16px;
+      background: var(--miuix-surface-container);
+      overflow: hidden;
     }
 
     .pif-device-option {
-      min-height: 56px;
+      position: relative;
+      min-height: 64px;
+      width: 100%;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 16px;
-      padding: 6px 14px;
-      border-radius: 8px;
+      gap: 12px;
+      padding: 10px 16px;
+      border: 0;
       box-sizing: border-box;
+      color: var(--miuix-on-surface);
+      background: transparent;
       cursor: pointer;
       user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: background-color 120ms linear;
 
-      &:hover {
-        background-color: var(--md-sys-color-surface-container);
+      &:not(.selected):hover {
+        background: color-mix(in srgb, var(--miuix-on-surface) 6%, transparent);
       }
 
       &:active {
-        background-color: var(--md-sys-color-surface-container-high);
+        background: color-mix(in srgb, var(--miuix-on-surface) 10%, transparent);
       }
+    }
+
+    .pif-device-option:not(:last-child)::after {
+      position: absolute;
+      bottom: 0;
+      inset-inline: 16px;
+      height: 1px;
+      background: var(--miuix-divider);
+      content: '';
+      pointer-events: none;
+    }
+
+    .pif-device-option.disabled {
+      cursor: default;
+      opacity: 0.6;
     }
 
     .pif-device-text {
       min-width: 0;
+      flex: 1 1 auto;
       display: flex;
       flex-direction: column;
       gap: 2px;
@@ -235,26 +360,154 @@
     }
 
     .pif-device-name {
+      color: var(--miuix-on-surface);
+      font-size: 16px;
       font-weight: 500;
+      line-height: 20px;
     }
 
     .pif-device-product {
-      color: var(--md-sys-color-on-surface-variant);
-      font-size: 0.8rem;
+      color: var(--miuix-summary);
+      font-size: 13px;
+      line-height: 18px;
     }
 
-    .pif-device-option md-radio {
-      flex-shrink: 0;
+    .pif-device-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: 0;
+      padding: 0;
+      opacity: 0;
+      pointer-events: none;
     }
 
-    .pif-device-list md-divider {
-      margin: 2px 10px;
+    .pif-selection-indicator {
+      position: relative;
+      width: 26px;
+      height: 26px;
+      flex: 0 0 26px;
+      border-radius: 50%;
+      background: var(--pif-selection-secondary);
+      transform-origin: center;
+      transition: background-color 300ms cubic-bezier(0.4, 0, 0.2, 1),
+        transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        box-shadow 160ms ease;
+
+      svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      path {
+        fill: none;
+        stroke: #ffffff;
+        stroke-width: 2.34;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-dasharray: 1;
+        stroke-dashoffset: 1;
+        transition: stroke-dashoffset 200ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
+    }
+
+    .pif-device-option.selected .pif-selection-indicator {
+      background: var(--miuix-primary);
+
+      svg {
+        opacity: 1;
+        transition-duration: 10ms;
+      }
+
+      path {
+        stroke-dashoffset: 0;
+      }
+    }
+
+    .pif-device-option:active .pif-selection-indicator {
+      transform: scale(0.85);
+    }
+
+    .pif-device-input:focus-visible + .pif-selection-indicator {
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--miuix-primary) 28%, transparent);
+    }
+
+    .pif-dialog-actions {
+      width: 100%;
+      display: flex;
+      gap: 20px;
+    }
+
+    .pif-dialog-button,
+    .pif-retry-button {
+      min-width: 0;
+      min-height: 44px;
+      border: 0;
+      border-radius: 16px;
+      box-sizing: border-box;
+      font: inherit;
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: 0;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: filter 120ms linear, opacity 120ms linear, transform 120ms linear;
+    }
+
+    .pif-dialog-button {
+      flex: 1 1 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 16px;
+    }
+
+    .pif-dialog-button-secondary,
+    .pif-retry-button {
+      color: var(--miuix-primary);
+      background: var(--miuix-surface-container-high);
+    }
+
+    .pif-dialog-button-primary {
+      position: relative;
+      color: #ffffff;
+      background: var(--miuix-primary);
     }
 
     .pif-apply-progress {
-      --md-circular-progress-size: 18px;
-      --md-circular-progress-active-indicator-width: 18px;
-      --md-circular-progress-active-indicator-color: currentColor;
+      position: absolute;
+      inset-inline-start: 16px;
+      width: 18px;
+      height: 18px;
+    }
+
+    .pif-retry-button {
+      min-height: 40px;
+      padding: 0 20px;
+      font-size: 15px;
+    }
+
+    .pif-dialog-button:active:not(:disabled),
+    .pif-retry-button:active:not(:disabled) {
+      filter: brightness(0.92);
+      transform: scale(0.98);
+    }
+
+    .pif-dialog-button:focus-visible,
+    .pif-retry-button:focus-visible {
+      box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--miuix-primary) 72%, transparent);
+      outline: none;
+    }
+
+    .pif-dialog-button:disabled,
+    .pif-retry-button:disabled {
+      cursor: default;
+      opacity: 0.42;
     }
 
     .pif-apply-progress[hidden] {
@@ -263,22 +516,58 @@
   }
 
   #system-app-dialog {
+    max-width: min(
+      420px,
+      calc(100vw - var(--left-inset) - var(--right-inset) - 24px)
+    );
+    --md-dialog-container-color: var(--miuix-background);
+    --md-dialog-container-shape: 32px;
+    --system-app-checkbox-secondary: #e6e6e6;
+
     [slot='headline'] {
       display: flex;
       flex-direction: column;
-      align-items: flex-start;
-      gap: 16px;
+      align-items: stretch;
+      gap: 12px;
       width: 100%;
+    }
+
+    #system-app-title {
+      color: var(--miuix-on-surface);
+      font-size: 18px;
+      font-weight: 500;
+      line-height: 24px;
+      text-align: center;
     }
 
     #system-app-search {
       width: 100%;
+      overflow: hidden;
+      border-radius: 9999px;
+      background: var(--miuix-surface-container-high);
+      --md-outlined-text-field-container-color: var(--miuix-surface-container-high);
+      --md-outlined-text-field-container-height: 45px;
+      --md-outlined-text-field-container-shape: 9999px;
+      --md-outlined-text-field-input-text-size: 17px;
+      --md-outlined-text-field-input-text-weight: 500;
+      --md-outlined-text-field-outline-color: transparent;
+      --md-outlined-text-field-hover-outline-color: transparent;
+      --md-outlined-text-field-focus-outline-color: transparent;
     }
 
     .system-app-content {
       position: relative;
-      min-height: min(300px, 45vh);
-      min-height: min(300px, 45dvh);
+      min-height: min(192px, 45vh);
+      min-height: min(192px, 45dvh);
+      max-height: min(420px, 45vh);
+      max-height: min(420px, 45dvh);
+      overflow: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: none;
+    }
+
+    .system-app-content::-webkit-scrollbar {
+      display: none;
     }
 
     .system-app-loading {
@@ -287,8 +576,8 @@
       inset: 0;
       display: grid;
       place-items: center;
-      color: var(--md-sys-color-primary);
-      background-color: var(--md-sys-color-surface-container-high);
+      color: var(--miuix-primary);
+      background-color: var(--miuix-background);
     }
 
     .system-app-loading[hidden] {
@@ -299,42 +588,69 @@
       min-height: inherit;
       display: flex;
       flex-direction: column;
-      gap: 2px;
-      border-radius: 20px;
+      gap: 0;
+      border-radius: 16px;
+      background: var(--miuix-surface-container);
       overflow: hidden;
 
       .card-box {
         content-visibility: auto;
-        contain-intrinsic-size: auto 60px;
+        contain-intrinsic-size: auto 64px;
+      }
+
+      .card-box[hidden] {
+        display: none;
       }
 
       .card {
         position: relative;
+        min-height: 64px;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        background-color: var(--md-sys-color-surface-container);
-        padding: 8px 0;
-        border-radius: 2px;
+        gap: 12px;
+        color: var(--miuix-on-surface);
+        background: transparent;
+        padding: 10px 16px;
+        border: 0;
+        border-radius: 0;
         width: 100%;
         box-sizing: border-box;
+        cursor: pointer;
+        overflow: hidden;
+        -webkit-tap-highlight-color: transparent;
+        transition: background-color 120ms linear;
 
         &:active {
-          border-radius: 20px;
+          background: color-mix(in srgb, var(--miuix-on-surface) 10%, transparent);
         }
+
+        &:focus-within {
+          background: color-mix(in srgb, var(--miuix-on-surface) 8%, transparent);
+        }
+      }
+
+      .system-app-item:not(:last-child) .system-app-card::before {
+        position: absolute;
+        bottom: 0;
+        inset-inline: 68px 16px;
+        height: 1px;
+        background: var(--miuix-divider);
+        content: '';
+        pointer-events: none;
       }
 
       .name {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 12px;
         min-width: 0;
+        flex: 1 1 auto;
       }
 
       .app-icon-container {
         width: 40px;
         height: 40px;
-        margin-inline-start: 12px;
         position: relative;
         flex-shrink: 0;
       }
@@ -343,8 +659,8 @@
         position: absolute;
         inset: 0;
         overflow: hidden;
-        background-color: var(--md-sys-color-surface-container-high);
-        border-radius: 6px;
+        background-color: var(--miuix-surface-container-high);
+        border-radius: 10px;
       }
 
       .loader::after {
@@ -354,7 +670,7 @@
         background: linear-gradient(
           90deg,
           transparent,
-          color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent),
+          color-mix(in srgb, var(--miuix-on-surface) 8%, transparent),
           transparent
         );
         transform: translateX(-100%);
@@ -365,7 +681,9 @@
       }
 
       .app-icon {
+        width: 100%;
         height: 100%;
+        object-fit: contain;
         opacity: 0;
         transition: opacity 0.3s ease;
       }
@@ -374,8 +692,8 @@
         display: none;
         width: 100%;
         height: 100%;
-        border-radius: 8px;
-        background-color: var(--md-sys-color-secondary-container);
+        border-radius: 10px;
+        background-color: var(--miuix-primary-container);
         justify-content: center;
         align-items: center;
 
@@ -386,6 +704,9 @@
 
       .app-info {
         min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
       }
 
       .app-name,
@@ -395,23 +716,136 @@
       }
 
       .app-name {
+        overflow: hidden;
+        font-size: 16px;
         font-weight: 500;
+        line-height: 20px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .package-name {
-        font-size: 0.85em;
-        color: var(--md-sys-color-outline);
+        overflow: hidden;
+        color: var(--miuix-summary);
+        font-size: 13px;
+        line-height: 18px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
-      .checkbox {
-        flex-shrink: 0;
+      .system-app-checkbox {
+        position: relative;
+        width: 26px;
+        height: 26px;
+        flex: 0 0 26px;
+        border-radius: 50%;
+        background: var(--system-app-checkbox-secondary);
+        pointer-events: none;
+        transform-origin: center;
+        transition: background-color 300ms cubic-bezier(0.4, 0, 0.2, 1),
+          transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+        svg {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          opacity: 0;
+          transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        path {
+          fill: none;
+          stroke: #ffffff;
+          stroke-width: 2.34;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-dasharray: 1;
+          stroke-dashoffset: 1;
+          transition: stroke-dashoffset 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
       }
+
+      .card.selected .system-app-checkbox {
+        background: var(--miuix-primary);
+
+        svg {
+          opacity: 1;
+          transition-duration: 10ms;
+        }
+
+        path {
+          stroke-dashoffset: 0;
+        }
+      }
+
+      .card:active .system-app-checkbox {
+        transform: scale(0.85);
+      }
+    }
+
+    [slot='actions'] {
+      width: 100%;
+      display: flex;
+      gap: 20px;
+    }
+
+    [slot='actions'] > * {
+      min-width: 0;
+      flex: 1 1 0;
+    }
+
+    #cancel-system-app {
+      border-radius: 16px;
+      background: var(--miuix-surface-container-high);
+      --md-outlined-button-container-color: var(--miuix-surface-container-high);
+      --md-outlined-button-outline-color: transparent;
+      --md-outlined-button-hover-outline-color: transparent;
+      --md-outlined-button-pressed-outline-color: transparent;
     }
   }
 }
 
+:root[data-theme-resolved='dark'] .dialog-content #pif-fingerprint-dialog {
+  --pif-selection-secondary: #505050;
+}
+
+:root[data-theme-resolved='dark'] .dialog-content #system-app-dialog {
+  --system-app-checkbox-secondary: #505050;
+}
+
+@keyframes pif-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .dialog-content #system-app-dialog .loader::after {
-    animation: none;
+  .dialog-content #pif-fingerprint-dialog {
+    .pif-loading-spinner,
+    .pif-apply-progress {
+      animation-duration: 1.4s;
+    }
+
+    .pif-device-option,
+    .pif-selection-indicator,
+    .pif-selection-indicator svg,
+    .pif-selection-indicator path,
+    .pif-dialog-button,
+    .pif-retry-button {
+      transition: none;
+    }
+  }
+
+  .dialog-content #system-app-dialog {
+    .loader::after {
+      animation: none;
+    }
+
+    .system-app-checkbox,
+    .system-app-checkbox svg,
+    .system-app-checkbox path {
+      transition: none;
+    }
   }
 }

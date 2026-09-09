@@ -90,12 +90,12 @@ export class ToolsPage {
   getElement(): HTMLElement {
     const page = document.createElement('section')
     page.id = 'page-tools'
-    page.className = 'app-page tools-page'
+    page.className = 'app-page miuix-page tools-page'
     page.dataset.page = 'tools'
     page.hidden = true
 
     const heading = document.createElement('header')
-    heading.className = 'page-heading'
+    heading.className = 'page-heading miuix-top-app-bar'
     const title = document.createElement('h1')
     title.textContent = translate('tools_title', 'Tools')
     heading.appendChild(title)
@@ -144,12 +144,12 @@ export class ToolsPage {
 
   #createGroup(title: string, definitions: readonly ToolDefinition[]): HTMLElement {
     const section = document.createElement('section')
-    section.className = 'feature-section'
+    section.className = 'feature-section miuix-preference-section'
     const heading = document.createElement('h2')
     heading.className = 'section-title'
     heading.textContent = title
     const list = document.createElement('div')
-    list.className = 'feature-list'
+    list.className = 'feature-list miuix-preference-group'
     for (const definition of definitions) list.appendChild(this.#createToolRow(definition))
     section.append(heading, list)
     return section
@@ -158,11 +158,11 @@ export class ToolsPage {
   #createToolRow(definition: ToolDefinition): HTMLButtonElement {
     const row = document.createElement('button')
     row.type = 'button'
-    row.className = 'feature-row'
+    row.className = 'feature-row miuix-preference'
     row.dataset.toolEvent = definition.event
 
     const iconBox = document.createElement('span')
-    iconBox.className = 'feature-icon'
+    iconBox.className = 'feature-icon miuix-preference-icon'
     const icon = document.createElement('md-icon')
     icon.className = 'tool-action-icon'
     icon.textContent = definition.icon

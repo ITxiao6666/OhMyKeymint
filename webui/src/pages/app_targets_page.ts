@@ -31,10 +31,10 @@ export class AppTargetsPage {
   getElement(): HTMLElement {
     const page = document.createElement('section')
     page.id = 'page-targets'
-    page.className = 'targets-page targets-overlay'
+    page.className = 'targets-page targets-overlay miuix-page'
     page.hidden = true
     page.innerHTML = /* html */ `
-      <header class="targets-heading">
+      <header class="targets-heading miuix-top-app-bar">
         <md-icon-button class="targets-back" flip-icon-in-rtl="true">
           <md-icon>arrow_back</md-icon>
         </md-icon-button>
@@ -47,7 +47,7 @@ export class AppTargetsPage {
         </div>
       </header>
       <div class="targets-controls">
-        <md-outlined-text-field class="targets-search">
+        <md-outlined-text-field class="targets-search miuix-search-bar">
           <md-icon slot="leading-icon">search</md-icon>
           <md-icon-button class="targets-search-clear" slot="trailing-icon" hidden>
             <md-icon>close</md-icon>
@@ -150,9 +150,10 @@ export class AppTargetsPage {
   #createFilter(filter: SelectionFilter, iconName: string, label: string): HTMLButtonElement {
     const button = document.createElement('button')
     button.type = 'button'
-    button.className = 'target-filter'
+    button.className = 'target-filter miuix-chip'
     button.dataset.filter = filter
     button.setAttribute('role', 'radio')
+    button.tabIndex = filter === this.#filter ? 0 : -1
     const icon = document.createElement('md-icon')
     icon.textContent = iconName
     icon.setAttribute('aria-hidden', 'true')
@@ -164,6 +165,29 @@ export class AppTargetsPage {
       this.#appList.setSelectionFilter(filter)
       this.#syncFilters()
     }
+    button.onkeydown = event => {
+      const buttons = [...this.#element?.querySelectorAll<HTMLButtonElement>('.target-filter') ?? []]
+      const currentIndex = buttons.indexOf(button)
+      if (currentIndex < 0 || buttons.length === 0) return
+
+      let nextIndex: number | null = null
+      if (event.key === 'Home') nextIndex = 0
+      else if (event.key === 'End') nextIndex = buttons.length - 1
+      else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        nextIndex = (currentIndex + 1) % buttons.length
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        nextIndex = (currentIndex - 1 + buttons.length) % buttons.length
+      }
+      if (nextIndex === null) return
+      event.preventDefault()
+      const next = buttons[nextIndex]
+      const nextFilter = next.dataset.filter as SelectionFilter | undefined
+      if (!nextFilter) return
+      this.#filter = nextFilter
+      this.#appList.setSelectionFilter(nextFilter)
+      this.#syncFilters()
+      next.focus()
+    }
     return button
   }
 
@@ -172,6 +196,7 @@ export class AppTargetsPage {
       const selected = button.dataset.filter === this.#filter
       button.classList.toggle('selected', selected)
       button.setAttribute('aria-checked', String(selected))
+      button.tabIndex = selected ? 0 : -1
     })
   }
 

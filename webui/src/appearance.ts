@@ -1,19 +1,33 @@
-export const APPEARANCE_MODES = ['dark', 'amoled', 'light', 'auto'] as const
+export const APPEARANCE_MODES = ['auto', 'light', 'dark', 'amoled'] as const
 export type AppearanceMode = typeof APPEARANCE_MODES[number]
 
 export const ACCENT_COLORS = [
-  'blue',
-  'yellow',
+  'default',
   'red',
-  'purple',
-  'green',
-  'orange',
   'pink',
+  'purple',
+  'deepPurple',
+  'indigo',
+  'blue',
   'cyan',
-  'grey',
-  'system',
+  'teal',
+  'green',
+  'yellow',
+  'amber',
+  'orange',
+  'brown',
+  'blueGrey',
+  'sakura',
 ] as const
 export type AccentColor = typeof ACCENT_COLORS[number]
+
+export const APPEARANCE_OPTIONS = [
+  'monet',
+  'barBlur',
+  'floatingBottomBar',
+  'liquidGlass',
+] as const
+export type AppearanceOption = typeof APPEARANCE_OPTIONS[number]
 
 type ResolvedMode = 'light' | 'dark'
 type AppearanceListener = () => void
@@ -26,11 +40,21 @@ interface AccentPalette {
 }
 
 const DEFAULT_MODE: AppearanceMode = 'auto'
-const DEFAULT_ACCENT: AccentColor = 'system'
+type ManualAccent = Exclude<AccentColor, 'default'>
+const DEFAULT_ACCENT = 'default' as const satisfies AccentColor
+const DEFAULT_MANUAL_ACCENT: ManualAccent = 'blue'
+const DEFAULT_OPTIONS: Readonly<Record<AppearanceOption, boolean>> = {
+  monet: true,
+  barBlur: false,
+  floatingBottomBar: false,
+  liquidGlass: false,
+}
 const THEME_QUERY = 'theme'
 const ACCENT_QUERY = 'accent'
 const APPEARANCE_STORAGE_KEY = 'omk-appearance'
 const ACCENT_PROPERTIES = [
+  '--miuix-primary',
+  '--miuix-primary-container',
   '--md-sys-color-primary',
   '--md-sys-color-on-primary',
   '--md-sys-color-primary-container',
@@ -42,7 +66,7 @@ const ACCENT_PROPERTIES = [
   '--md-sys-color-inverse-primary',
 ] as const
 
-const ACCENTS: Record<Exclude<AccentColor, 'system'>, Record<ResolvedMode, AccentPalette>> = {
+const ACCENTS: Record<ManualAccent, Record<ResolvedMode, AccentPalette>> = {
   blue: {
     light: {
       primary: '#1157ce',
@@ -97,6 +121,104 @@ const ACCENTS: Record<Exclude<AccentColor, 'system'>, Record<ResolvedMode, Accen
       onPrimary: '#381e72',
       primaryContainer: '#4f378b',
       onPrimaryContainer: '#eaddff',
+    },
+  },
+  deepPurple: {
+    light: {
+      primary: '#5f3da8',
+      onPrimary: '#ffffff',
+      primaryContainer: '#e9ddff',
+      onPrimaryContainer: '#1e0b4f',
+    },
+    dark: {
+      primary: '#d0bcff',
+      onPrimary: '#362065',
+      primaryContainer: '#4d3780',
+      onPrimaryContainer: '#e9ddff',
+    },
+  },
+  indigo: {
+    light: {
+      primary: '#4355b9',
+      onPrimary: '#ffffff',
+      primaryContainer: '#dce2ff',
+      onPrimaryContainer: '#10174b',
+    },
+    dark: {
+      primary: '#bec6ff',
+      onPrimary: '#27337e',
+      primaryContainer: '#3d4a95',
+      onPrimaryContainer: '#dce2ff',
+    },
+  },
+  teal: {
+    light: {
+      primary: '#006a60',
+      onPrimary: '#ffffff',
+      primaryContainer: '#9ef2e5',
+      onPrimaryContainer: '#00201c',
+    },
+    dark: {
+      primary: '#80dbcf',
+      onPrimary: '#003731',
+      primaryContainer: '#005047',
+      onPrimaryContainer: '#9ef2e5',
+    },
+  },
+  amber: {
+    light: {
+      primary: '#8b5000',
+      onPrimary: '#ffffff',
+      primaryContainer: '#ffddb4',
+      onPrimaryContainer: '#2d1600',
+    },
+    dark: {
+      primary: '#ffb95f',
+      onPrimary: '#4d2600',
+      primaryContainer: '#6d3900',
+      onPrimaryContainer: '#ffddb4',
+    },
+  },
+  brown: {
+    light: {
+      primary: '#815343',
+      onPrimary: '#ffffff',
+      primaryContainer: '#ffdbce',
+      onPrimaryContainer: '#32130a',
+    },
+    dark: {
+      primary: '#ffb59f',
+      onPrimary: '#4c251a',
+      primaryContainer: '#653b2e',
+      onPrimaryContainer: '#ffdbce',
+    },
+  },
+  blueGrey: {
+    light: {
+      primary: '#4f616d',
+      onPrimary: '#ffffff',
+      primaryContainer: '#d3e5ef',
+      onPrimaryContainer: '#091e28',
+    },
+    dark: {
+      primary: '#b7cad4',
+      onPrimary: '#21333b',
+      primaryContainer: '#394b53',
+      onPrimaryContainer: '#d3e5ef',
+    },
+  },
+  sakura: {
+    light: {
+      primary: '#a23f54',
+      onPrimary: '#ffffff',
+      primaryContainer: '#ffd9df',
+      onPrimaryContainer: '#3f0717',
+    },
+    dark: {
+      primary: '#ffb2bd',
+      onPrimary: '#610f25',
+      primaryContainer: '#7f293d',
+      onPrimaryContainer: '#ffd9df',
     },
   },
   green: {
@@ -155,33 +277,22 @@ const ACCENTS: Record<Exclude<AccentColor, 'system'>, Record<ResolvedMode, Accen
       onPrimaryContainer: '#adedff',
     },
   },
-  grey: {
-    light: {
-      primary: '#5e5e5e',
-      onPrimary: '#ffffff',
-      primaryContainer: '#e2e2e2',
-      onPrimaryContainer: '#1b1b1b',
-    },
-    dark: {
-      primary: '#c6c6c6',
-      onPrimary: '#303030',
-      primaryContainer: '#464646',
-      onPrimaryContainer: '#e2e2e2',
-    },
-  },
 }
 
 function isAppearanceMode(value: string | null): value is AppearanceMode {
   return value !== null && APPEARANCE_MODES.some(mode => mode === value)
 }
 
-function isAccentColor(value: string | null): value is AccentColor {
-  return value !== null && ACCENT_COLORS.some(color => color === value)
+function normalizeAccent(value: string | null): AccentColor | null {
+  if (value === 'system') return DEFAULT_ACCENT
+  if (value === 'grey') return 'blueGrey'
+  return ACCENT_COLORS.find(color => color === value) ?? null
 }
 
 export class AppearanceController {
   #mode: AppearanceMode
   #accent: AccentColor
+  #options: Record<AppearanceOption, boolean>
   #systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
   #listeners: AppearanceListener[] = []
 
@@ -189,9 +300,15 @@ export class AppearanceController {
     const url = new URL(window.location.href)
     const stored = AppearanceController.#readStoredAppearance()
     const requestedMode = url.searchParams.get(THEME_QUERY) ?? stored.mode
-    const requestedAccent = url.searchParams.get(ACCENT_QUERY) ?? stored.accent
+    const queryAccent = url.searchParams.get(ACCENT_QUERY)
+    const requestedAccent = normalizeAccent(queryAccent ?? stored.accent)
     this.#mode = isAppearanceMode(requestedMode) ? requestedMode : DEFAULT_MODE
-    this.#accent = isAccentColor(requestedAccent) ? requestedAccent : DEFAULT_ACCENT
+    this.#accent = requestedAccent ?? DEFAULT_ACCENT
+    this.#options = { ...DEFAULT_OPTIONS, ...stored.options }
+    if (stored.options.monet === undefined && normalizeAccent(stored.accent) !== null) {
+      this.#options.monet = stored.accent === DEFAULT_ACCENT || stored.accent === 'system'
+    }
+    if (this.#options.liquidGlass) this.#options.floatingBottomBar = true
     this.#systemTheme.addEventListener('change', () => {
       if (this.#mode !== 'auto') return
       this.#apply()
@@ -208,6 +325,10 @@ export class AppearanceController {
     return this.#accent
   }
 
+  getOption(option: AppearanceOption): boolean {
+    return this.#options[option]
+  }
+
   setMode(mode: AppearanceMode): void {
     if (mode === this.#mode) return
     this.#mode = mode
@@ -218,8 +339,24 @@ export class AppearanceController {
   }
 
   setAccent(accent: AccentColor): void {
-    if (accent === this.#accent) return
-    this.#accent = accent
+    const normalized = normalizeAccent(accent)
+    if (normalized === null || normalized === this.#accent) return
+    this.#accent = normalized
+    this.#storeAppearance()
+    this.#syncUrl()
+    this.#apply()
+    this.#emit()
+  }
+
+  setOption(option: AppearanceOption, enabled: boolean): void {
+    const floatingChanged = option === 'liquidGlass' && enabled
+      && !this.#options.floatingBottomBar
+    const glassChanged = option === 'floatingBottomBar' && !enabled
+      && this.#options.liquidGlass
+    if (this.#options[option] === enabled && !floatingChanged && !glassChanged) return
+    this.#options[option] = enabled
+    if (floatingChanged) this.#options.floatingBottomBar = true
+    if (glassChanged) this.#options.liquidGlass = false
     this.#storeAppearance()
     this.#syncUrl()
     this.#apply()
@@ -230,19 +367,30 @@ export class AppearanceController {
     this.#listeners.push(listener)
   }
 
-  static #readStoredAppearance(): { mode: string | null, accent: string | null } {
+  static #readStoredAppearance(): {
+    mode: string | null
+    accent: string | null
+    options: Partial<Record<AppearanceOption, boolean>>
+  } {
     try {
       const value = window.localStorage.getItem(APPEARANCE_STORAGE_KEY)
-      if (value === null) return { mode: null, accent: null }
+      if (value === null) return { mode: null, accent: null, options: {} }
       const parsed: unknown = JSON.parse(value)
-      if (typeof parsed !== 'object' || parsed === null) return { mode: null, accent: null }
+      if (typeof parsed !== 'object' || parsed === null) {
+        return { mode: null, accent: null, options: {} }
+      }
       const record = parsed as Record<string, unknown>
+      const options: Partial<Record<AppearanceOption, boolean>> = {}
+      for (const option of APPEARANCE_OPTIONS) {
+        if (typeof record[option] === 'boolean') options[option] = record[option]
+      }
       return {
         mode: typeof record.mode === 'string' ? record.mode : null,
         accent: typeof record.accent === 'string' ? record.accent : null,
+        options,
       }
     } catch {
-      return { mode: null, accent: null }
+      return { mode: null, accent: null, options: {} }
     }
   }
 
@@ -251,6 +399,7 @@ export class AppearanceController {
       window.localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({
         mode: this.#mode,
         accent: this.#accent,
+        ...this.#options,
       }))
     } catch {
       // Some WebViews can disable storage; the in-memory setting still applies.
@@ -278,13 +427,38 @@ export class AppearanceController {
     root.dataset.themeMode = this.#mode
     root.dataset.themeResolved = resolved
     root.dataset.themeAccent = this.#accent
+    root.dataset.monet = String(this.#options.monet)
+    root.dataset.barBlur = String(this.#options.barBlur)
+    root.dataset.floatingBottomBar = String(this.#options.floatingBottomBar)
+    root.dataset.liquidGlass = String(this.#options.liquidGlass)
     root.style.colorScheme = resolved
 
     for (const property of ACCENT_PROPERTIES) root.style.removeProperty(property)
-    if (this.#accent === 'system') return
-
-    const palette = ACCENTS[this.#accent][resolved]
+    if (this.#options.monet && this.#accent === DEFAULT_ACCENT) {
+      const fallback = ACCENTS.blue[resolved]
+      const values: Record<(typeof ACCENT_PROPERTIES)[number], string> = {
+        '--miuix-primary': `var(--primary, ${fallback.primary})`,
+        '--miuix-primary-container': `var(--primaryContainer, ${fallback.primaryContainer})`,
+        '--md-sys-color-primary': `var(--primary, ${fallback.primary})`,
+        '--md-sys-color-on-primary': `var(--onPrimary, ${fallback.onPrimary})`,
+        '--md-sys-color-primary-container': `var(--primaryContainer, ${fallback.primaryContainer})`,
+        '--md-sys-color-on-primary-container': `var(--onPrimaryContainer, ${fallback.onPrimaryContainer})`,
+        '--md-sys-color-secondary': `var(--secondary, ${fallback.primary})`,
+        '--md-sys-color-on-secondary': `var(--onSecondary, ${fallback.onPrimary})`,
+        '--md-sys-color-secondary-container': `var(--secondaryContainer, ${fallback.primaryContainer})`,
+        '--md-sys-color-on-secondary-container': `var(--onSecondaryContainer, ${fallback.onPrimaryContainer})`,
+        '--md-sys-color-inverse-primary': `var(--inversePrimary, ${fallback.primary})`,
+      }
+      for (const [property, value] of Object.entries(values)) root.style.setProperty(property, value)
+      return
+    }
+    const selectedAccent: ManualAccent = this.#accent === DEFAULT_ACCENT
+      ? DEFAULT_MANUAL_ACCENT
+      : this.#accent
+    const palette = ACCENTS[selectedAccent][resolved]
     const values: Record<(typeof ACCENT_PROPERTIES)[number], string> = {
+      '--miuix-primary': palette.primary,
+      '--miuix-primary-container': palette.primaryContainer,
       '--md-sys-color-primary': palette.primary,
       '--md-sys-color-on-primary': palette.onPrimary,
       '--md-sys-color-primary-container': palette.primaryContainer,

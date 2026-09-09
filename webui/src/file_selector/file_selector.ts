@@ -245,7 +245,7 @@ export class FileSelector {
   getElement(): DocumentFragment {
     const template = document.createElement('template')
     template.innerHTML = /* html */ `
-      <md-dialog id="file-selector-dialog" class="file-selector-dialog">
+      <md-dialog id="file-selector-dialog" class="file-selector-dialog miuix-dialog">
         <div slot="headline" class="file-selector-headline">
           <md-icon-button class="back-button" flip-icon-in-rtl="true">
             <md-icon>arrow_back</md-icon>

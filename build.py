@@ -72,6 +72,7 @@ MODULE_TEXT_FILES = (
     "daemon-injector",
     "injector.toml",
     "keybox.xml",
+    "google_attestation_status.json",
     "module.prop",
     "uninstall.sh",
     "post-fs-data.sh",

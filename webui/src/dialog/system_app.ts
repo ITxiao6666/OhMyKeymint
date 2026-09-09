@@ -4,8 +4,6 @@ import { i18n } from '../i18n'
 import { applyDialogAnimation } from './animation'
 import './dialog.scss'
 
-type CheckboxElement = HTMLElement & { checked: boolean }
-
 export class SystemAppDialog {
   #dialog: MdDialog | null = null
   #renderGeneration = 0
@@ -19,7 +17,7 @@ export class SystemAppDialog {
   getElement(): DocumentFragment {
     const template = document.createElement('template')
     template.innerHTML = /* html */ `
-      <md-dialog id="system-app-dialog">
+      <md-dialog id="system-app-dialog" class="miuix-dialog">
         <div slot="headline">
           <span id="system-app-title"></span>
           <md-outlined-text-field id="system-app-search">
@@ -123,8 +121,9 @@ export class SystemAppDialog {
 
     const checkedApps: string[] = []
     list.querySelectorAll<HTMLElement>('.card').forEach(card => {
-      const checkbox = card.querySelector<CheckboxElement>('md-checkbox')
-      if (checkbox?.checked && card.dataset.package) checkedApps.push(card.dataset.package)
+      if (card.dataset.selected === 'true' && card.dataset.package) {
+        checkedApps.push(card.dataset.package)
+      }
     })
 
     await this.#appList.saveSystemAppSelection(checkedApps)

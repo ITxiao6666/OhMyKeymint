@@ -1,5 +1,10 @@
 import { i18n } from '../i18n'
-import type { ActivityEntry, KeyboxLevel, KeyboxSource } from '../cli'
+import type {
+  ActivityEntry,
+  KeyboxLevel,
+  KeyboxRevocationStatus,
+  KeyboxSource,
+} from '../cli'
 import './pages.scss'
 
 export type ModuleStatus = 'loading' | 'ready' | 'error'
@@ -19,6 +24,7 @@ export class HomePage {
   #keyboxStatus: KeyboxStatus = 'loading'
   #keyboxSource: KeyboxSource = 'unknown'
   #keyboxLevel: KeyboxLevel = 'unknown'
+  #keyboxRevocation: KeyboxRevocationStatus = 'not_checked'
   #teeStatus: TeeStatus = 'loading'
   #securityPatch: string | null = null
   #spoofedDevice: string | null | undefined
@@ -31,10 +37,10 @@ export class HomePage {
   getElement(): HTMLElement {
     const page = document.createElement('section')
     page.id = 'page-home'
-    page.className = 'app-page home-page'
+    page.className = 'app-page miuix-page home-page'
     page.dataset.page = 'home'
     page.innerHTML = /* html */ `
-      <header class="page-heading home-heading">
+      <header class="page-heading miuix-top-app-bar home-heading">
         <div class="home-brand">
           <h1>Oh My Keymint</h1>
         </div>
@@ -44,7 +50,7 @@ export class HomePage {
         </div>
       </header>
       <div class="home-identity-grid" aria-live="polite">
-        <article class="identity-card keybox-summary" data-status="loading">
+        <article class="identity-card miuix-card keybox-summary" data-status="loading">
           <div class="identity-section">
             <span class="identity-label keybox-label"></span>
             <strong class="identity-primary keybox-source-value">&mdash;</strong>
@@ -54,11 +60,11 @@ export class HomePage {
             <strong class="identity-secondary keybox-level-value">&mdash;</strong>
           </div>
           <div class="identity-section identity-footer">
-            <span class="identity-label keybox-status-label"></span>
-            <strong class="identity-secondary keybox-status-value"></strong>
+            <span class="identity-label keybox-revocation-label"></span>
+            <strong class="identity-secondary keybox-revocation-value"></strong>
           </div>
         </article>
-        <article class="identity-card device-summary">
+        <article class="identity-card miuix-card device-summary">
           <div class="identity-section">
             <span class="identity-label security-patch-label"></span>
             <strong class="identity-primary security-patch-value">&mdash;</strong>
@@ -73,7 +79,7 @@ export class HomePage {
           </div>
         </article>
       </div>
-      <section class="home-activity" aria-labelledby="recent-activity-title">
+      <section class="home-activity miuix-card" aria-labelledby="recent-activity-title">
         <header class="activity-heading">
           <h2 id="recent-activity-title"></h2>
           <span class="activity-count"></span>
@@ -88,10 +94,10 @@ export class HomePage {
 
     page.querySelector<HTMLElement>('.keybox-label')!.textContent =
       translate('home_keybox', 'Keybox')
-    page.querySelector<HTMLElement>('.keybox-status-label')!.textContent =
-      translate('home_status', 'Status')
     page.querySelector<HTMLElement>('.keybox-level-label')!.textContent =
-      translate('home_keybox_level', 'Level')
+      translate('home_keybox_security_level', 'Security Level')
+    page.querySelector<HTMLElement>('.keybox-revocation-label')!.textContent =
+      translate('home_keybox_revocation', 'Certificate status')
     page.querySelector<HTMLElement>('.security-patch-label')!.textContent =
       translate('home_security_patch', 'Security patch')
     page.querySelector<HTMLElement>('.tee-status-label')!.textContent =
@@ -128,16 +134,25 @@ export class HomePage {
     value: Exclude<KeyboxStatus, 'loading'>,
     source: KeyboxSource = 'unknown',
     level: KeyboxLevel = 'unknown',
+    revocation: KeyboxRevocationStatus = 'not_checked',
   ): void {
     this.#keyboxStatus = value
     this.#keyboxSource = source
     this.#keyboxLevel = level
+    this.#keyboxRevocation = revocation
     this.#renderDeviceOverview()
   }
 
-  setKeyboxDetails(source: KeyboxSource, level: KeyboxLevel): void {
-    this.#keyboxSource = source
-    this.#keyboxLevel = level
+  setKeyboxLoading(): void {
+    this.#keyboxStatus = 'loading'
+    this.#keyboxSource = 'unknown'
+    this.#keyboxLevel = 'unknown'
+    this.#keyboxRevocation = 'checking'
+    this.#renderDeviceOverview()
+  }
+
+  setKeyboxRevocation(value: KeyboxRevocationStatus): void {
+    this.#keyboxRevocation = value
     this.#renderDeviceOverview()
   }
 
@@ -205,53 +220,72 @@ export class HomePage {
     const keybox = this.#element?.querySelector<HTMLElement>('.keybox-summary')
     const keyboxSource = this.#element?.querySelector<HTMLElement>('.keybox-source-value')
     const keyboxLevel = this.#element?.querySelector<HTMLElement>('.keybox-level-value')
-    const keyboxStatus = this.#element?.querySelector<HTMLElement>('.keybox-status-value')
+    const keyboxRevocation = this.#element?.querySelector<HTMLElement>('.keybox-revocation-value')
     const teeStatus = this.#element?.querySelector<HTMLElement>('.tee-status-value')
 
-    const keyboxStates: Record<KeyboxStatus, { source: string, status: string, level: string, statusCode: string }> = {
+    const keyboxStates: Record<KeyboxStatus, {
+      source: string
+      level: string
+      revocation: string
+      revocationCode: string
+    }> = {
       loading: {
         source: '\u2014',
-        status: translate('home_keybox_status_checking', 'Checking'),
-        level: translate('home_keybox_level_unknown', '\u2014'),
-        statusCode: 'checking',
+        level: translate('home_keybox_level_unknown', 'Unknown'),
+        revocation: translate('home_keybox_status_checking', 'Checking'),
+        revocationCode: 'checking',
       },
       bundled: {
         source: translate('home_keybox_bundled', 'Built-in Keybox'),
-        status: this.#keyboxIntegrityStatus(),
-        level: this.#keyboxIntegrityLevel(),
-        statusCode: this.#keyboxIntegrityStatusCode(),
+        level: this.#keyboxLevelLabel(),
+        revocation: this.#keyboxRevocationLabel(),
+        revocationCode: this.#keyboxRevocationCode(),
       },
       custom: {
         source: this.#keyboxSourceLabel(),
-        status: this.#keyboxIntegrityStatus(),
-        level: this.#keyboxIntegrityLevel(),
-        statusCode: this.#keyboxIntegrityStatusCode(),
+        level: this.#keyboxLevelLabel(),
+        revocation: this.#keyboxRevocationLabel(),
+        revocationCode: this.#keyboxRevocationCode(),
       },
       invalid: {
         source: translate('home_keybox_invalid', 'Invalid Keybox'),
-        status: translate('home_keybox_status_revoked', 'Revoked'),
-        level: translate('home_keybox_level_l3', 'L3'),
-        statusCode: 'revoked',
+        level: translate('home_keybox_level_unknown', 'Unknown'),
+        revocation: translate('home_keybox_local_invalid', 'Local validation failed'),
+        revocationCode: 'invalid',
       },
       error: {
         source: '\u2014',
-        status: translate('home_keybox_status_unknown', 'Unknown'),
-        level: translate('home_keybox_level_unknown', '\u2014'),
-        statusCode: 'unknown',
+        level: translate('home_keybox_level_unknown', 'Unknown'),
+        revocation: translate('home_keybox_revocation_check_failed', 'Check failed'),
+        revocationCode: 'unknown',
       },
     }
     if (keybox) keybox.dataset.status = this.#keyboxStatus
-    if (keyboxSource) keyboxSource.textContent = keyboxStates[this.#keyboxStatus].source
+    if (keyboxSource) {
+      keyboxSource.textContent = keyboxStates[this.#keyboxStatus].source
+      keyboxSource.dataset.source = this.#keyboxStatus === 'custom'
+        ? this.#keyboxSource
+        : this.#keyboxStatus
+      keyboxSource.style.removeProperty('font-size')
+      if (keyboxSource.dataset.source === 'google_hardware'
+        || keyboxSource.dataset.source === 'google_remote') {
+        requestAnimationFrame(() => {
+          if (!keyboxSource.isConnected || !keyboxSource.dataset.source?.startsWith('google_')) return
+          const availableWidth = keyboxSource.clientWidth
+          const contentWidth = keyboxSource.scrollWidth
+          if (availableWidth <= 0 || contentWidth <= availableWidth) return
+          const fittedSize = Math.max(10, Math.floor(160 * availableWidth / contentWidth) / 10)
+          keyboxSource.style.fontSize = `${fittedSize}px`
+        })
+      }
+    }
     if (keyboxLevel) {
       keyboxLevel.textContent = keyboxStates[this.#keyboxStatus].level
-      keyboxLevel.dataset.level = this.#keyboxStatus === 'loading'
-        ? 'unknown'
-        : this.#keyboxStatus === 'invalid' ? 'l3' : this.#keyboxStatus === 'error'
-          ? 'unknown' : this.#keyboxIntegrityLevelCode()
+      keyboxLevel.dataset.level = this.#keyboxLevel
     }
-    if (keyboxStatus) {
-      keyboxStatus.textContent = keyboxStates[this.#keyboxStatus].status
-      keyboxStatus.dataset.status = keyboxStates[this.#keyboxStatus].statusCode
+    if (keyboxRevocation) {
+      keyboxRevocation.textContent = keyboxStates[this.#keyboxStatus].revocation
+      keyboxRevocation.dataset.status = keyboxStates[this.#keyboxStatus].revocationCode
     }
     if (teeStatus) {
       const teeStates: Record<TeeStatus, string> = {
@@ -273,38 +307,43 @@ export class HomePage {
   #keyboxSourceLabel(): string {
     switch (this.#keyboxSource) {
       case 'google_hardware':
-        return translate('home_keybox_hardware', 'Google hardware key')
+        return translate('home_keybox_hardware', 'Google hardware root certificate')
       case 'google_remote':
-        return translate('home_keybox_remote', 'Google remote key')
+        return translate('home_keybox_remote', 'Google remote key provisioning')
       case 'unknown':
         return translate('home_keybox_unknown', 'Unknown key')
     }
   }
 
-  // The backend has no Play Integrity result source. Keep the UI honest by
-  // treating a fully identified valid Keybox as L1 and incomplete metadata as L2.
-  #keyboxIntegrityLevelCode(): 'l1' | 'l2' {
-    return this.#keyboxSource !== 'unknown' && this.#keyboxLevel !== 'unknown' ? 'l1' : 'l2'
+  #keyboxLevelLabel(): string {
+    switch (this.#keyboxLevel) {
+      case 'tee':
+        return translate('home_keybox_tee', 'TEE')
+      case 'strongbox':
+        return translate('home_keybox_strongbox', 'StrongBox')
+      case 'unknown':
+        return translate('home_keybox_level_unknown', 'Unknown')
+    }
   }
 
-  #keyboxIntegrityLevel(): string {
-    return translate(
-      this.#keyboxIntegrityLevelCode() === 'l1' ? 'home_keybox_level_l1' : 'home_keybox_level_l2',
-      this.#keyboxIntegrityLevelCode() === 'l1' ? 'L1' : 'L2',
-    )
+  #keyboxRevocationLabel(): string {
+    switch (this.#keyboxRevocation) {
+      case 'not_checked':
+        return translate('home_keybox_status_not_checked', 'Not checked')
+      case 'checking':
+        return translate('home_keybox_status_checking', 'Checking')
+      case 'not_listed':
+        return translate('home_keybox_revocation_not_revoked', 'Not revoked')
+      case 'suspended':
+      case 'revoked':
+        return translate('home_keybox_revocation_revoked', 'Revoked')
+      case 'unknown':
+        return translate('home_keybox_revocation_check_failed', 'Check failed')
+    }
   }
 
-  #keyboxIntegrityStatus(): string {
-    return translate(
-      this.#keyboxIntegrityLevelCode() === 'l1'
-        ? 'home_keybox_status_valid'
-        : 'home_keybox_status_soft_banned',
-      this.#keyboxIntegrityLevelCode() === 'l1' ? 'Valid' : 'Soft-banned',
-    )
-  }
-
-  #keyboxIntegrityStatusCode(): 'valid' | 'soft-banned' {
-    return this.#keyboxIntegrityLevelCode() === 'l1' ? 'valid' : 'soft-banned'
+  #keyboxRevocationCode(): string {
+    return this.#keyboxRevocation === 'suspended' ? 'revoked' : this.#keyboxRevocation
   }
 
   #renderActivities(): void {

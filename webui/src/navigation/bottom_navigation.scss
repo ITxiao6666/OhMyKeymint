@@ -66,6 +66,12 @@
   transition: max-width 220ms ease, opacity 160ms ease;
 }
 
+.bottom-navigation-surface,
+.bottom-navigation-indicator,
+.bottom-navigation-accent-track {
+  display: none;
+}
+
 .bottom-navigation-item.active .bottom-navigation-label {
   max-width: 88px;
   opacity: 1;

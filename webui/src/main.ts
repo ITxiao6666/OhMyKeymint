@@ -1,7 +1,6 @@
 import type { MdDialog } from '@material/web/all'
 import '@material/web/button/filled-button.js'
 import '@material/web/button/outlined-button.js'
-import '@material/web/checkbox/checkbox.js'
 import '@material/web/dialog/dialog.js'
 import '@material/web/divider/divider.js'
 import '@material/web/fab/fab.js'
@@ -17,7 +16,7 @@ import '@material/web/switch/switch.js'
 import '@material/web/textfield/outlined-text-field.js'
 import { AppList } from './app_list/app_list'
 import { appearance } from './appearance'
-import { Cli } from './cli'
+import { Cli, type KeyboxRevocationStatus } from './cli'
 import { ConfigOhMyKeyMint } from './config_ohmykeymint'
 import { KeyboxDialog } from './dialog/keybox'
 import { applyDialogAnimation } from './dialog/animation'
@@ -36,21 +35,22 @@ import { fetchLatestSecurityPatch } from './security_patch'
 import { Snackbar } from './snackbar/snackbar'
 import { isDev } from './utils/dev'
 import './style.scss'
+import './miuix.scss'
 
 await i18n.init()
 
 const root = document.querySelector<HTMLDivElement>('#app')!
 root.innerHTML = /* html */ `
-  <main class="app-shell">
+  <main class="app-shell miuix-app">
     <div class="page-stack"></div>
   </main>
-  <section class="floating-content">
+  <section class="floating-content miuix-snackbar-host">
     <div class="snackbar hide" role="status" aria-live="polite">
       <div class="snackbar-text"></div>
     </div>
   </section>
-  <section class="overlay-content"></section>
-  <section class="dialog-content"></section>
+  <section class="overlay-content miuix-overlay-layer"></section>
+  <section class="dialog-content miuix-dialog-layer"></section>
 `
 
 const cli = new Cli()
@@ -251,7 +251,7 @@ toolsPage.on('tool-install-keybox', () => keyboxDialog.choose())
 dialogContent.querySelector('#keybox-dialog')?.addEventListener(
   'closed',
   () => {
-    void refreshHomeIdentity()
+    void refreshHomeIdentity(true)
     void refreshHomeActivity()
   },
 )
@@ -269,16 +269,48 @@ dialogContent.querySelector('#pif-fingerprint-dialog')?.addEventListener(
 )
 
 let homeRefreshGeneration = 0
-async function refreshHomeIdentity(): Promise<void> {
+let keyboxRevocationRequest: Promise<KeyboxRevocationStatus> | null = null
+
+function requestKeyboxRevocation(force: boolean): Promise<KeyboxRevocationStatus> {
+  if (!force && keyboxRevocationRequest !== null) return keyboxRevocationRequest
+
+  const request = cli.checkKeyboxRevocation()
+  keyboxRevocationRequest = request
+  request.then(
+    () => {
+      if (keyboxRevocationRequest === request) keyboxRevocationRequest = null
+    },
+    () => {
+      if (keyboxRevocationRequest === request) keyboxRevocationRequest = null
+    },
+  )
+  return request
+}
+
+async function refreshKeyboxRevocation(generation: number, force: boolean): Promise<void> {
+  try {
+    const status = await requestKeyboxRevocation(force)
+    if (generation === homeRefreshGeneration) homePage.setKeyboxRevocation(status)
+  } catch (error) {
+    if (generation !== homeRefreshGeneration) return
+    homePage.setKeyboxRevocation('unknown')
+    console.error('Unable to check the current Keybox revocation status:', error)
+  }
+}
+
+async function refreshHomeIdentity(forceKeyboxRevocation = false): Promise<void> {
+  if (forceKeyboxRevocation) keyboxRevocationRequest = null
   const generation = ++homeRefreshGeneration
 
   if (isDev()) {
-    homePage.setKeyboxStatus('custom', 'google_remote', 'tee')
+    homePage.setKeyboxStatus('custom', 'google_remote', 'tee', 'not_listed')
     homePage.setTeeStatus('normal')
     homePage.setSecurityPatch('2026-08-01')
     homePage.setSpoofedDevice('Google Pixel 9 Pro')
     return
   }
+
+  homePage.setKeyboxLoading()
 
   const [keyboxResult, patchResult, teeResult, pifResult] = await Promise.allSettled([
     cli.getKeyboxState(),
@@ -294,7 +326,9 @@ async function refreshHomeIdentity(): Promise<void> {
       state.valid ? (state.bundled ? 'bundled' : 'custom') : 'invalid',
       state.source,
       state.level,
+      state.valid ? 'checking' : state.revocation,
     )
+    if (state.valid) void refreshKeyboxRevocation(generation, forceKeyboxRevocation)
   } else {
     homePage.setKeyboxStatus('error')
     console.error('Unable to load the current Keybox state:', keyboxResult.reason)
@@ -372,6 +406,7 @@ homePage.onClearActivities(() => {
 
 const widevineDialog = document.createElement('md-dialog') as MdDialog
 widevineDialog.id = 'widevine-dialog'
+widevineDialog.classList.add('miuix-dialog')
 widevineDialog.innerHTML = /* html */ `
   <div slot="headline" class="widevine-dialog-title"></div>
   <div slot="content" class="widevine-dialog-content">

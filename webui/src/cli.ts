@@ -62,12 +62,22 @@ export type PifFingerprintState = {
 
 export type KeyboxSource = 'google_hardware' | 'google_remote' | 'unknown'
 export type KeyboxLevel = 'tee' | 'strongbox' | 'unknown'
+export type PlayIntegrityStatus = 'not_checked'
+export type KeyboxRevocationStatus =
+  | 'not_checked'
+  | 'checking'
+  | 'not_listed'
+  | 'suspended'
+  | 'revoked'
+  | 'unknown'
 
 export interface KeyboxState {
   valid: boolean
   bundled: boolean
   source: KeyboxSource
   level: KeyboxLevel
+  play_integrity: PlayIntegrityStatus
+  revocation: KeyboxRevocationStatus
 }
 
 function parseCanonicalJson(output: string, description: string): unknown {
@@ -145,7 +155,10 @@ function parsePifState(output: string): PifFingerprintState {
 function parseKeyboxState(output: string): KeyboxState {
   const parsed = parseCanonicalJson(output, 'Keybox state')
   if (!isRecord(parsed)
-      || !hasOnlyKeys(parsed, ['valid', 'bundled', 'source', 'level'])
+      || !hasOnlyKeys(
+        parsed,
+        ['valid', 'bundled', 'source', 'level', 'play_integrity', 'revocation'],
+      )
       || typeof parsed.valid !== 'boolean'
       || typeof parsed.bundled !== 'boolean'
       || (parsed.source !== 'google_hardware'
@@ -154,6 +167,12 @@ function parseKeyboxState(output: string): KeyboxState {
       || (parsed.level !== 'tee'
         && parsed.level !== 'strongbox'
         && parsed.level !== 'unknown')
+      || parsed.play_integrity !== 'not_checked'
+      || (parsed.revocation !== 'not_checked'
+        && parsed.revocation !== 'not_listed'
+        && parsed.revocation !== 'suspended'
+        && parsed.revocation !== 'revoked'
+        && parsed.revocation !== 'unknown')
       || (!parsed.valid && parsed.bundled)) {
     throw new Error('OMK returned an invalid Keybox state')
   }
@@ -162,6 +181,8 @@ function parseKeyboxState(output: string): KeyboxState {
     bundled: parsed.bundled,
     source: parsed.source,
     level: parsed.level,
+    play_integrity: parsed.play_integrity,
+    revocation: parsed.revocation,
   }
 }
 
@@ -273,6 +294,15 @@ export class Cli {
     const { keymint } = await this.#getHelperPaths()
     const output = await this.#run(keymint, ['--webui-get-keybox-state'], 256)
     return parseKeyboxState(output)
+  }
+
+  async checkKeyboxRevocation(): Promise<KeyboxRevocationStatus> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-check-keybox-revocation'], 256)
+    if (output !== 'not_listed' && output !== 'suspended' && output !== 'revoked') {
+      throw new Error('OMK returned an invalid Keybox revocation status')
+    }
+    return output
   }
 
   async installWidevineL1(): Promise<void> {

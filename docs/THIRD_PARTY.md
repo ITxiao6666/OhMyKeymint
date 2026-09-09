@@ -41,6 +41,16 @@ its WebUI or Autopif implementation; it independently validates the generated
 `device_list.json` and `device_prop/*.prop` data protocol before rendering the
 OMK PIF profile.
 
+## Google attestation status snapshot
+
+The module includes the public JSON snapshot used to seed the local
+`/data/misc/keystore/omk/data/google_attestation_status.json` cache on a first
+install. Later successful HTTPS responses from Google's fixed attestation
+endpoint replace that cache atomically after the complete response passes the
+same schema and serial validation used for live checks. The snapshot contains
+only Google's public `REVOKED`/`SUSPENDED` entries; it does not contain private
+keys or device identifiers.
+
 ## Specter interface and Widevine workflow reference
 
 The WebUI information architecture and the vendor Widevine provisioning

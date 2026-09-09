@@ -162,11 +162,18 @@ system picker cannot be opened, the WebUI falls back to its shared-storage
 browser. It does not change `[crypto]`, device identity, or unrelated
 configuration settings.
 
-The Home page's Keybox summary uses `L1`/`Valid` for a valid Keybox with
-identified Google source and hardware level, `L2`/`Soft-banned` when the file
-is valid but metadata is incomplete, and `L3`/`Revoked` when validation fails.
-This is a local Keybox classification; it is not a live result read from a
-third-party Play Integrity checker.
+The Home page checks every certificate serial number in the active Keybox
+against Google's attestation status list. A valid online response is cached at
+`/data/misc/keystore/omk/data/google_attestation_status.json`; when Google is
+unreachable, the validated local cache is used, with the module's validated
+snapshot as the first-install fallback. It shows **Not revoked** when no serial
+is present in the selected list and **Revoked** when any serial is marked
+`SUSPENDED` or `REVOKED`. If all sources fail validation, the result remains a
+check failure and is not reported as **Not revoked**. The local list can be
+stale, and absence from it does not mean that the Keybox passes Play Integrity.
+The **Security Level** row is read from the active Keybox certificate and shows
+`TEE`, `StrongBox`, or an unknown value when the certificate does not identify
+either level.
 Continue to manage those settings through the documented active files.
 
 **Spoof PIF fingerprint** and **Widevine L1** are the other network-backed

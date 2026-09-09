@@ -1,8 +1,5 @@
 import type {
   MdDialog,
-  MdFilledButton,
-  MdOutlinedButton,
-  MdRadio,
   MdSwitch,
 } from '@material/web/all'
 import { Cli, type PifDevice, type PifFingerprintState } from '../cli'
@@ -18,7 +15,7 @@ const RANDOM_SELECTION = '__random__'
 export class PifFingerprintDialog {
   #dialog: MdDialog | null = null
   #toggle: MdSwitch | null = null
-  #applyButton: MdFilledButton | null = null
+  #applyButton: HTMLButtonElement | null = null
   #currentState: PifFingerprintState | null = null
   #devices: PifDevice[] = []
   #stateStatus: LoadStatus = 'loading'
@@ -40,26 +37,27 @@ export class PifFingerprintDialog {
   getElement(): DocumentFragment {
     const template = document.createElement('template')
     template.innerHTML = /* html */ `
-      <md-dialog id="pif-fingerprint-dialog">
-        <div slot="headline"></div>
+      <md-dialog id="pif-fingerprint-dialog" class="miuix-dialog">
+        <div slot="headline" class="pif-dialog-headline">
+          <span class="pif-dialog-title"></span>
+        </div>
         <div slot="content" class="pif-dialog-content">
           <label class="pif-enable-row" for="pif-enabled">
-            <span></span>
-            <md-switch id="pif-enabled" icons></md-switch>
+            <span class="pif-enable-copy">
+              <span class="pif-enable-title"></span>
+              <span class="pif-enable-summary"></span>
+            </span>
+            <md-switch id="pif-enabled"></md-switch>
           </label>
-          <div class="pif-requirement">
-            <md-icon>info</md-icon>
-            <span></span>
-          </div>
           <div class="pif-current-config" aria-live="polite"></div>
           <div class="pif-device-panel" aria-live="polite"></div>
         </div>
-        <div slot="actions">
-          <md-outlined-button id="cancel-pif"></md-outlined-button>
-          <md-filled-button id="apply-pif">
-            <md-circular-progress class="pif-apply-progress" slot="icon" indeterminate hidden></md-circular-progress>
+        <div slot="actions" class="pif-dialog-actions">
+          <button type="button" class="pif-dialog-button pif-dialog-button-secondary" id="cancel-pif"></button>
+          <button type="button" class="pif-dialog-button pif-dialog-button-primary" id="apply-pif">
+            <span class="pif-apply-progress" aria-hidden="true" hidden></span>
             <span class="pif-apply-label"></span>
-          </md-filled-button>
+          </button>
         </div>
       </md-dialog>
     `
@@ -67,15 +65,15 @@ export class PifFingerprintDialog {
     const fragment = template.content
     this.#dialog = fragment.querySelector<MdDialog>('#pif-fingerprint-dialog')!
     this.#toggle = fragment.querySelector<MdSwitch>('#pif-enabled')!
-    this.#applyButton = fragment.querySelector<MdFilledButton>('#apply-pif')!
+    this.#applyButton = fragment.querySelector<HTMLButtonElement>('#apply-pif')!
 
-    fragment.querySelector<HTMLElement>('#pif-fingerprint-dialog [slot="headline"]')!.textContent =
+    fragment.querySelector<HTMLElement>('.pif-dialog-title')!.textContent =
       i18n.t('pif_fingerprint_title')
-    fragment.querySelector<HTMLElement>('.pif-enable-row span')!.textContent =
+    fragment.querySelector<HTMLElement>('.pif-enable-title')!.textContent =
       i18n.t('pif_enable_spoofing')
-    this.#toggle.setAttribute('aria-label', i18n.t('pif_enable_spoofing'))
-    fragment.querySelector<HTMLElement>('.pif-requirement span')!.textContent =
+    fragment.querySelector<HTMLElement>('.pif-enable-summary')!.textContent =
       i18n.t('pif_zygisk_next_required')
+    this.#toggle.setAttribute('aria-label', i18n.t('pif_enable_spoofing'))
 
     this.#toggle.addEventListener('change', () => {
       if (this.#stateStatus !== 'ready' || this.#busy || !this.#toggle) return
@@ -84,7 +82,7 @@ export class PifFingerprintDialog {
       this.#updateControls()
     })
 
-    const cancelButton = fragment.querySelector<MdOutlinedButton>('#cancel-pif')!
+    const cancelButton = fragment.querySelector<HTMLButtonElement>('#cancel-pif')!
     cancelButton.textContent = i18n.t('functional_button_cancel')
     cancelButton.onclick = () => this.close()
     this.#applyButton.onclick = () => void this.#apply()
@@ -208,19 +206,22 @@ export class PifFingerprintDialog {
     const label = document.createElement('span')
     label.className = 'pif-current-label'
     label.textContent = i18n.t('pif_current_config')
+    const copy = document.createElement('span')
+    copy.className = 'pif-current-copy'
+    copy.appendChild(label)
     const value = document.createElement('span')
     value.className = 'pif-current-value'
     value.textContent = this.#currentState.enabled
       ? this.#currentState.model
       : i18n.t('pif_disabled')
-    container.append(label, value)
 
     if (this.#currentState.enabled) {
       const patch = document.createElement('span')
       patch.className = 'pif-current-patch'
       patch.textContent = i18n.t('pif_security_patch', this.#currentState.security_patch)
-      container.appendChild(patch)
+      copy.appendChild(patch)
     }
+    container.append(copy, value)
   }
 
   #renderPanel(): void {
@@ -248,6 +249,10 @@ export class PifFingerprintDialog {
       this.#appendError(panel, i18n.t('pif_devices_load_error'), this.#catalogError, () => this.#retryCatalog())
       return
     }
+    if (this.#devices.length === 0) {
+      this.#appendError(panel, i18n.t('pif_devices_load_error'), '', () => this.#retryCatalog())
+      return
+    }
     this.#appendDeviceList(panel)
   }
 
@@ -255,8 +260,9 @@ export class PifFingerprintDialog {
     const status = document.createElement('div')
     status.className = 'pif-panel-status'
     status.setAttribute('role', 'status')
-    const progress = document.createElement('md-circular-progress')
-    progress.setAttribute('indeterminate', '')
+    const progress = document.createElement('span')
+    progress.className = 'pif-loading-spinner'
+    progress.setAttribute('aria-hidden', 'true')
     const text = document.createElement('span')
     text.textContent = message
     status.append(progress, text)
@@ -287,7 +293,10 @@ export class PifFingerprintDialog {
     const detailElement = document.createElement('span')
     detailElement.className = 'pif-error-detail'
     detailElement.textContent = detail
-    const retryButton = document.createElement('md-outlined-button')
+    detailElement.toggleAttribute('hidden', detail.length === 0)
+    const retryButton = document.createElement('button')
+    retryButton.type = 'button'
+    retryButton.className = 'pif-retry-button'
     retryButton.textContent = i18n.t('functional_button_retry')
     retryButton.onclick = retry
     status.append(icon, titleElement, detailElement, retryButton)
@@ -295,21 +304,26 @@ export class PifFingerprintDialog {
   }
 
   #appendDeviceList(panel: HTMLElement): void {
+    const heading = document.createElement('span')
+    heading.className = 'pif-device-heading'
+    heading.textContent = i18n.t('pif_choose_device')
     const list = document.createElement('div')
     list.className = 'pif-device-list'
     list.setAttribute('role', 'radiogroup')
     list.setAttribute('aria-label', i18n.t('pif_choose_device'))
     list.appendChild(this.#createDeviceOption(i18n.t('pif_random_device'), RANDOM_SELECTION))
-    list.appendChild(document.createElement('md-divider'))
     for (const device of this.#devices) {
       list.appendChild(this.#createDeviceOption(device.model, device.product, device.product))
     }
-    panel.appendChild(list)
+    panel.append(heading, list)
   }
 
   #createDeviceOption(labelText: string, value: string, supportingText?: string): HTMLElement {
     const row = document.createElement('label')
     row.className = 'pif-device-option'
+    row.dataset.product = value
+    row.classList.toggle('selected', this.#selectedProduct === value)
+    row.classList.toggle('disabled', this.#busy)
     const text = document.createElement('span')
     text.className = 'pif-device-text'
     const label = document.createElement('span')
@@ -323,18 +337,38 @@ export class PifFingerprintDialog {
       text.appendChild(product)
     }
 
-    const radio = document.createElement('md-radio') as MdRadio
-    radio.name = 'pif-device'
-    radio.value = value
-    radio.checked = this.#selectedProduct === value
-    radio.disabled = this.#busy
-    radio.addEventListener('change', () => {
-      if (!radio.checked || this.#busy) return
+    const input = document.createElement('input')
+    input.className = 'pif-device-input'
+    input.type = 'radio'
+    input.name = 'pif-device'
+    input.value = value
+    input.checked = this.#selectedProduct === value
+    input.disabled = this.#busy
+    const indicator = document.createElement('span')
+    indicator.className = 'pif-selection-indicator'
+    indicator.setAttribute('aria-hidden', 'true')
+    indicator.innerHTML = /* html */ `
+      <svg viewBox="0 0 26 26" focusable="false">
+        <path d="M8.576 13.660 L11.643 16.843 L17.500 9.291" pathLength="1"></path>
+      </svg>
+    `
+    input.addEventListener('change', () => {
+      if (!input.checked || this.#busy) return
       this.#selectedProduct = value
+      this.#syncDeviceSelection()
       this.#updateControls()
     })
-    row.append(text, radio)
+    row.append(text, input, indicator)
     return row
+  }
+
+  #syncDeviceSelection(): void {
+    this.#dialog?.querySelectorAll<HTMLElement>('.pif-device-option').forEach(option => {
+      const selected = option.dataset.product === this.#selectedProduct
+      option.classList.toggle('selected', selected)
+      const input = option.querySelector<HTMLInputElement>('.pif-device-input')
+      if (input) input.checked = selected
+    })
   }
 
   async #apply(): Promise<void> {
@@ -386,13 +420,14 @@ export class PifFingerprintDialog {
 
     this.#toggle.disabled = this.#busy || this.#stateStatus !== 'ready'
     this.#applyButton.disabled = this.#busy || !canApply
-    const cancelButton = this.#dialog.querySelector<MdOutlinedButton>('#cancel-pif')
+    const cancelButton = this.#dialog.querySelector<HTMLButtonElement>('#cancel-pif')
     if (cancelButton) cancelButton.disabled = this.#busy
     this.#dialog.toggleAttribute('aria-busy', this.#busy)
-    this.#dialog.querySelectorAll<MdRadio>('md-radio').forEach(radio => {
-      radio.disabled = this.#busy
+    this.#dialog.querySelectorAll<HTMLInputElement>('.pif-device-input').forEach(input => {
+      input.disabled = this.#busy
+      input.closest('.pif-device-option')?.classList.toggle('disabled', this.#busy)
     })
-    this.#dialog.querySelectorAll<MdOutlinedButton>('.pif-panel-status md-outlined-button').forEach(button => {
+    this.#dialog.querySelectorAll<HTMLButtonElement>('.pif-panel-status button').forEach(button => {
       button.disabled = this.#busy
     })
 
