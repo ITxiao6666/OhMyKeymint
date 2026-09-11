@@ -1,3 +1,5 @@
+import { setThemeMode } from 'miuix-vue'
+
 export const APPEARANCE_MODES = ['auto', 'light', 'dark', 'amoled'] as const
 export type AppearanceMode = typeof APPEARANCE_MODES[number]
 
@@ -363,8 +365,12 @@ export class AppearanceController {
     this.#emit()
   }
 
-  onChange(listener: AppearanceListener): void {
+  onChange(listener: AppearanceListener): () => void {
     this.#listeners.push(listener)
+    return () => {
+      const index = this.#listeners.indexOf(listener)
+      if (index !== -1) this.#listeners.splice(index, 1)
+    }
   }
 
   static #readStoredAppearance(): {
@@ -424,6 +430,10 @@ export class AppearanceController {
   #apply(): void {
     const root = document.documentElement
     const resolved = this.#resolvedMode()
+    // Keep the component library's own theme class in sync with the persisted
+    // controller state.  `amoled` intentionally uses the dark Miuix palette;
+    // the pure-black surface is supplied by our tokens below.
+    setThemeMode(this.#mode === 'auto' ? 'system' : resolved)
     root.dataset.themeMode = this.#mode
     root.dataset.themeResolved = resolved
     root.dataset.themeAccent = this.#accent
@@ -452,9 +462,13 @@ export class AppearanceController {
       for (const [property, value] of Object.entries(values)) root.style.setProperty(property, value)
       return
     }
-    const selectedAccent: ManualAccent = this.#accent === DEFAULT_ACCENT
-      ? DEFAULT_MANUAL_ACCENT
-      : this.#accent
+    // A manually selected accent is a Monet seed and only applies while
+    // dynamic Monet colors are enabled.  Disabling Monet must restore the
+    // default static palette instead of leaving the previously selected
+    // custom color active.
+    const selectedAccent: ManualAccent = this.#options.monet && this.#accent !== DEFAULT_ACCENT
+      ? this.#accent
+      : DEFAULT_MANUAL_ACCENT
     const palette = ACCENTS[selectedAccent][resolved]
     const values: Record<(typeof ACCENT_PROPERTIES)[number], string> = {
       '--miuix-primary': palette.primary,

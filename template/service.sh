@@ -120,6 +120,49 @@ if [ -n "$RESETPROP_BIN" ]; then
   contains_reset_prop "vendor.boot.bootmode" "recovery" "unknown"
 fi
 
+# Optional ADB Disabler configuration written by the WebUI. The file contains
+# four lines (enabled, developer options, USB debugging, OEM unlock), each 0/1.
+# Keep this parser deliberately strict: malformed or missing state is ignored.
+ADB_DISABLER_CONFIG=/data/misc/keystore/omk/data/adb_disabler.conf
+if [ -r "$ADB_DISABLER_CONFIG" ] && [ -n "$RESETPROP_BIN" ]; then
+  SETTINGS_BIN=/system/bin/settings
+  [ -x "$SETTINGS_BIN" ] || SETTINGS_BIN=settings
+  ADB_LOCK=$(sed -n '1p' "$ADB_DISABLER_CONFIG" 2>/dev/null)
+  ADB_DEV=$(sed -n '2p' "$ADB_DISABLER_CONFIG" 2>/dev/null)
+  ADB_USB=$(sed -n '3p' "$ADB_DISABLER_CONFIG" 2>/dev/null)
+  ADB_OEM=$(sed -n '4p' "$ADB_DISABLER_CONFIG" 2>/dev/null)
+  # Reject trailing records as well as malformed values.  This prevents a
+  # partially-written or hand-edited file from being treated as valid state.
+  ADB_LINE_COUNT=$(wc -l < "$ADB_DISABLER_CONFIG" 2>/dev/null)
+  ADB_LINE_COUNT=${ADB_LINE_COUNT##* }
+  ADB_EXTRA=$(sed -n '5p' "$ADB_DISABLER_CONFIG" 2>/dev/null)
+  if [ "$ADB_LINE_COUNT" = 4 ]; then
+    case "$ADB_LOCK:$ADB_DEV:$ADB_USB:$ADB_OEM:$ADB_EXTRA" in
+    1:0:0:0:|1:0:0:1:|1:0:1:0:|1:0:1:1:|1:1:0:0:|1:1:0:1:|1:1:1:0:|1:1:1:1:)
+      if [ "$ADB_DEV" = 1 ]; then
+        "$SETTINGS_BIN" put global development_settings_enabled 0 2>/dev/null
+        "$RESETPROP_BIN" -n persist.sys.development_settings_enabled 0
+        "$RESETPROP_BIN" -n ro.debuggable 0
+        "$RESETPROP_BIN" -n ro.force.debuggable 0
+      fi
+      if [ "$ADB_USB" = 1 ]; then
+        "$SETTINGS_BIN" put global adb_enabled 0 2>/dev/null
+        "$RESETPROP_BIN" -n ro.adb.secure 1
+        "$RESETPROP_BIN" -n persist.sys.usb.config mtp
+        "$RESETPROP_BIN" -n sys.usb.config mtp
+        "$RESETPROP_BIN" -n service.adb.root 0
+        "$RESETPROP_BIN" -n init.svc.adbd stopped
+        "$RESETPROP_BIN" -n init.svc_debug_pid.adbd ""
+      fi
+      if [ "$ADB_OEM" = 1 ]; then
+        "$RESETPROP_BIN" -n sys.oem_unlock_allowed 0
+        "$RESETPROP_BIN" -n ro.oem_unlock_supported 0
+      fi
+      ;;
+    esac
+  fi
+fi
+
 #Hide Lsposed Logd
 setprop persist.logd.size ""
 setprop persist.logd.size.crash ""

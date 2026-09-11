@@ -4,6 +4,10 @@
     "module": "esnext",
     "lib": ["ES2023", "DOM"],
     "types": ["vite/client"],
+    "paths": {
+      "miuix-vue": ["./node_modules/miuix-vue/dist/src/index.d.ts"],
+      "miuix-vue/icons": ["./node_modules/miuix-vue/dist/src/icons/extended/index.d.ts"]
+    },
     "skipLibCheck": true,
 
     /* Bundler mode */
@@ -18,5 +22,21 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": [
+    "src/bootstrap.ts",
+    "src/cli.ts",
+    "src/config.ts",
+    "src/config_ohmykeymint.ts",
+    "src/appearance.ts",
+    "src/i18n.ts",
+    "src/security_patch.ts",
+    "src/package_name.ts",
+    "src/history.ts",
+    "src/app_list/app_list.ts",
+    "src/file_selector/file_selector.ts",
+    "src/utils/dev.ts",
+    "src/webview/webview.ts",
+    "src/vue/**/*.vue",
+    "src/vue/**/*.ts"
+  ]
 }

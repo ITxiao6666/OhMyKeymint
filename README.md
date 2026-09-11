@@ -46,8 +46,8 @@ comma-separated TOML form remains accepted.
 The module includes a WebUI for choosing the exact packages in `scoop`,
 installing a local keybox, managing the Android security patch level, and
 applying a Pixel PIF fingerprint through OMK's own Zygisk payload. It also
-offers an explicitly confirmed Widevine provisioning action on devices that
-ship a compatible vendor `KmInstallKeybox` utility:
+provides an ADB Disabler with independent controls for developer options, USB
+debugging, and OEM unlocking:
 
 - In KernelSU, open Oh My Keymint from the module list and select its WebUI.
 - In Magisk, open an installed KSUWebUIStandalone or WebUI X host and select
@@ -108,27 +108,18 @@ properties, and do not change OMK's `[device]` identity. Disabling the action
 removes the OMK profile and restarts the affected processes so their next
 instances use the original values.
 
-**Widevine L1** first locates a compatible vendor `KmInstallKeybox` utility,
-then downloads the fixed `https://rawbin.dpejoh.com/clips/attestation` resource,
-reverses that feed's documented substitution alphabet, and accepts only a
-bounded, well-formed `AndroidAttestation` XML document. The native helper places
-the document in a private temporary file and invokes the utility with
-`<temporary-file> attestation true`. It attempts to remove the temporary file
-before returning and reports cleanup failures. This vendor path is normally
-available only on some Qualcomm devices. It changes vendor-backed attestation
-provisioning, may affect DRM or device certification, and therefore requires
-confirmation. A successful utility exit does not by itself guarantee that
-Widevine reports L1. The remote payload is protected by HTTPS and an exact
-host/path allowlist, but it is a server-managed value rather than a locally
-pinned key.
+The ADB Disabler action stores four strict `0/1` values in
+`/data/misc/keystore/omk/data/adb_disabler.conf`. When enabled, the selected
+settings are applied immediately and replayed by the module service at every
+boot. Disabling the master switch stops future replay; it intentionally does
+not restore properties already changed during the current boot.
 
-The security-patch, PIF, and Widevine network actions use the bundled native
-HTTPS client and require neither `curl` nor `wget`. Other WebUI operations
-remain local. The WebUI can also read and replace `scoop` and select a local XML
-file from shared storage or through another installed file app to replace the
-active OMK keybox. The security-patch actions do not change secrets, identity
-fields, or other settings; the separate Widevine action has the provisioning
-effects described above.
+The security-patch and PIF network actions use the bundled native HTTPS client
+and require neither `curl` nor `wget`. Other WebUI operations remain local.
+The WebUI can also read and replace `scoop` and select a local XML file from
+shared storage or through another installed file app to replace the active OMK
+keybox. The security-patch actions do not change secrets, identity fields, or
+other settings.
 
 When the module is uninstalled from KernelSU, its bundled uninstaller removes
 exactly `/data/adb/omk` and `/data/misc/keystore/omk`, including OMK-created key

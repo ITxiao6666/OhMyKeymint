@@ -1,5 +1,14 @@
 # Third-Party Software
 
+## miuix-vue WebUI components
+
+The embedded WebUI is built with the Vue 3 components from
+[YuKongA/miuix-vue](https://github.com/YuKongA/miuix-vue), version `0.1.1`.
+The library is licensed under the Apache License 2.0. Oh My Keymint uses its
+navigation bar, top app bar, cards, preferences, sheets, dialogs, progress
+indicators, and icons; application behavior and native bridge calls remain in
+the Oh My Keymint source.
+
 ## Tricky Addon - Update Target List
 
 The embedded Oh My Keymint WebUI contains adapted source from
@@ -51,26 +60,23 @@ same schema and serial validation used for live checks. The snapshot contains
 only Google's public `REVOKED`/`SUSPENDED` entries; it does not contain private
 keys or device identifiers.
 
-## Specter interface and Widevine workflow reference
+## Specter interface and ADB Disabler reference
 
-The WebUI information architecture and the vendor Widevine provisioning
-workflow were checked against
+The WebUI information architecture and ADB Disabler workflow were checked against
 [dpejoh/specter](https://github.com/dpejoh/specter) commit
 [`829c4fa95ab5a08e4cd7e18dd686e73896d90a24`](https://github.com/dpejoh/specter/commit/829c4fa95ab5a08e4cd7e18dd686e73896d90a24).
 That project is licensed under GPL-3.0. Oh My Keymint does not include or run
 Specter's WebUI or shell scripts. Its WebUI and Rust implementation are
-independent; they reproduce only the documented interaction with the fixed
-attestation feed and the vendor `KmInstallKeybox` command contract.
+independent; they reproduce only the documented ADB Disabler settings.
 
-The Widevine action downloads its server-managed attestation document from
-`https://rawbin.dpejoh.com/clips/attestation`. The document is not bundled with
-Oh My Keymint. OMK restricts the request to that exact HTTPS host and path,
-validates the decoded XML envelope, and attempts to delete its temporary copy
-after the vendor command exits, reporting cleanup failures.
+The ADB Disabler action follows Specter's documented settings: it independently
+controls developer options, USB debugging, and OEM unlock, persists four strict
+0/1 values under OMK's data directory, and reapplies the selected properties at
+boot. It does not bundle Specter's shell scripts.
 
 ## Native HTTPS client
 
-The security-patch, PIF fingerprint, and Widevine WebUI actions use the Rust
+The security-patch and PIF fingerprint WebUI actions use the Rust
 [ureq](https://github.com/algesten/ureq) HTTP client (version 3.4.0), licensed
 under the MIT or Apache License 2.0. Its HTTPS implementation uses
 [rustls](https://github.com/rustls/rustls) and

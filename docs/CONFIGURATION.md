@@ -62,10 +62,10 @@ change does not require a keymint restart.
 ## Embedded WebUI
 
 The module includes a WebUI for selecting packages in `scoop`, installing a
-local keybox, managing the Android security patch level, and applying a Pixel
-PIF fingerprint through OMK's own Zygisk payload. On supported vendor devices,
-it also exposes an explicitly confirmed Widevine provisioning action through
-`KmInstallKeybox`. Open it from the Oh My Keymint module page in
+local keybox, managing the Android security patch level, applying a Pixel
+PIF fingerprint through OMK's own Zygisk payload, and configuring ADB Disabler.
+ADB Disabler controls developer options, USB debugging, and OEM unlock and
+reapplies the selected settings at boot. Open it from the Oh My Keymint module page in
 KernelSU. With Magisk, open an installed KSUWebUIStandalone or WebUI X host and
 select Oh My Keymint; the module does not install either host.
 
@@ -124,11 +124,11 @@ values.
 
 The Home page also keeps the 30 most recent successful WebUI changes in
 `/data/misc/keystore/omk/data/webui_activity.json`. The list covers saved app
-targets, Keybox changes, Widevine provisioning, security-patch synchronization
+targets, Keybox changes, ADB Disabler settings, security-patch synchronization
 and restore, and PIF enable or disable actions. It stores only the action type,
 a short non-secret result such as an entry count, patch date, or Pixel model,
 and the completion time. It never stores package-name lists, Keybox contents or
-filenames, Widevine key material, downloaded response bodies, or a PIF
+filenames, downloaded response bodies, or a PIF
 fingerprint. The Home page initially shows the newest four entries, can expand
 the complete retained list, and provides controls to copy an entry or clear the
 activity file. Activity recording is supplementary: failure to update this file
@@ -227,25 +227,11 @@ process refresh. The spoof is process-local: it does not call `resetprop`,
 change global Android properties, or change values under OMK's `[device]`
 section.
 
-The **Widevine L1** tool first searches the applicable vendor library
-directories and `/vendor/bin` for a compatible `KmInstallKeybox` utility. When
-found, it uses the native HTTPS client to request exactly
-`https://rawbin.dpejoh.com/clips/attestation`, reverses the source's fixed
-substitution alphabet, and rejects an oversized, malformed, or invalid
-`AndroidAttestation` XML response. It writes the decoded value to a private
-temporary file and invokes the utility with `<temporary-file> attestation true`.
-The helper attempts to remove the temporary file before returning and treats a
-cleanup failure as an error.
-
-`KmInstallKeybox` is a proprietary vendor utility rather than a portable
-Android or KeyMint API. The tool is normally present only on some Qualcomm
-devices, and different vendor implementations may reject the same input. The
-WebUI requires confirmation because this operation changes vendor-backed
-attestation provisioning and may affect DRM or device certification. A zero
-exit status reports that the utility accepted the operation; it does not
-guarantee that a DRM client will subsequently report Widevine L1. The remote
-resource is constrained by TLS and an exact URL allowlist but is server-managed
-and does not have a key pinned by OMK.
+ADB Disabler stores four strict `0/1` values in
+`/data/misc/keystore/omk/data/adb_disabler.conf`. Enabling the master switch
+applies only the selected sub-options and the service script replays them on
+each boot. Disabling the master switch stops future replay; it intentionally
+does not restore properties that were already changed in the current boot.
 
 All other WebUI assets are bundled and no network request is made for normal
 local operations. None of the WebUI network paths requires a device-provided
@@ -947,9 +933,8 @@ until the file is corrected.
 The embedded WebUI can change `scoop`, install a locally selected keybox,
 synchronize the four `[trust]` patch-level fields from the official Android
 Security Bulletin, restore those fields to `"auto"`, manage the validated PIF
-profile, and invoke the separately confirmed vendor Widevine provisioning
-action. Security-patch sync and restore also manage the two global runtime
-properties and the defaults snapshot described above. Persistent native save
-paths validate the complete candidate before writing and use atomic
-replacement. Successful saves enter the applicable watcher hot-reload path;
-the Widevine action instead uses only a private temporary file.
+profile, and configure ADB Disabler. Security-patch sync and restore also manage
+the two global runtime properties and the defaults snapshot described above.
+Persistent native save paths validate the complete candidate before writing and
+use atomic replacement. Successful saves enter the applicable watcher hot-reload
+path.

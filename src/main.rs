@@ -23,6 +23,7 @@ use crate::{
     top::qwq2333::ohmykeymint::IOhMyKsService::BnOhMyKsService,
 };
 
+pub mod adb_disabler;
 pub mod att_mgr;
 pub mod config;
 pub mod consts;
@@ -41,7 +42,6 @@ pub mod utils;
 pub mod watchdog;
 pub mod webui_activity;
 pub mod webui_http;
-pub mod widevine;
 
 include!(concat!(env!("OUT_DIR"), "/aidl.rs"));
 // include!( "./aidl.rs"); // for development only
@@ -370,23 +370,44 @@ fn handle_webui_keybox_command() -> Option<Result<String, String>> {
     }
 }
 
-fn handle_webui_widevine_command() -> Option<Result<&'static str, String>> {
+fn handle_webui_adb_disabler_command() -> Option<Result<&'static str, String>> {
     let mut args = std::env::args();
     let _program = args.next();
-    if args.next()?.as_str() != "--webui-install-widevine-l1" {
+    if args.next()?.as_str() != "--webui-set-adb-disabler" {
+        return None;
+    }
+    let values: Vec<String> = args.collect();
+    let settings = match adb_disabler::Settings::from_tokens(&values) {
+        Ok(settings) => settings,
+        Err(error) => return Some(Err(format!("{error:#}"))),
+    };
+    // WebUI helpers run as short-lived root commands, before the normal
+    // daemon startup path.  Ensure the shared OMK data directory exists and
+    // has the expected ownership before persisting the configuration.
+    prepare_android_storage();
+    Some(
+        adb_disabler::apply(settings)
+            .map(|()| "adb_disabler_applied")
+            .map_err(|error| format!("{error:#}")),
+    )
+}
+
+fn handle_webui_get_adb_disabler_command() -> Option<Result<String, String>> {
+    let mut args = std::env::args();
+    let _program = args.next();
+    if args.next()?.as_str() != "--webui-get-adb-disabler" {
         return None;
     }
     if args.next().is_some() {
         return Some(Err(
-            "--webui-install-widevine-l1 does not accept arguments".to_string()
+            "--webui-get-adb-disabler does not accept arguments".to_string()
         ));
     }
-
-    Some(
-        widevine::install_widevine_l1_attestation()
-            .map(|()| "widevine_l1_installed")
-            .map_err(|error| format!("{error:#}")),
-    )
+    let settings = adb_disabler::read();
+    Some(Ok(format!(
+        "{{\"enabled\":{},\"dev_options\":{},\"usb_debug\":{},\"oem_unlock\":{}}}",
+        settings.enabled, settings.dev_options, settings.usb_debug, settings.oem_unlock
+    )))
 }
 
 fn handle_webui_security_patch_command() -> Option<Result<String, String>> {
@@ -578,7 +599,18 @@ fn main() {
         return;
     }
 
-    if let Some(result) = handle_webui_widevine_command() {
+    if let Some(result) = handle_webui_adb_disabler_command() {
+        match result {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
+    if let Some(result) = handle_webui_get_adb_disabler_command() {
         match result {
             Ok(output) => println!("{output}"),
             Err(error) => {

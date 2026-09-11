@@ -106,7 +106,7 @@ jobs:
     - name: Install Node.js
       uses: actions/setup-node@v6
       with:
-        node-version: 22.14.0
+        node-version: 24
         cache: pnpm
         cache-dependency-path: webui/pnpm-lock.yaml
 

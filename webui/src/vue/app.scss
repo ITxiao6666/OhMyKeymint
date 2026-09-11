@@ -1,0 +1,488 @@
+// Component anatomy, typography, interaction and motion come from miuix-vue.
+// These overrides connect the existing appearance preferences and page layout.
+:root {
+  --m-color-primary: var(--md-sys-color-primary, #3482ff);
+  --m-color-on-primary: var(--md-sys-color-on-primary, #fff);
+  --m-color-primary-variant: var(--m-color-primary);
+  --m-color-on-primary-variant: var(--md-sys-color-primary-container, #d9e2ff);
+  --m-color-primary-container: var(--md-sys-color-primary-container, #d9e2ff);
+  --m-color-on-primary-container: var(--md-sys-color-on-primary-container, #001a42);
+  --m-color-disabled-primary: var(--m-color-primary-container);
+  --m-color-disabled-on-primary: var(--m-color-on-primary-container);
+  --m-color-disabled-primary-button: var(--m-color-primary-container);
+  --m-color-disabled-on-primary-button: var(--m-color-on-primary-container);
+  --m-color-disabled-primary-slider: var(--m-color-primary-container);
+  --m-color-tertiary-container: var(--m-color-primary-container);
+  --m-color-on-tertiary-container: var(--m-color-on-primary-container);
+  --m-color-tertiary-container-variant: var(--m-color-primary-container);
+  --m-text-main-size: 16px;
+  --m-text-body1-size: 16px;
+  --m-text-body2-size: 14px;
+  --m-text-button-size: 16px;
+  --m-text-subtitle-size: 15px;
+  --m-text-title4-size: 19px;
+  --m-color-slider-key-point-foreground: var(--m-color-primary);
+  --omk-top-inset: var(--window-inset-top, env(safe-area-inset-top, 0px));
+  --omk-bottom-inset: var(--window-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --omk-left-inset: var(--window-inset-left, env(safe-area-inset-left, 0px));
+  --omk-right-inset: var(--window-inset-right, env(safe-area-inset-right, 0px));
+  --omk-nav-height: 64px;
+  --omk-bar-background: rgb(247 247 247 / 82%);
+  --omk-glass-background: rgb(255 255 255 / 54%);
+}
+
+:root.m-theme-dark {
+  --omk-bar-background: rgb(0 0 0 / 78%);
+  --omk-glass-background: rgb(36 36 36 / 58%);
+}
+
+/* app.scss is injected after miuix-vue's stylesheet.  Keep the surface
+ * tokens in sync with the library's light/dark class; otherwise a fallback
+ * declared on :root can win the cascade and leave cards/popups white while
+ * the rest of the page is dark. */
+:root.m-theme-light {
+  --m-color-background: #fff;
+  --m-color-on-background: #000;
+  --m-color-surface: #f7f7f7;
+  --m-color-on-surface: #000;
+  --m-color-surface-variant: #fff;
+  --m-color-surface-container: #fff;
+  --m-color-on-surface-container: #000;
+  --m-color-surface-container-high: #e8e8e8;
+  --m-color-surface-container-highest: #e8e8e8;
+  --m-color-on-surface-variant-summary: rgb(0 0 0 / 60%);
+  --m-color-on-surface-variant-actions: rgb(0 0 0 / 40%);
+  --m-color-divider-line: #e0e0e0;
+  --m-color-window-dimming: rgb(0 0 0 / 30%);
+}
+
+:root.m-theme-dark {
+  --m-color-background: #242424;
+  --m-color-on-background: rgb(255 255 255 / 90%);
+  --m-color-surface: #000;
+  --m-color-on-surface: #f2f2f2;
+  --m-color-surface-variant: #242424;
+  --m-color-surface-container: #242424;
+  --m-color-on-surface-container: rgb(255 255 255 / 90%);
+  --m-color-surface-container-high: #242424;
+  --m-color-surface-container-highest: #2d2d2d;
+  --m-color-on-surface-variant-summary: rgb(255 255 255 / 50%);
+  --m-color-on-surface-variant-actions: rgb(255 255 255 / 40%);
+  --m-color-divider-line: #393939;
+  --m-color-window-dimming: rgb(0 0 0 / 60%);
+}
+
+:root[data-theme-mode='amoled'] {
+  --m-color-background: #000;
+  --m-color-on-background: rgb(255 255 255 / 90%);
+  --m-color-surface: #000;
+  --m-color-surface-variant: #101010;
+  --m-color-surface-container: #101010;
+  --m-color-surface-container-high: #171717;
+  --m-color-surface-container-highest: #202020;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { width: 100%; min-height: 100%; margin: 0; }
+html { scrollbar-width: none; }
+html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
+// Miuix sheets/dialogs own their scrolling containers. Keep the content
+// scrollable for small screens while matching the edge-to-edge mobile UI
+// (without exposing a browser scrollbar gutter).
+.m-bottom-sheet__content,
+.m-dialog__content {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.m-bottom-sheet__content::-webkit-scrollbar,
+.m-dialog__content::-webkit-scrollbar {
+  display: none;
+}
+.m-dropdown-preference__popup {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* Keep the popup touch-scrollable while suppressing the native WebView
+   * scrollbar.  Android WebView may ignore `scrollbar-width` and expose a
+   * transient track unless both the track and thumb are explicitly hidden. */
+  scrollbar-color: transparent transparent;
+}
+.m-dropdown-preference__popup::-webkit-scrollbar,
+.m-dropdown-preference__popup::-webkit-scrollbar-track,
+.m-dropdown-preference__popup::-webkit-scrollbar-thumb {
+  width: 0;
+  height: 0;
+  display: none;
+  background: transparent;
+}
+
+/* The dropdown layer is teleported directly under <body>.  Some WebView
+ * versions attach the scrollbar to the layer rather than the popup node. */
+.m-dropdown-preference__layer,
+.m-dropdown-preference__layer * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.m-dropdown-preference__layer::-webkit-scrollbar,
+.m-dropdown-preference__layer *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* Explicitly bind card/surface backgrounds to the active MIUIX token.  This
+ * prevents browser-default white blocks when a component receives an inline
+ * color prop or renders in a teleported layer. */
+.m-card,
+.m-surface,
+.m-navigation-bar,
+.m-dropdown-preference__popup,
+.m-dropdown-preference__item {
+  background-color: var(--m-color-surface-container);
+}
+
+/* Miuix dropdowns are teleported to <body>; keep this fallback broad enough
+ * for older WebViews that paint a scrollbar on an internal scrolling wrapper
+ * instead of the popup host itself. */
+.m-dropdown-preference__popup * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.m-dropdown-preference__popup *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+  background: transparent;
+}
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  color: var(--m-color-on-surface);
+  background: var(--m-color-surface);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, textarea { font: inherit; }
+button { touch-action: manipulation; }
+.omk-app {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: var(--omk-top-inset) var(--omk-right-inset)
+    calc(var(--omk-nav-height) + var(--omk-bottom-inset) + 12px) var(--omk-left-inset);
+}
+.page-host { min-height: calc(100vh - var(--omk-nav-height)); }
+.app-page, .settings-view { width: min(100%, 720px); margin: 0 auto; }
+.app-page { padding: 0 12px 16px; }
+.m-top-app-bar { position: sticky; top: var(--omk-top-inset); z-index: 10; background: var(--m-color-surface); }
+.m-basic-component__title { font-size: 16px; line-height: 1.3; }
+.m-basic-component__summary { font-size: 14px; line-height: 1.35; }
+.m-arrow-preference__title, .m-checkbox-preference__title, .m-switch-preference__title { font-size: 16px; line-height: 1.3; }
+.m-arrow-preference__summary, .m-checkbox-preference__summary, .m-switch-preference__summary { font-size: 14px; line-height: 1.35; }
+.m-basic-component__end { margin-left: 0; margin-inline-start: auto; }
+.m-top-app-bar__nav { left: auto; inset-inline-start: 0; padding-left: 0; padding-inline-start: 16px; }
+.m-top-app-bar__actions { right: auto; inset-inline-end: 0; padding-right: 0; padding-inline-end: 16px; }
+.identity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.identity-card { min-width: 0; }
+.identity-card > .m-card { height: 100%; min-height: 182px; padding: 16px; }
+.identity-card > .m-card,
+.activity-card > .m-card {
+  /* KernelSU-style tonal surfaces: the active accent is visible as a
+   * soft fill instead of leaving every raised card pure white. */
+  background: var(--m-color-surface-container);
+}
+.identity-card > .m-card {
+  background: var(--m-color-primary-container);
+  background: color-mix(
+    in srgb,
+    var(--m-color-primary-container) 72%,
+    var(--m-color-surface-container)
+  );
+}
+.activity-card > .m-card {
+  background: var(--m-color-primary-container);
+  background: color-mix(
+    in srgb,
+    var(--m-color-primary-container) 44%,
+    var(--m-color-surface-container)
+  );
+}
+.identity-field { display: grid; gap: 4px; min-width: 0; padding-top: 14px; }
+.identity-field:first-child { padding-top: 0; }
+.identity-field > span { color: var(--m-color-on-surface-variant-summary); font-size: 13px; line-height: 1.35; }
+.identity-field strong { overflow-wrap: anywhere; font-size: 15px; line-height: 1.35; font-weight: 600; }
+.identity-field--primary { min-height: 42px; }
+.identity-field--primary strong { font-size: clamp(13px, 3.2vw, 15px); }
+[data-tone='error'] { color: var(--m-color-error); }
+[data-tone='muted'] {
+  color: var(--m-color-on-surface);
+  font-size: inherit;
+  font-weight: inherit;
+}
+[data-tone='loading'] { opacity: .7; }
+.home-page .m-top-app-bar__title { align-items: flex-start; width: 100%; padding-inline: 4px; text-align: start; }
+.home-page .m-top-app-bar__title .m-text { font-size: clamp(20px, 5.3vw, 24px); line-height: 1.2; }
+.activity-card { margin-top: 12px; }
+.activity-card > .m-card { padding: 10px 4px 12px; }
+.activity-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 3px; }
+.activity-heading h2 { margin: 0; font-size: 17px; }
+.activity-heading span { color: var(--m-color-on-surface-variant-summary); font-size: 12px; }
+.activity-list { margin: 0; padding: 0; list-style: none; }
+.activity-list .m-basic-component { min-height: 60px; padding: 10px 8px; }
+.activity-list .m-basic-component__center { min-width: 0; }
+.activity-list .m-basic-component__row { align-items: flex-start; }
+.activity-list .m-basic-component__start { padding-top: 3px; }
+.activity-list .m-basic-component__end { align-items: center; }
+.activity-list .m-basic-component__title {
+  color: var(--m-color-on-surface);
+  font-size: 16px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+.activity-list .m-basic-component__summary {
+  color: var(--m-color-on-surface-variant-summary);
+  font-weight: 400;
+}
+.activity-list time { color: var(--m-color-on-surface-variant-summary); font-size: 12px; line-height: 1.4; }
+.activity-toggle.m-button { width: calc(100% - 20px); margin: 4px 10px 0; color: var(--m-color-primary); }
+.activity-empty { min-height: 120px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--m-color-on-surface-variant-summary); }
+.preference-section { margin-top: 4px; }
+.preference-card .m-basic-component { min-height: 70px; }
+.preference-card > .m-card {
+  background: var(--m-color-primary-container);
+  background: color-mix(
+    in srgb,
+    var(--m-color-primary-container) 44%,
+    var(--m-color-surface-container)
+  );
+}
+
+/* KernelSU falls back to its neutral light/dark surfaces when Monet is
+ * disabled.  Keep a previously selected custom seed from tinting every card
+ * after the user turns the dynamic palette off. */
+:root[data-monet='false'] .identity-card > .m-card,
+:root[data-monet='false'] .activity-card > .m-card,
+:root[data-monet='false'] .preference-card > .m-card,
+:root[data-monet='false'] .settings-card .m-card {
+  background: var(--m-color-surface-container) !important;
+}
+
+:root[data-monet='false'] .settings-card .m-card {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-monet='false'][data-floating-bottom-bar='true']
+  .main-navigation .m-navigation-bar__item--selected {
+  background: var(--m-color-surface-container-high);
+  color: var(--m-color-on-surface);
+}
+.preference-icon { display: inline-flex; width: 28px; align-items: center; justify-content: center; color: var(--m-color-primary); }
+.main-navigation {
+  position: fixed;
+  z-index: 80;
+  right: var(--omk-right-inset);
+  bottom: 0;
+  left: var(--omk-left-inset);
+  width: auto;
+  padding-bottom: var(--omk-bottom-inset);
+  background: var(--m-color-surface);
+}
+.main-navigation .m-navigation-bar__row { max-width: 720px; margin-inline: auto; }
+.main-navigation .m-navigation-bar__item { min-width: 0; }
+.main-navigation .m-navigation-bar__item--selected { color: var(--m-color-primary); }
+.main-navigation .m-navigation-bar__label { max-width: 100%; padding-inline: 4px; line-height: 1.25; }
+:root[data-bar-blur='true'] .m-top-app-bar,
+:root[data-bar-blur='true'] .main-navigation {
+  /* A translucent layer is required for backdrop-filter to reveal the page
+   * beneath it.  Keep an rgba fallback for older Android WebViews, then use
+   * the active MIUIX surface token so dark/AMOLED themes never turn white. */
+  background: var(--omk-bar-background);
+  background: color-mix(in srgb, var(--m-color-surface) 78%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+:root[data-floating-bottom-bar='true'] { --omk-nav-height: 92px; }
+:root[data-floating-bottom-bar='true'] .main-navigation {
+  left: 50%;
+  right: auto;
+  bottom: max(28px, calc(var(--omk-bottom-inset) + 8px));
+  width: 236px;
+  height: 64px;
+  padding: 4px;
+  transform: translateX(-50%);
+  border-radius: 32px;
+  background: var(--m-color-surface-container);
+  box-shadow: 0 0 10px rgb(0 0 0 / 10%);
+}
+:root[data-floating-bottom-bar='true'] .main-navigation .m-divider { display: none; }
+:root[data-floating-bottom-bar='true'] .main-navigation .m-navigation-bar__item { height: 56px; border-radius: 28px; opacity: 1; }
+:root[data-floating-bottom-bar='true'] .main-navigation .m-navigation-bar__item--selected { background: var(--m-color-tertiary-container); color: var(--m-color-on-tertiary-container); }
+:root[data-floating-bottom-bar='true'] .main-navigation .m-navigation-bar__icon { margin-top: 4px; }
+:root[data-floating-bottom-bar='true'] .main-navigation .m-navigation-bar__label { font-size: 11px; margin-bottom: 4px; }
+:root[data-liquid-glass='true'] .main-navigation {
+  overflow: hidden;
+  background: var(--omk-glass-background);
+  background: color-mix(in srgb, var(--m-color-surface-container) 58%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+  backdrop-filter: blur(22px) saturate(1.35);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%), 0 3px 16px rgb(0 0 0 / 16%);
+}
+:root[data-liquid-glass='true'] .m-top-app-bar {
+  background: var(--omk-glass-background);
+  background: color-mix(in srgb, var(--m-color-surface) 58%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+  backdrop-filter: blur(22px) saturate(1.35);
+  box-shadow: inset 0 -1px 0 rgb(255 255 255 / 12%);
+}
+:root[data-liquid-glass='true'] .main-navigation .m-navigation-bar__item--selected {
+  /* Keep the selected pill tied to the active accent instead of the
+   * neutral glass tint.  The solid container fallback is used by older
+   * WebViews that do not implement color-mix(). */
+  background: var(--m-color-primary-container);
+  background: color-mix(in srgb, var(--m-color-primary) 18%, transparent);
+  color: var(--m-color-primary);
+}
+
+/* LiquidBottomTabs-inspired sliding lens for the Vue MIUIX navigation bar.
+ * The indicator follows pointer drags through --omk-liquid-nav-index and
+ * settles with a spring-like easing when a tab is released. */
+:root[data-floating-bottom-bar='true'][data-liquid-glass='true'] .main-navigation {
+  --omk-liquid-nav-index: 0;
+  --omk-liquid-nav-scale: 1;
+  --omk-liquid-nav-highlight-x: 50%;
+  --omk-liquid-nav-panel-offset: 0px;
+  isolation: isolate;
+  overflow: hidden;
+  touch-action: none;
+  /* Keep a translucent host surface beneath the moving lens.  Without this
+   * layer backdrop-filter has no backdrop to sample and older WebViews paint
+   * the bar as a fully transparent strip. */
+  background: var(--omk-glass-background);
+  background: color-mix(in srgb, var(--m-color-surface-container) 58%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+  backdrop-filter: blur(22px) saturate(1.35);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%), 0 3px 16px rgb(0 0 0 / 16%);
+  transform: translate3d(calc(-50% + var(--omk-liquid-nav-panel-offset)), 0, 0);
+  transition: transform 380ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+:root[data-floating-bottom-bar='true'][data-liquid-glass='true']
+  .main-navigation::before {
+  position: absolute;
+  z-index: 0;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / 3);
+  border-radius: 28px;
+  background: var(--m-color-primary-container);
+  background: color-mix(in srgb, var(--m-color-primary) 16%, transparent);
+  background-image: radial-gradient(
+    circle 72px at var(--omk-liquid-nav-highlight-x) 50%,
+    rgb(255 255 255 / 18%),
+    transparent 72%
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--m-color-primary) 20%, transparent),
+    inset 0 0 10px rgb(0 0 0 / 8%), 0 4px 12px rgb(0 0 0 / 10%);
+  content: '';
+  pointer-events: none;
+  transform: translate3d(calc(var(--omk-liquid-nav-index) * 100%), 0, 0)
+    scale(var(--omk-liquid-nav-scale));
+  transform-origin: center;
+  transition: transform 380ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 160ms linear, box-shadow 160ms linear;
+  will-change: transform;
+}
+
+:root[data-theme-resolved='dark'][data-floating-bottom-bar='true'][data-liquid-glass='true']
+  .main-navigation::before {
+  background: var(--m-color-primary-container);
+  background: color-mix(in srgb, var(--m-color-primary) 24%, transparent);
+  background-image: radial-gradient(
+    circle 72px at var(--omk-liquid-nav-highlight-x) 50%,
+    rgb(255 255 255 / 14%),
+    transparent 72%
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--m-color-primary) 30%, transparent),
+    0 4px 14px rgb(0 0 0 / 22%);
+}
+
+:root[data-floating-bottom-bar='true'][data-liquid-glass='true']
+  .main-navigation .m-navigation-bar__row {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-floating-bottom-bar='true'][data-liquid-glass='true']
+  .main-navigation .m-navigation-bar__item {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), opacity 120ms linear;
+}
+
+:root[data-floating-bottom-bar='true'][data-liquid-glass='true']
+  .main-navigation.is-pressing .m-navigation-bar__item--selected {
+  transform: scale(1.08);
+}
+
+:root[data-floating-bottom-bar='true'][data-liquid-glass='true']
+  .main-navigation.is-pressing::before {
+  box-shadow: inset 0 0 8px rgb(0 0 0 / 15%),
+    inset 0 0 0 1px rgb(255 255 255 / 18%),
+    -1px 0 0 rgb(0 174 255 / 10%), 1px 0 0 rgb(255 74 116 / 10%),
+    0 4px 14px rgb(0 0 0 / 14%);
+}
+
+:root[data-floating-bottom-bar='true'][data-liquid-glass='true']
+  .main-navigation.is-dragging,
+:root[data-floating-bottom-bar='true'][data-liquid-glass='true']
+  .main-navigation.is-dragging::before {
+  transition: none;
+}
+:root.m-theme-dark[data-liquid-glass='true'] .main-navigation .m-navigation-bar__item--selected {
+  /* The shared ::before lens paints the selected state.  Keep the button
+   * itself transparent so the lens can slide freely between tabs in dark
+   * mode as well. */
+  background: transparent;
+}
+
+.confirm-sheet { display: grid; gap: 18px; padding-top: 4px; }
+.confirm-sheet p { margin: 0; overflow-wrap: anywhere; color: var(--m-color-on-surface-variant-summary); line-height: 1.45; }
+.confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.confirm-actions .m-button { gap: 6px; }
+.adb-disabler-sheet { gap: 8px; }
+.adb-disabler-sheet > p { font-size: var(--m-text-body2-size); line-height: 1.35; }
+.adb-disabler-sheet > .m-basic-component {
+  min-height: 52px;
+  padding: 10px 0;
+}
+.adb-disabler-sheet > .m-basic-component .m-text--headline1 {
+  font-size: 15px;
+  line-height: 1.2;
+}
+.adb-disabler-sheet > .m-basic-component .m-text--body2 {
+  font-size: 12px;
+  line-height: 1.25;
+}
+.adb-disabler-sheet > .confirm-actions {
+  position: sticky;
+  bottom: 0;
+  padding-top: 6px;
+  background: var(--m-color-background);
+}
+.targets-view { min-height: 100vh; min-height: 100dvh; }
+@media (max-width: 430px) {
+  .identity-grid { gap: 8px; }
+  .identity-card > .m-card { padding: 12px; }
+}
+@media (max-width: 360px) {
+  .app-page { padding-inline: 10px; }
+  .identity-card > .m-card { padding: 10px; }
+  .identity-field strong { font-size: 13px; }
+  .identity-field--primary strong { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

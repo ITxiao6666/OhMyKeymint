@@ -32,6 +32,7 @@ const ACTIVITY_ACTIONS = [
   'security_patch_restored',
   'pif_enabled',
   'pif_disabled',
+  'adb_disabler_changed',
 ] as const
 export type ActivityAction = typeof ACTIVITY_ACTIONS[number]
 
@@ -62,6 +63,12 @@ export type PifFingerprintState = {
 
 export type KeyboxSource = 'google_hardware' | 'google_remote' | 'unknown'
 export type KeyboxLevel = 'tee' | 'strongbox' | 'unknown'
+export interface AdbDisablerState {
+  enabled: boolean
+  dev_options: boolean
+  usb_debug: boolean
+  oem_unlock: boolean
+}
 export type PlayIntegrityStatus = 'not_checked'
 export type KeyboxRevocationStatus =
   | 'not_checked'
@@ -305,13 +312,36 @@ export class Cli {
     return output
   }
 
-  async installWidevineL1(): Promise<void> {
+  /** Apply ADB Disabler options and persist them for the next boot. */
+  async setAdbDisabler(
+    enabled: boolean,
+    devOptions: boolean,
+    usbDebug: boolean,
+    oemUnlock: boolean,
+  ): Promise<void> {
     const { keymint } = await this.#getHelperPaths()
-    const output = await this.#run(keymint, ['--webui-install-widevine-l1'], 256)
-    if (output !== 'widevine_l1_installed') {
-      throw new Error('OMK returned an unexpected Widevine L1 installation result')
+    const values = [enabled, devOptions, usbDebug, oemUnlock].map(value => value ? '1' : '0')
+    const output = await this.#run(keymint, ['--webui-set-adb-disabler', ...values], 256)
+    if (output !== 'adb_disabler_applied') {
+      throw new Error('OMK returned an unexpected ADB Disabler result')
     }
-    await this.#recordActivity('widevine_installed', '')
+    await this.#recordActivity('adb_disabler_changed', enabled ? 'enabled' : 'disabled')
+  }
+
+  async getAdbDisabler(): Promise<AdbDisablerState> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-get-adb-disabler'], 256)
+    let parsed: unknown
+    try { parsed = JSON.parse(output) } catch { throw new Error('OMK returned invalid ADB Disabler state') }
+    if (!isRecord(parsed)
+        || !hasOnlyKeys(parsed, ['enabled', 'dev_options', 'usb_debug', 'oem_unlock'])
+        || typeof parsed.enabled !== 'boolean'
+        || typeof parsed.dev_options !== 'boolean'
+        || typeof parsed.usb_debug !== 'boolean'
+        || typeof parsed.oem_unlock !== 'boolean') {
+      throw new Error('OMK returned invalid ADB Disabler state')
+    }
+    return parsed as unknown as AdbDisablerState
   }
 
   async syncSecurityPatch(date: string): Promise<string> {

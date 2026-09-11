@@ -211,6 +211,36 @@ body::-webkit-scrollbar,
   display: none;
 }
 
+/* DropdownPreference renders its popup at the document root.  Hide native
+ * WebView tracks (including older Android thumb/track implementations) while
+ * retaining overflow scrolling for touch and keyboard users. */
+:root .m-dropdown-preference__popup {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scrollbar-color: transparent transparent;
+}
+
+:root .m-dropdown-preference__popup::-webkit-scrollbar,
+:root .m-dropdown-preference__popup::-webkit-scrollbar-track,
+:root .m-dropdown-preference__popup::-webkit-scrollbar-thumb {
+  width: 0;
+  height: 0;
+  display: none;
+  background: transparent;
+}
+
+:root .m-dropdown-preference__popup * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+:root .m-dropdown-preference__popup *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+  background: transparent;
+}
+
 body {
   background: var(--miuix-background);
   font-family: -apple-system, BlinkMacSystemFont, "MiSans", "Noto Sans", Roboto,

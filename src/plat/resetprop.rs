@@ -79,8 +79,8 @@ const RESETPROP_FALLBACKS: &[(&str, Option<&str>)] = &[
 
 #[derive(Clone)]
 pub struct ResetpropCommand {
-    program: String,
-    prepend_arg: Option<String>,
+    pub(crate) program: String,
+    pub(crate) prepend_arg: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

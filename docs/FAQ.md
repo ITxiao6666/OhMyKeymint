@@ -176,18 +176,12 @@ The **Security Level** row is read from the active Keybox certificate and shows
 either level.
 Continue to manage those settings through the documented active files.
 
-**Spoof PIF fingerprint** and **Widevine L1** are the other network-backed
-actions. PIF uses only the documented Pixel profile feed described below. The
-Widevine action first locates a compatible vendor `KmInstallKeybox` utility,
-then requests exactly `https://rawbin.dpejoh.com/clips/attestation`, decodes and
-validates its bounded `AndroidAttestation` XML response, and passes a private
-temporary file to the utility as `<file> attestation true`. It attempts to
-remove the temporary file before returning and reports cleanup failures. The
-action normally works only on some Qualcomm devices, changes vendor-backed
-provisioning, and may affect DRM or device certification, so the WebUI requires
-confirmation. A successful vendor utility call does not guarantee that a DRM
-client will report L1. OMK restricts the HTTPS host and path, but the payload
-remains a server-managed value rather than a locally pinned key.
+**Spoof PIF fingerprint** is the other network-backed action. PIF uses only the
+documented Pixel profile feed described below. The **ADB Disabler** controls
+developer options, USB debugging, and OEM unlock independently. Its four
+settings are persisted under OMK's data directory and replayed by the module at
+boot; disabling its master switch stops future replay but does not restore
+properties already changed during the current boot.
 
 ### What happens when the WebUI saves the app list?
 

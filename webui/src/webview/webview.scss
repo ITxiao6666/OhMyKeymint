@@ -1,5 +1,3 @@
-@use '../theme';
-
 .webview {
   height: 100vh;
   height: 100dvh;
@@ -12,11 +10,11 @@
   align-items: center;
   position: absolute;
   inset: 0;
-  background-color: var(--md-sys-color-surface);
+  background-color: var(--m-color-surface, #f7f7f7);
 }
 
 .webview p {
   text-align: center;
   width: 100%;
-  color: var(--md-sys-color-on-surface);
+  color: var(--m-color-on-surface, #1b1b1f);
 }

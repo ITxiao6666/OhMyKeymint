@@ -29,6 +29,7 @@ enum ActivityAction {
     SecurityPatchRestored,
     PifEnabled,
     PifDisabled,
+    AdbDisablerChanged,
 }
 
 impl ActivityAction {
@@ -41,6 +42,7 @@ impl ActivityAction {
             "security_patch_restored" => Ok(Self::SecurityPatchRestored),
             "pif_enabled" => Ok(Self::PifEnabled),
             "pif_disabled" => Ok(Self::PifDisabled),
+            "adb_disabler_changed" => Ok(Self::AdbDisablerChanged),
             _ => bail!("unsupported WebUI activity action"),
         }
     }
@@ -177,6 +179,7 @@ mod tests {
             ),
             ("pif_enabled", ActivityAction::PifEnabled),
             ("pif_disabled", ActivityAction::PifDisabled),
+            ("adb_disabler_changed", ActivityAction::AdbDisablerChanged),
         ] {
             assert_eq!(ActivityAction::parse(name).unwrap(), action);
             assert_eq!(
