@@ -31,6 +31,21 @@ export const APPEARANCE_OPTIONS = [
 ] as const
 export type AppearanceOption = typeof APPEARANCE_OPTIONS[number]
 
+// Keep the same palette families and color specification names exposed by
+// KernelSU.  The values are persisted so switching pages or reopening the
+// WebUI does not reset the selected palette.
+export const PALETTE_STYLES = [
+  'TonalSpot',
+  'Neutral',
+  'Vibrant',
+  'Expressive',
+  'Rainbow',
+  'FruitSalad',
+] as const
+export type PaletteStyle = typeof PALETTE_STYLES[number]
+export const COLOR_SPECS = ['SPEC_2025', 'SPEC_2021'] as const
+export type ColorSpec = typeof COLOR_SPECS[number]
+
 type ResolvedMode = 'light' | 'dark'
 type AppearanceListener = () => void
 
@@ -45,6 +60,8 @@ const DEFAULT_MODE: AppearanceMode = 'auto'
 type ManualAccent = Exclude<AccentColor, 'default'>
 const DEFAULT_ACCENT = 'default' as const satisfies AccentColor
 const DEFAULT_MANUAL_ACCENT: ManualAccent = 'blue'
+const DEFAULT_PALETTE_STYLE: PaletteStyle = 'TonalSpot'
+const DEFAULT_COLOR_SPEC: ColorSpec = 'SPEC_2025'
 const DEFAULT_OPTIONS: Readonly<Record<AppearanceOption, boolean>> = {
   monet: true,
   barBlur: false,
@@ -55,32 +72,53 @@ const THEME_QUERY = 'theme'
 const ACCENT_QUERY = 'accent'
 const APPEARANCE_STORAGE_KEY = 'omk-appearance'
 const ACCENT_PROPERTIES = [
-  '--miuix-primary',
-  '--miuix-primary-container',
-  '--md-sys-color-primary',
-  '--md-sys-color-on-primary',
-  '--md-sys-color-primary-container',
-  '--md-sys-color-on-primary-container',
-  '--md-sys-color-secondary',
-  '--md-sys-color-on-secondary',
-  '--md-sys-color-secondary-container',
-  '--md-sys-color-on-secondary-container',
-  '--md-sys-color-inverse-primary',
+  '--m-color-primary',
+  '--m-color-on-primary',
+  '--m-color-primary-container',
+  '--m-color-on-primary-container',
+  '--m-color-secondary',
+  '--m-color-on-secondary',
+  '--m-color-secondary-container',
+  '--m-color-on-secondary-container',
+  '--m-color-tertiary-container',
+  '--m-color-on-tertiary-container',
+  '--m-color-tertiary-container-variant',
+  '--m-color-inverse-primary',
 ] as const
+
+/**
+ * KernelSU delegates palette generation to MaterialKolor.  The WebView build
+ * does not ship that Kotlin generator, so apply the same six palette families
+ * as a lightweight CSS color transform.  TonalSpot keeps the dynamic Monet
+ * seed untouched; the other styles deliberately shift saturation/hue so the
+ * selected style is immediately visible throughout the UI.
+ */
+function styleColor(source: string, style: PaletteStyle, role: 'primary' | 'container'): string {
+  if (style === 'TonalSpot') return source
+  const mixes: Record<Exclude<PaletteStyle, 'TonalSpot'>, { color: string; primary: number; container: number }> = {
+    Neutral: { color: '#808080', primary: 46, container: 62 },
+    Vibrant: { color: '#ff2d92', primary: 22, container: 30 },
+    Expressive: { color: '#6750a4', primary: 30, container: 38 },
+    Rainbow: { color: '#00a8c6', primary: 28, container: 34 },
+    FruitSalad: { color: '#4caf50', primary: 28, container: 36 },
+  }
+  const mix = mixes[style][role]
+  return `color-mix(in srgb, ${source} ${100 - mix}%, ${mixes[style].color} ${mix}%)`
+}
 
 const ACCENTS: Record<ManualAccent, Record<ResolvedMode, AccentPalette>> = {
   blue: {
     light: {
-      primary: '#1157ce',
+      primary: '#3482ff',
       onPrimary: '#ffffff',
-      primaryContainer: '#d9e2ff',
-      onPrimaryContainer: '#001a42',
+      primaryContainer: '#5d9bff',
+      onPrimaryContainer: '#ffffff',
     },
     dark: {
-      primary: '#adc6ff',
-      onPrimary: '#002e69',
-      primaryContainer: '#004494',
-      onPrimaryContainer: '#d9e2ff',
+      primary: '#277af7',
+      onPrimary: '#ffffff',
+      primaryContainer: '#338fe4',
+      onPrimaryContainer: '#ffffff',
     },
   },
   yellow: {
@@ -295,6 +333,9 @@ export class AppearanceController {
   #mode: AppearanceMode
   #accent: AccentColor
   #options: Record<AppearanceOption, boolean>
+  #paletteStyle: PaletteStyle
+  #colorSpec: ColorSpec
+  #interfaceScale = 100
   #systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
   #listeners: AppearanceListener[] = []
 
@@ -307,6 +348,12 @@ export class AppearanceController {
     this.#mode = isAppearanceMode(requestedMode) ? requestedMode : DEFAULT_MODE
     this.#accent = requestedAccent ?? DEFAULT_ACCENT
     this.#options = { ...DEFAULT_OPTIONS, ...stored.options }
+    this.#paletteStyle = PALETTE_STYLES.includes(stored.paletteStyle as PaletteStyle)
+      ? stored.paletteStyle as PaletteStyle : DEFAULT_PALETTE_STYLE
+    this.#colorSpec = COLOR_SPECS.includes(stored.colorSpec as ColorSpec)
+      ? stored.colorSpec as ColorSpec : DEFAULT_COLOR_SPEC
+    this.#interfaceScale = typeof stored.interfaceScale === 'number'
+      ? Math.max(80, Math.min(110, Math.round(stored.interfaceScale))) : 100
     if (stored.options.monet === undefined && normalizeAccent(stored.accent) !== null) {
       this.#options.monet = stored.accent === DEFAULT_ACCENT || stored.accent === 'system'
     }
@@ -331,6 +378,21 @@ export class AppearanceController {
     return this.#options[option]
   }
 
+  get paletteStyle(): PaletteStyle { return this.#paletteStyle }
+
+  get colorSpec(): ColorSpec { return this.#colorSpec }
+
+  get interfaceScale(): number { return this.#interfaceScale }
+
+  setInterfaceScale(scale: number): void {
+    const normalized = Math.max(80, Math.min(110, Math.round(scale)))
+    if (normalized === this.#interfaceScale) return
+    this.#interfaceScale = normalized
+    this.#storeAppearance()
+    this.#apply()
+    this.#emit()
+  }
+
   setMode(mode: AppearanceMode): void {
     if (mode === this.#mode) return
     this.#mode = mode
@@ -346,6 +408,22 @@ export class AppearanceController {
     this.#accent = normalized
     this.#storeAppearance()
     this.#syncUrl()
+    this.#apply()
+    this.#emit()
+  }
+
+  setPaletteStyle(style: PaletteStyle): void {
+    if (!PALETTE_STYLES.includes(style) || style === this.#paletteStyle) return
+    this.#paletteStyle = style
+    this.#storeAppearance()
+    this.#apply()
+    this.#emit()
+  }
+
+  setColorSpec(spec: ColorSpec): void {
+    if (!COLOR_SPECS.includes(spec) || spec === this.#colorSpec) return
+    this.#colorSpec = spec
+    this.#storeAppearance()
     this.#apply()
     this.#emit()
   }
@@ -376,14 +454,17 @@ export class AppearanceController {
   static #readStoredAppearance(): {
     mode: string | null
     accent: string | null
+    paletteStyle: string | null
+    colorSpec: string | null
+    interfaceScale: number | null
     options: Partial<Record<AppearanceOption, boolean>>
   } {
     try {
       const value = window.localStorage.getItem(APPEARANCE_STORAGE_KEY)
-      if (value === null) return { mode: null, accent: null, options: {} }
+      if (value === null) return { mode: null, accent: null, paletteStyle: null, colorSpec: null, interfaceScale: null, options: {} }
       const parsed: unknown = JSON.parse(value)
       if (typeof parsed !== 'object' || parsed === null) {
-        return { mode: null, accent: null, options: {} }
+        return { mode: null, accent: null, paletteStyle: null, colorSpec: null, interfaceScale: null, options: {} }
       }
       const record = parsed as Record<string, unknown>
       const options: Partial<Record<AppearanceOption, boolean>> = {}
@@ -393,10 +474,13 @@ export class AppearanceController {
       return {
         mode: typeof record.mode === 'string' ? record.mode : null,
         accent: typeof record.accent === 'string' ? record.accent : null,
+        paletteStyle: typeof record.paletteStyle === 'string' ? record.paletteStyle : null,
+        colorSpec: typeof record.colorSpec === 'string' ? record.colorSpec : null,
+        interfaceScale: typeof record.interfaceScale === 'number' ? record.interfaceScale : null,
         options,
       }
     } catch {
-      return { mode: null, accent: null, options: {} }
+      return { mode: null, accent: null, paletteStyle: null, colorSpec: null, interfaceScale: null, options: {} }
     }
   }
 
@@ -405,6 +489,9 @@ export class AppearanceController {
       window.localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({
         mode: this.#mode,
         accent: this.#accent,
+        paletteStyle: this.#paletteStyle,
+        colorSpec: this.#colorSpec,
+        interfaceScale: this.#interfaceScale,
         ...this.#options,
       }))
     } catch {
@@ -441,23 +528,29 @@ export class AppearanceController {
     root.dataset.barBlur = String(this.#options.barBlur)
     root.dataset.floatingBottomBar = String(this.#options.floatingBottomBar)
     root.dataset.liquidGlass = String(this.#options.liquidGlass)
+    root.dataset.paletteStyle = this.#paletteStyle
+    root.dataset.colorSpec = this.#colorSpec
+    root.style.setProperty('--omk-ui-scale', String(this.#interfaceScale / 100))
     root.style.colorScheme = resolved
 
     for (const property of ACCENT_PROPERTIES) root.style.removeProperty(property)
     if (this.#options.monet && this.#accent === DEFAULT_ACCENT) {
       const fallback = ACCENTS.blue[resolved]
+      const dynamicPrimary = `var(--primary, ${fallback.primary})`
+      const dynamicContainer = `var(--primaryContainer, ${fallback.primaryContainer})`
       const values: Record<(typeof ACCENT_PROPERTIES)[number], string> = {
-        '--miuix-primary': `var(--primary, ${fallback.primary})`,
-        '--miuix-primary-container': `var(--primaryContainer, ${fallback.primaryContainer})`,
-        '--md-sys-color-primary': `var(--primary, ${fallback.primary})`,
-        '--md-sys-color-on-primary': `var(--onPrimary, ${fallback.onPrimary})`,
-        '--md-sys-color-primary-container': `var(--primaryContainer, ${fallback.primaryContainer})`,
-        '--md-sys-color-on-primary-container': `var(--onPrimaryContainer, ${fallback.onPrimaryContainer})`,
-        '--md-sys-color-secondary': `var(--secondary, ${fallback.primary})`,
-        '--md-sys-color-on-secondary': `var(--onSecondary, ${fallback.onPrimary})`,
-        '--md-sys-color-secondary-container': `var(--secondaryContainer, ${fallback.primaryContainer})`,
-        '--md-sys-color-on-secondary-container': `var(--onSecondaryContainer, ${fallback.onPrimaryContainer})`,
-        '--md-sys-color-inverse-primary': `var(--inversePrimary, ${fallback.primary})`,
+        '--m-color-primary': styleColor(dynamicPrimary, this.#paletteStyle, 'primary'),
+        '--m-color-on-primary': `var(--onPrimary, ${fallback.onPrimary})`,
+        '--m-color-primary-container': styleColor(dynamicContainer, this.#paletteStyle, 'container'),
+        '--m-color-on-primary-container': `var(--onPrimaryContainer, ${fallback.onPrimaryContainer})`,
+        '--m-color-secondary': styleColor(`var(--secondary, ${fallback.primary})`, this.#paletteStyle, 'primary'),
+        '--m-color-on-secondary': `var(--onSecondary, ${fallback.onPrimary})`,
+        '--m-color-secondary-container': styleColor(`var(--secondaryContainer, ${fallback.primaryContainer})`, this.#paletteStyle, 'container'),
+        '--m-color-on-secondary-container': `var(--onSecondaryContainer, ${fallback.onPrimaryContainer})`,
+        '--m-color-tertiary-container': styleColor(`var(--tertiaryContainer, ${fallback.primaryContainer})`, this.#paletteStyle, 'container'),
+        '--m-color-on-tertiary-container': `var(--onTertiaryContainer, ${fallback.onPrimaryContainer})`,
+        '--m-color-tertiary-container-variant': styleColor(`var(--tertiaryContainer, ${fallback.primaryContainer})`, this.#paletteStyle, 'container'),
+        '--m-color-inverse-primary': styleColor(`var(--inversePrimary, ${fallback.primary})`, this.#paletteStyle, 'primary'),
       }
       for (const [property, value] of Object.entries(values)) root.style.setProperty(property, value)
       return
@@ -470,18 +563,21 @@ export class AppearanceController {
       ? this.#accent
       : DEFAULT_MANUAL_ACCENT
     const palette = ACCENTS[selectedAccent][resolved]
+    const primary = styleColor(palette.primary, this.#paletteStyle, 'primary')
+    const container = styleColor(palette.primaryContainer, this.#paletteStyle, 'container')
     const values: Record<(typeof ACCENT_PROPERTIES)[number], string> = {
-      '--miuix-primary': palette.primary,
-      '--miuix-primary-container': palette.primaryContainer,
-      '--md-sys-color-primary': palette.primary,
-      '--md-sys-color-on-primary': palette.onPrimary,
-      '--md-sys-color-primary-container': palette.primaryContainer,
-      '--md-sys-color-on-primary-container': palette.onPrimaryContainer,
-      '--md-sys-color-secondary': palette.primary,
-      '--md-sys-color-on-secondary': palette.onPrimary,
-      '--md-sys-color-secondary-container': palette.primaryContainer,
-      '--md-sys-color-on-secondary-container': palette.onPrimaryContainer,
-      '--md-sys-color-inverse-primary': palette.primary,
+      '--m-color-primary': primary,
+      '--m-color-on-primary': palette.onPrimary,
+      '--m-color-primary-container': container,
+      '--m-color-on-primary-container': palette.onPrimaryContainer,
+      '--m-color-secondary': primary,
+      '--m-color-on-secondary': palette.onPrimary,
+      '--m-color-secondary-container': container,
+      '--m-color-on-secondary-container': palette.onPrimaryContainer,
+      '--m-color-tertiary-container': container,
+      '--m-color-on-tertiary-container': palette.onPrimaryContainer,
+      '--m-color-tertiary-container-variant': container,
+      '--m-color-inverse-primary': primary,
     }
     for (const [property, value] of Object.entries(values)) root.style.setProperty(property, value)
   }

@@ -136,6 +136,11 @@
     <string name="settings_appearance">外观</string>
     <string name="settings_mode">模式</string>
     <string name="settings_color">强调色</string>
+    <string name="settings_color_style">色彩风格</string>
+    <string name="settings_color_spec">色彩标准</string>
+    <string name="settings_interaction">交互</string>
+    <string name="settings_interface_scale">界面缩放</string>
+    <string name="settings_interface_scale_desc">调整全局显示比例</string>
     <string name="theme_mode_dark">深色</string>
     <string name="theme_mode_amoled">纯黑</string>
     <string name="theme_mode_light">浅色</string>

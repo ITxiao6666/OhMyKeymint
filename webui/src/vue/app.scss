@@ -1,12 +1,12 @@
 // Component anatomy, typography, interaction and motion come from miuix-vue.
 // These overrides connect the existing appearance preferences and page layout.
 :root {
-  --m-color-primary: var(--md-sys-color-primary, #3482ff);
-  --m-color-on-primary: var(--md-sys-color-on-primary, #fff);
+  --m-color-primary: #3482ff;
+  --m-color-on-primary: #fff;
   --m-color-primary-variant: var(--m-color-primary);
-  --m-color-on-primary-variant: var(--md-sys-color-primary-container, #d9e2ff);
-  --m-color-primary-container: var(--md-sys-color-primary-container, #d9e2ff);
-  --m-color-on-primary-container: var(--md-sys-color-on-primary-container, #001a42);
+  --m-color-on-primary-variant: #aecdff;
+  --m-color-primary-container: #5d9bff;
+  --m-color-on-primary-container: #fff;
   --m-color-disabled-primary: var(--m-color-primary-container);
   --m-color-disabled-on-primary: var(--m-color-on-primary-container);
   --m-color-disabled-primary-button: var(--m-color-primary-container);
@@ -15,12 +15,12 @@
   --m-color-tertiary-container: var(--m-color-primary-container);
   --m-color-on-tertiary-container: var(--m-color-on-primary-container);
   --m-color-tertiary-container-variant: var(--m-color-primary-container);
-  --m-text-main-size: 16px;
+  --m-text-main-size: 17px;
   --m-text-body1-size: 16px;
   --m-text-body2-size: 14px;
-  --m-text-button-size: 16px;
-  --m-text-subtitle-size: 15px;
-  --m-text-title4-size: 19px;
+  --m-text-button-size: 17px;
+  --m-text-subtitle-size: 14px;
+  --m-text-title4-size: 18px;
   --m-color-slider-key-point-foreground: var(--m-color-primary);
   --omk-top-inset: var(--window-inset-top, env(safe-area-inset-top, 0px));
   --omk-bottom-inset: var(--window-inset-bottom, env(safe-area-inset-bottom, 0px));
@@ -29,7 +29,19 @@
   --omk-nav-height: 64px;
   --omk-bar-background: rgb(247 247 247 / 82%);
   --omk-glass-background: rgb(255 255 255 / 54%);
+  --omk-identity-mix: 42%;
+  --omk-activity-mix: 24%;
+  --omk-preference-mix: 24%;
+  --omk-ui-scale: 1;
 }
+
+/* Palette families mirror KernelSU's selectable Monet styles.  They tune the
+ * tonal amount applied to cards while keeping the MIUIX surface tokens intact. */
+:root[data-palette-style='Neutral'] { --omk-identity-mix: 22%; --omk-activity-mix: 14%; --omk-preference-mix: 14%; }
+:root[data-palette-style='Vibrant'] { --omk-identity-mix: 58%; --omk-activity-mix: 34%; --omk-preference-mix: 34%; }
+:root[data-palette-style='Expressive'] { --omk-identity-mix: 50%; --omk-activity-mix: 30%; --omk-preference-mix: 30%; }
+:root[data-palette-style='Rainbow'],
+:root[data-palette-style='FruitSalad'] { --omk-identity-mix: 46%; --omk-activity-mix: 28%; --omk-preference-mix: 28%; }
 
 :root.m-theme-dark {
   --omk-bar-background: rgb(0 0 0 / 78%);
@@ -167,6 +179,7 @@ button { touch-action: manipulation; }
 .omk-app {
   min-height: 100vh;
   min-height: 100dvh;
+  zoom: var(--omk-ui-scale, 1);
   padding: var(--omk-top-inset) var(--omk-right-inset)
     calc(var(--omk-nav-height) + var(--omk-bottom-inset) + 12px) var(--omk-left-inset);
 }
@@ -194,7 +207,7 @@ button { touch-action: manipulation; }
   background: var(--m-color-primary-container);
   background: color-mix(
     in srgb,
-    var(--m-color-primary-container) 72%,
+    var(--m-color-primary-container) var(--omk-identity-mix),
     var(--m-color-surface-container)
   );
 }
@@ -202,7 +215,7 @@ button { touch-action: manipulation; }
   background: var(--m-color-primary-container);
   background: color-mix(
     in srgb,
-    var(--m-color-primary-container) 44%,
+    var(--m-color-primary-container) var(--omk-activity-mix),
     var(--m-color-surface-container)
   );
 }
@@ -251,7 +264,7 @@ button { touch-action: manipulation; }
   background: var(--m-color-primary-container);
   background: color-mix(
     in srgb,
-    var(--m-color-primary-container) 44%,
+    var(--m-color-primary-container) var(--omk-preference-mix),
     var(--m-color-surface-container)
   );
 }

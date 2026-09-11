@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import {
+  MiuixArrowPreference,
   MiuixCard,
   MiuixDivider,
   MiuixDropdownPreference,
   MiuixIcon,
+  MiuixSlider,
   MiuixSmallTitle,
   MiuixSpinnerPreference,
   MiuixSwitchPreference,
@@ -16,10 +18,14 @@ import { Background, Layers, Sidebar, Theme, Translate, Tune } from 'miuix-vue/i
 import {
   ACCENT_COLORS,
   APPEARANCE_MODES,
+  COLOR_SPECS,
+  PALETTE_STYLES,
   appearance,
   type AccentColor,
   type AppearanceMode,
   type AppearanceOption,
+  type ColorSpec,
+  type PaletteStyle,
 } from '../appearance'
 import { i18n } from '../i18n'
 
@@ -89,11 +95,17 @@ const accentItems = computed<MiuixDropdownItem[]>(() => ACCENT_CHOICES.map(choic
   text: translate(choice.labelKey, choice.fallback),
   color: ACCENT_SWATCHES[choice.value],
 })))
+const paletteStyleItems = computed<string[]>(() => PALETTE_STYLES.map(style => style))
+const colorSpecItems = computed<string[]>(() => COLOR_SPECS.map(spec => spec))
 
 const modeIndex = ref(Math.max(0, APPEARANCE_MODES.indexOf(appearance.mode)))
 const languageIndex = ref(Math.max(0, languageCodes.indexOf(i18n.preference)))
 const accentIndex = ref(Math.max(0, ACCENT_COLORS.indexOf(appearance.accent)))
+const paletteStyleIndex = ref(Math.max(0, PALETTE_STYLES.indexOf(appearance.paletteStyle)))
+const colorSpecIndex = ref(Math.max(0, COLOR_SPECS.indexOf(appearance.colorSpec)))
 const options = ref<Record<AppearanceOption, boolean>>(readOptions())
+const interfaceScale = ref(appearance.interfaceScale)
+const showScaleSlider = ref(false)
 
 function readOptions(): Record<AppearanceOption, boolean> {
   return {
@@ -107,7 +119,10 @@ function readOptions(): Record<AppearanceOption, boolean> {
 function syncAppearanceState(): void {
   modeIndex.value = Math.max(0, APPEARANCE_MODES.indexOf(appearance.mode))
   accentIndex.value = Math.max(0, ACCENT_COLORS.indexOf(appearance.accent))
+  paletteStyleIndex.value = Math.max(0, PALETTE_STYLES.indexOf(appearance.paletteStyle))
+  colorSpecIndex.value = Math.max(0, COLOR_SPECS.indexOf(appearance.colorSpec))
   options.value = readOptions()
+  interfaceScale.value = appearance.interfaceScale
 }
 
 function selectMode(index: number): void {
@@ -131,11 +146,28 @@ function selectAccent(index: number): void {
   syncAppearanceState()
 }
 
+function selectPaletteStyle(index: number): void {
+  const style = PALETTE_STYLES[index] as PaletteStyle | undefined
+  if (style) appearance.setPaletteStyle(style)
+  syncAppearanceState()
+}
+
+function selectColorSpec(index: number): void {
+  const spec = COLOR_SPECS[index] as ColorSpec | undefined
+  if (spec) appearance.setColorSpec(spec)
+  syncAppearanceState()
+}
+
 function setOption(option: AppearanceOption, enabled: boolean): void {
   appearance.setOption(option, enabled)
   // The controller couples liquid glass to the floating bar, so refresh every
   // option after a write instead of mirroring only the switch that was touched.
   syncAppearanceState()
+}
+
+function setInterfaceScale(value: number): void {
+  interfaceScale.value = Math.round(value)
+  appearance.setInterfaceScale(value)
 }
 
 onBeforeUnmount(appearance.onChange(syncAppearanceState))
@@ -218,6 +250,32 @@ onBeforeUnmount(appearance.onChange(syncAppearanceState))
                 <span class="settings-preference-icon"><MiuixIcon :icon="Tune" :size="22" /></span>
               </template>
             </MiuixSpinnerPreference>
+
+            <div class="settings-divider"><MiuixDivider /></div>
+
+            <MiuixDropdownPreference
+              :model-value="paletteStyleIndex"
+              :title="translate('settings_color_style', 'Color style')"
+              :items="paletteStyleItems"
+              @update:model-value="selectPaletteStyle"
+            >
+              <template #start>
+                <span class="settings-preference-icon"><MiuixIcon :icon="Tune" :size="22" /></span>
+              </template>
+            </MiuixDropdownPreference>
+
+            <div class="settings-divider"><MiuixDivider /></div>
+
+            <MiuixDropdownPreference
+              :model-value="colorSpecIndex"
+              :title="translate('settings_color_spec', 'Color standard')"
+              :items="colorSpecItems"
+              @update:model-value="selectColorSpec"
+            >
+              <template #start>
+                <span class="settings-preference-icon"><MiuixIcon :icon="Tune" :size="22" /></span>
+              </template>
+            </MiuixDropdownPreference>
           </template>
         </MiuixCard>
       </section>
@@ -258,21 +316,57 @@ onBeforeUnmount(appearance.onChange(syncAppearanceState))
             </template>
           </MiuixSwitchPreference>
 
-          <div class="settings-divider"><MiuixDivider /></div>
+          <template v-if="options.floatingBottomBar">
+            <div class="settings-divider"><MiuixDivider /></div>
+            <MiuixSwitchPreference
+              :model-value="options.liquidGlass"
+              :title="translate('settings_liquid_glass', 'Liquid glass')"
+              :summary="translate(
+                'settings_liquid_glass_desc',
+                'Add translucent glass depth to surfaces',
+              )"
+              @update:model-value="setOption('liquidGlass', $event)"
+            >
+              <template #start>
+                <span class="settings-preference-icon"><MiuixIcon :icon="Theme" :size="22" /></span>
+              </template>
+            </MiuixSwitchPreference>
+          </template>
+        </MiuixCard>
+      </section>
 
-          <MiuixSwitchPreference
-            :model-value="options.liquidGlass"
-            :title="translate('settings_liquid_glass', 'Liquid glass')"
-            :summary="translate(
-              'settings_liquid_glass_desc',
-              'Add translucent glass depth to surfaces',
-            )"
-            @update:model-value="setOption('liquidGlass', $event)"
+      <section class="settings-section" aria-labelledby="interaction-title">
+        <MiuixSmallTitle
+          id="interaction-title"
+          :text="translate('settings_interaction', 'Interaction')"
+        />
+        <MiuixCard class="settings-card" press-feedback="none">
+          <MiuixArrowPreference
+            :title="translate('settings_interface_scale', 'Interface scale')"
+            :summary="translate('settings_interface_scale_desc', 'Adjust the overall display size')"
+            :hold-down="showScaleSlider"
+            @click="showScaleSlider = !showScaleSlider"
           >
             <template #start>
-              <span class="settings-preference-icon"><MiuixIcon :icon="Theme" :size="22" /></span>
+              <span class="settings-preference-icon"><MiuixIcon :icon="Tune" :size="22" /></span>
             </template>
-          </MiuixSwitchPreference>
+            <template #end>
+              <span class="scale-preference__value">{{ interfaceScale }}%</span>
+            </template>
+            <template #bottom>
+              <MiuixSlider
+                v-if="showScaleSlider"
+                :model-value="interfaceScale"
+                :min="80"
+                :max="110"
+                :step="5"
+                :show-key-points="true"
+                :key-points="[80, 90, 100, 110]"
+                :aria-label="translate('settings_interface_scale', 'Interface scale')"
+                @update:model-value="setInterfaceScale"
+              />
+            </template>
+          </MiuixArrowPreference>
         </MiuixCard>
       </section>
     </div>
@@ -421,116 +515,36 @@ onBeforeUnmount(appearance.onChange(syncAppearanceState))
   line-height: 1.35;
 }
 
-.theme-preview {
+.scale-preference {
   box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 560px;
-  margin: 0;
-  padding: 32px 12px 72px;
-  overflow: visible;
+  padding: 14px 16px 18px;
 }
 
-.preview-device {
-  position: relative;
+.scale-preference__header {
   display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  width: min(42%, 240px);
-  aspect-ratio: .46;
-  height: auto;
-  padding: 14px 11px 12px;
-  overflow: hidden;
-  border: 2px solid color-mix(in srgb, var(--m-color-on-surface) 48%, transparent);
-  border-radius: 36px;
-  background: color-mix(in srgb, var(--m-color-surface) 94%, var(--m-color-primary));
-  box-shadow: 0 3px 12px rgb(0 0 0 / 8%);
-}
-
-.preview-device-header {
-  display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  min-height: 31px;
-  padding-inline: 8px;
-  color: var(--m-color-on-surface);
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
-.preview-device-title {
+.scale-preference__title {
+  color: var(--m-color-on-surface);
   font-size: 16px;
   font-weight: 600;
-  letter-spacing: -.01em;
+  line-height: 1.3;
 }
 
-.preview-device-menu {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--m-color-on-surface) 58%, transparent);
+.scale-preference__summary,
+.scale-preference__value {
+  color: var(--m-color-on-surface-variant-summary);
+  font-size: 14px;
+  line-height: 1.35;
 }
 
-.preview-device-content {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 0 14px;
-}
-
-.preview-device-accent,
-.preview-device-panel {
-  display: block;
-  border-radius: 11px;
-}
-
-.preview-device-accent {
-  height: 68px;
-  background: color-mix(in srgb, var(--m-color-primary) 30%, var(--m-color-surface));
-}
-
-.preview-device-panel {
-  flex: 1;
-  background: color-mix(in srgb, var(--m-color-on-surface) 8%, var(--m-color-surface));
-}
-
-.preview-device-navigation {
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  height: 44px;
-  padding-inline: 8px;
-  border: 1px solid color-mix(in srgb, var(--m-color-on-surface) 12%, transparent);
-  border-radius: 22px;
-  background: color-mix(in srgb, var(--m-color-surface-container-high) 90%, transparent);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 8%);
-}
-
-.preview-device-nav-item {
-  display: block;
-  width: 17px;
-  height: 17px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--m-color-on-surface) 64%, transparent);
-}
-
-.preview-device-nav-item--active {
-  background: var(--m-color-primary);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--m-color-primary) 14%, transparent);
-}
-
-:global(:root[data-bar-blur='true'] .preview-device-header),
-:global(:root[data-bar-blur='true'] .preview-device-navigation) {
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-}
-
-:global(:root[data-liquid-glass='true'] .preview-device-navigation) {
-  background: var(--omk-glass-background);
-  -webkit-backdrop-filter: blur(10px) saturate(1.2);
-  backdrop-filter: blur(10px) saturate(1.2);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 9%), 0 1px 6px rgb(0 0 0 / 10%);
-}
+.scale-preference__summary { margin-top: 3px; }
+.scale-preference__value { white-space: nowrap; }
+.scale-preference :deep(.m-slider) { margin-inline: 2px; }
 
 .sr-only {
   position: absolute;
@@ -550,11 +564,6 @@ onBeforeUnmount(appearance.onChange(syncAppearanceState))
     padding-bottom: 22px;
   }
 
-  .theme-preview {
-    min-height: 390px;
-    padding: 24px 8px 56px;
-  }
-
   .mode-preference {
     padding: 12px 12px 14px;
   }
@@ -564,9 +573,4 @@ onBeforeUnmount(appearance.onChange(syncAppearanceState))
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .preview-device-nav-item {
-    transition: none;
-  }
-}
 </style>

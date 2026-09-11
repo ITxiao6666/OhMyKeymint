@@ -136,6 +136,11 @@
     <string name="settings_appearance">Appearance</string>
     <string name="settings_mode">Mode</string>
     <string name="settings_color">Accent color</string>
+    <string name="settings_color_style">Color Style</string>
+    <string name="settings_color_spec">Color Spec</string>
+    <string name="settings_interaction">Interaction</string>
+    <string name="settings_interface_scale">Interface scale</string>
+    <string name="settings_interface_scale_desc">Adjust the overall display size</string>
     <string name="theme_mode_dark">Dark</string>
     <string name="theme_mode_amoled">Pure black</string>
     <string name="theme_mode_light">Light</string>
