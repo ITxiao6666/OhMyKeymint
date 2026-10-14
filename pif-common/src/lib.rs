@@ -243,6 +243,7 @@ fn parse_source_profile(contents: &[u8]) -> Result<SourceProfile, String> {
     let mut manufacturer = None;
     let mut model = None;
     let mut security_patch = None;
+    let mut device_initial_sdk_int = None;
     let normalized = text.replace("\r\n", "\n");
     if normalized.contains('\r') {
         return Err("PIF source profile contains an invalid line ending".to_string());
@@ -263,10 +264,22 @@ fn parse_source_profile(contents: &[u8]) -> Result<SourceProfile, String> {
             "MANUFACTURER" => &mut manufacturer,
             "MODEL" => &mut model,
             "SECURITY_PATCH" => &mut security_patch,
+            "DEVICE_INITIAL_SDK_INT" => &mut device_initial_sdk_int,
             _ => return Err(format!("PIF source profile contains unknown key {key}")),
         };
         if slot.replace(value.to_string()).is_some() {
             return Err(format!("PIF source profile contains duplicate key {key}"));
+        }
+    }
+
+    // The feed may include the device's launch SDK. Accept validated metadata
+    // without changing OMK's separate process-local API-level override policy
+    // or the canonical profile consumed by already loaded Zygisk companions.
+    if let Some(value) = device_initial_sdk_int {
+        if !value.bytes().all(|byte| byte.is_ascii_digit())
+            || !matches!(value.parse::<i32>(), Ok(sdk) if sdk > 0)
+        {
+            return Err("DEVICE_INITIAL_SDK_INT must be a positive 32-bit integer".to_string());
         }
     }
 
@@ -458,6 +471,54 @@ mod tests {
         ] {
             assert!(PifProfile::from_source(&selected(), malformed.as_bytes()).is_err());
         }
+    }
+
+    #[test]
+    fn source_profile_accepts_optional_launch_sdk_without_changing_stored_format() {
+        let expected = PifProfile::from_source(&selected(), PROP.as_bytes()).unwrap();
+        for sdk in ["21", "32", "34", "37"] {
+            let source = format!("{PROP}DEVICE_INITIAL_SDK_INT={sdk}\n");
+            for source in [source.clone(), source.replace('\n', "\r\n")] {
+                let profile = PifProfile::from_source(&selected(), source.as_bytes()).unwrap();
+                assert_eq!(profile, expected);
+                assert_eq!(
+                    profile.to_canonical_json().unwrap(),
+                    expected.to_canonical_json().unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn source_profile_parses_pixel_11_feed() {
+        let selected = DeviceEntry {
+            model: "Pixel 11 Pro XL".to_string(),
+            product: "kodiak_beta".to_string(),
+        };
+        let source = b"FINGERPRINT=google/kodiak_beta/kodiak:CANARY/ZP11.260918.007/16484274:user/release-keys\nMANUFACTURER=Google\nMODEL=Pixel 11 Pro XL\nSECURITY_PATCH=2026-10-05\nDEVICE_INITIAL_SDK_INT=37\n";
+        let profile = PifProfile::from_source(&selected, source).unwrap();
+        assert_eq!(profile.model, selected.model);
+        assert_eq!(profile.product, selected.product);
+        assert_eq!(profile.security_patch, "2026-10-05");
+        let stored = profile.to_canonical_json().unwrap();
+        assert_eq!(PifProfile::from_json(stored.as_bytes()).unwrap(), profile);
+    }
+
+    #[test]
+    fn source_profile_rejects_invalid_or_duplicate_launch_sdk() {
+        for value in ["", "0", "-1", "+37", "37.0", "37x", " 37", "2147483648"] {
+            let source = format!("{PROP}DEVICE_INITIAL_SDK_INT={value}\n");
+            assert!(PifProfile::from_source(&selected(), source.as_bytes()).is_err());
+        }
+        let source = format!("{PROP}DEVICE_INITIAL_SDK_INT=37\nDEVICE_INITIAL_SDK_INT=37\n");
+        assert!(PifProfile::from_source(&selected(), source.as_bytes()).is_err());
+        let source = format!("{PROP}DEVICE_INITIAL_SDK_INT=37\nUNKNOWN=37\n");
+        assert!(PifProfile::from_source(&selected(), source.as_bytes()).is_err());
+        let source = format!(
+            "{}DEVICE_INITIAL_SDK_INT=37\n",
+            PROP.replace("SECURITY_PATCH=2026-08-05\n", "")
+        );
+        assert!(PifProfile::from_source(&selected(), source.as_bytes()).is_err());
     }
 
     #[test]

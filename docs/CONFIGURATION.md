@@ -215,8 +215,8 @@ the bundled snapshot.
 The WebUI does not display or clear a recent-activity history. Existing activity
 files from older installations are ignored by the current interface.
 
-The Home page exposes read-only runtime diagnostics for OMK KeyMint, keystore2,
-the injector, Soter, the registered TEE and StrongBox KeyMint HALs, and the matching
+The Home page exposes read-only runtime diagnostics for OMK KeyMint,
+Soter, the registered TEE and StrongBox KeyMint services, and the matching
 `default` and `strongbox` RKP Binder services. A missing
 optional StrongBox service is shown as unregistered. These checks do not issue
 an attestation challenge, contact an RKP provisioning server, or certify
@@ -285,9 +285,13 @@ script and does not require a device-provided `curl`, `wget`, or shell download
 tool.
 
 The native helper accepts only the fixed feed paths, validates every catalog
-entry, requires exactly `FINGERPRINT`, `MANUFACTURER`, `MODEL`, and
-`SECURITY_PATCH` in a profile, and splits the fingerprint into its eight Build
-components. It writes the following LF-delimited values only after they agree
+entry, requires `FINGERPRINT`, `MANUFACTURER`, `MODEL`, and `SECURITY_PATCH`
+in a profile, and accepts optional `DEVICE_INITIAL_SDK_INT` launch-SDK metadata
+as a positive 32-bit decimal integer. Unknown keys, duplicate keys, and missing
+required fields are rejected. The launch-SDK metadata is not persisted and does
+not change the Zygisk payload's process-local API-level override of `21`.
+The helper splits the fingerprint into its eight Build components. It writes
+the following LF-delimited values only after they agree
 with one another and satisfy TrickyStore's value limits:
 
 ```text

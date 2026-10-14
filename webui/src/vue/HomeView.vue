@@ -122,8 +122,6 @@ const serviceRows = computed(() => {
   if (!props.diagnostics) return []
   return [
     { id: 'keymint', label: tr('home_diag_keymint', 'OMK KeyMint'), value: props.diagnostics.keymint },
-    { id: 'keystore2', label: tr('home_diag_keystore2', 'Keystore2'), value: props.diagnostics.keystore2 },
-    { id: 'injector', label: tr('home_diag_injector', 'Injector'), value: props.diagnostics.injector },
     { id: 'soter', label: tr('home_diag_soter', 'Soter'), value: props.diagnostics.soter },
   ]
 })
@@ -131,10 +129,10 @@ const serviceRows = computed(() => {
 const hardwareRows = computed(() => {
   if (!props.diagnostics) return []
   return [
-    { id: 'tee', label: 'TEE · KeyMint HAL', value: props.diagnostics.tee },
-    { id: 'strongbox', label: 'StrongBox · KeyMint HAL', value: props.diagnostics.strongbox },
-    { id: 'rkp-tee', label: 'TEE · RKP Binder', value: props.diagnostics.rkp_tee },
-    { id: 'rkp-strongbox', label: 'StrongBox · RKP Binder', value: props.diagnostics.rkp_strongbox },
+    { id: 'tee', label: 'TEE · KeyMint', value: props.diagnostics.tee },
+    { id: 'strongbox', label: 'StrongBox · KeyMint', value: props.diagnostics.strongbox },
+    { id: 'rkp-tee', label: 'TEE · RKP', value: props.diagnostics.rkp_tee },
+    { id: 'rkp-strongbox', label: 'StrongBox · RKP', value: props.diagnostics.rkp_strongbox },
   ]
 })
 
