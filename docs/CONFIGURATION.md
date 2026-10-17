@@ -248,9 +248,12 @@ that level's year and month. When the saved default
 `ro.build.version.security_patch` has day `01`, the synchronized date also has
 day `01`; otherwise it keeps the published Google date. The saved system date
 is authoritative if it differs from the saved vendor date. The action updates
-the four `[trust]` patch-level fields and uses `resetprop` to set both
+the four `[trust]` patch-level fields and uses `resetprop -n` to set both
 `ro.build.version.security_patch` and `ro.vendor.build.security_patch` to that
-date. Before the first sync, the native helper saves the current values of both
+date without going through Android's property service or triggering its change
+actions. The same `-n` mode applies to restore, rollback, and startup writes;
+unrelated property writes keep their existing behavior. Before the first sync,
+the native helper saves the current values of both
 properties to
 `/data/misc/keystore/omk/data/security_patch_defaults.toml`. A later sync keeps
 the existing snapshot instead of replacing the saved defaults.
@@ -288,10 +291,15 @@ The native helper accepts only the fixed feed paths, validates every catalog
 entry, requires `FINGERPRINT`, `MANUFACTURER`, `MODEL`, and `SECURITY_PATCH`
 in a profile, and accepts optional `DEVICE_INITIAL_SDK_INT` launch-SDK metadata
 as a positive 32-bit decimal integer. Unknown keys, duplicate keys, and missing
-required fields are rejected. The launch-SDK metadata is not persisted and does
-not change the Zygisk payload's process-local API-level override of `21`.
-The helper splits the fingerprint into its eight Build components. It writes
-the following LF-delimited values only after they agree
+required fields are rejected. The launch-SDK metadata is retained in the profile;
+when absent, the product's initial API level defaults to `32`, following
+PlayIntegrityFix `v4.9-inject-s`. Native property spoofing uses that value for
+`ro.product.first_api_level` and `32` for `ro.board.first_api_level`, without
+overriding other API-level properties. GMS Build spoofing writes the same
+launch-SDK value to the integer `Build.VERSION.DEVICE_INITIAL_SDK_INT` field.
+It does not change `Build.VERSION.SDK_INT`.
+The helper splits the fingerprint into its eight Build components. It stores
+the following values in canonical JSON only after they agree
 with one another and satisfy TrickyStore's value limits:
 
 ```text
@@ -311,17 +319,45 @@ SECURITY_PATCH=YYYY-MM-DD
 
 The complete candidate is atomically stored at
 `/data/misc/keystore/omk/data/pif_fingerprint.json`; an invalid download or
-failed write leaves the previous profile unchanged. This state file is not
-part of either OMK TOML schema. OMK packages its own Zygisk library, which reads
+failed write leaves the previous profile unchanged. The WebUI controls Java
+Build spoofing and native property spoofing independently for Google Play
+services through **Spoof Build** and **Spoof Props**; both default to on.
+A separate **Spoof Build (Play Store)** switch defaults to off and applies all
+12 string fields listed above inside the Play Store, including model, product,
+device, fingerprint, release, build ID, and security patch. It does not change
+the store's launch SDK, running SDK, or native properties, and is independent
+of the two GMS switches. All three switches can be enabled together.
+Changes take effect only after Apply succeeds. Turning off the main switch
+removes the profile. The profile uses schema version 2; canonical version-1
+profiles remain readable without a rewrite and default to both paths enabled.
+The optional `spoof_vending_build` boolean defaults to false and is omitted
+from canonical JSON when false. Profiles without this option leave Play Store
+spoofing disabled.
+Version-2 profiles require the matching Zygisk payload; reboot after installing
+an updated module before applying the new options.
+This state file is not part of either OMK TOML schema. OMK packages its own
+Zygisk library, which reads
 the validated profile through its root companion when a new
 `com.google.android.gms.unstable` or `com.android.vending` process (including a
 named `:...` child process) is specialized by the Zygisk Next loader. During
-pre-app specialization the payload installs available PLT hooks. On AArch64 it
-also attempts a process-wide bionic callback hook only after validating the
-wrapper semantics, memory mappings, and BTI/MTE permissions. A rejected
+pre-app specialization, when native spoofing is enabled for GMS, the payload warms up
+bionic's lazily opened property areas before inspecting their mappings. It
+attempts validated process-private property-area replacement; shared property
+files and other processes are not modified. If that path cannot represent the
+profile or safely install, it restores any replaced mappings and uses the
+existing property hooks. On AArch64 the callback hook is attempted only after
+validating the wrapper semantics, memory mappings, and BTI/MTE permissions. A rejected
 callback hook leaves libc unchanged, records the reason, and continues with
 the available PLT and Java paths. After specialization the payload updates Java
-`Build` fields and records a property probe. Zygisk Next must already be
+`Build` fields and the integer launch SDK only when GMS Build spoofing is enabled,
+and records a property probe when GMS native spoofing is enabled. Store processes
+are separated before native hook installation and receive only the optional
+Java Build string overrides. A process with no enabled spoofing path unloads
+the PIF library. OMK retains its own Google-process scope and
+does not include upstream provider/signature spoofing or ADB/USB overrides.
+The WebUI shows the selected fingerprint, patch date, initial API level, and
+saved options. Its desktop development preview uses labelled in-memory sample
+data, not Android state or a Play Integrity result. Zygisk Next must already be
 installed and enabled by the user; OMK does
 not bundle, install, or implement that loader. The helper ends both target
 process families after a successful change so a later process receives the
@@ -750,7 +786,7 @@ saves both default properties to
 current runtime properties; for an explicit date or a mixed configuration, they
 are read from the trusted `build.prop` sources. An existing valid snapshot for
 the same build fingerprint is retained across repeated syncs. The helper then
-sets both properties to the selected date with `resetprop` and verifies the
+sets both properties to the selected date with `resetprop -n` and verifies the
 results. After that, it writes the date to `security_patch`, `os_patchlevel`,
 `vendor_patchlevel`, and `boot_patchlevel`. These are global Android properties
 for the current boot, not values visible only to OMK.
@@ -841,16 +877,32 @@ reports that the live update failed, restart keymint.
 
 This controls the 32-byte verified-boot public-key digest:
 
-- `"auto"` first reads `ro.boot.vbmeta.public_key_digest`, then tries to
-  calculate the top-level vbmeta key digest, and uses a random fallback only if
-  neither source is available;
+- `"auto"` reuses the public digest saved in
+  `/data/misc/keystore/omk/data/vbmeta_state.toml`. When no snapshot exists, it
+  first reads `ro.boot.vbmeta.public_key_digest`, then tries to calculate the
+  top-level vbmeta key digest, and uses a random fallback only if neither source
+  is available. That first result is atomically saved before KeyMint serves keys;
 - `"random"` generates a new value whenever keymint starts; or
 - a 64-character hexadecimal string pins an exact value.
 
-Keep `"auto"` unless you understand the attestation profile being configured.
-Changing this field requires a keymint restart. If `"random"` was active and
-you change it back to `"auto"`, reboot the whole device so Android restores the
-original boot property before `"auto"` reads it.
+The snapshot contains a format version and the public 32-byte digest as 64 hex
+characters, not a private key. It is shared by TEE and StrongBox and is retained
+across keymint restarts, reboots, slot changes, and OTA updates. Reusing it does
+not overwrite the Android boot property. An unreadable or invalid snapshot, or
+a failure to save the first value, stops startup instead of selecting a new key.
+Back it up together with `config.toml` and the rest of OMK's data; do not delete
+it to troubleshoot an existing KeyBlob.
+
+Explicit hex and `"random"` modes do not create, read, or replace the auto
+snapshot. Returning to `"auto"` reuses that snapshot if present. If none exists
+and `"random"` was active, reboot the whole device before using `"auto"` so the
+original boot property is restored before its first snapshot is captured.
+
+Changing this field requires a keymint restart. The verified-boot key, locked
+state, and verified-boot state are bound into KeyBlob encryption; deliberately
+changing any of them can make existing keys unreadable. `"random"` changes the
+key on every startup and is unsuitable for retaining such keys. Pinning a
+current value does not recover blobs created with a different, unknown value.
 
 #### `vb_hash`
 
@@ -862,9 +914,10 @@ This controls the 32-byte verified-boot hash:
 - `"random"` generates a new value whenever keymint starts; or
 - a 64-character hexadecimal string pins an exact value.
 
-The same restart rule applies as for `vb_key`: restart keymint after a normal
-change, and reboot the whole device when returning from `"random"` to
-`"auto"`.
+Restart keymint after a normal change, and reboot the whole device when
+returning from `"random"` to `"auto"`. This field is not stored in the public-key
+snapshot: auto mode resolves the current hash on each startup. It is included
+in attestation but not in the Root of Trust input used for KeyBlob encryption.
 
 #### `verified_boot_state`
 
@@ -954,7 +1007,8 @@ empty value is valid. Its absence does not invalidate an available IMEI.
 | `[trust].os_version` | Restart keymint. |
 | Other `[trust]` fields | Restart keymint. |
 | All `[device]` fields | Restart keymint to rebuild the cached ID snapshot. |
-| `vb_key` or `vb_hash` from `"random"` to `"auto"` | Reboot the whole device. |
+| `vb_key` from `"random"` to `"auto"` | Restart keymint to reuse its saved auto snapshot; reboot the device if none exists. |
+| `vb_hash` from `"random"` to `"auto"` | Reboot the whole device. |
 
 ## `injector.toml`
 

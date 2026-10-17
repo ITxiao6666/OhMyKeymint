@@ -60,6 +60,14 @@
     <string name="pif_enable_spoofing">Enable PIF fingerprint spoofing</string>
     <string name="pif_zygisk_next_required">Install and enable Zygisk Next separately. OMK does not bundle, download, or install it.</string>
     <string name="pif_current_config">Current configuration</string>
+    <string name="pif_preview">Browser preview with example data. No device configuration is changed.</string>
+    <string name="pif_spoof_build">Spoof Build</string>
+    <string name="pif_spoof_build_desc">Apply Pixel Build fields and the launch SDK to Google Play services only; the running Android SDK stays unchanged.</string>
+    <string name="pif_spoof_props">Spoof Props</string>
+    <string name="pif_spoof_props_desc">Override selected property reads in Google Play services only; global and Play Store properties stay unchanged.</string>
+    <string name="pif_spoof_vending">Spoof Build (Play Store)</string>
+    <string name="pif_spoof_vending_desc">Apply the selected Pixel Build fields to Play Store, including model, fingerprint and patch date. Independent of GMS; SDK and native properties stay unchanged.</string>
+    <string name="pif_initial_sdk">Initial SDK: %s</string>
     <string name="pif_security_patch">Security patch: %s</string>
     <string name="pif_disabled">Disabled</string>
     <string name="pif_loading_config">Loading PIF configuration…</string>
@@ -68,6 +76,9 @@
     <string name="pif_devices_load_error">Failed to load Pixel devices</string>
     <string name="pif_choose_device">Choose a Pixel device</string>
     <string name="pif_random_device">Random</string>
+    <string name="pif_refresh_devices">Refresh list</string>
+    <string name="pif_preview_apply">Preview changes</string>
+    <string name="pif_preview_applied">Preview updated only; no phone settings were changed.</string>
     <string name="pif_applying">Applying…</string>
     <string name="prompt_pif_applied">PIF fingerprint applied: %1$s · security patch %2$s.</string>
     <string name="prompt_pif_disabled">PIF fingerprint spoofing disabled.</string>

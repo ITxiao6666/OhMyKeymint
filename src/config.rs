@@ -1236,6 +1236,7 @@ impl<'de> Deserialize<'de> for TrustValueSpec {
 #[serde(rename_all = "snake_case")]
 pub enum TrustValueSource {
     ExplicitHex,
+    Persisted,
     Property,
     Computed,
     Original,
@@ -1247,6 +1248,7 @@ impl std::fmt::Display for TrustValueSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TrustValueSource::ExplicitHex => write!(f, "explicit_hex"),
+            TrustValueSource::Persisted => write!(f, "persisted"),
             TrustValueSource::Property => write!(f, "property"),
             TrustValueSource::Computed => write!(f, "computed"),
             TrustValueSource::Original => write!(f, "original"),

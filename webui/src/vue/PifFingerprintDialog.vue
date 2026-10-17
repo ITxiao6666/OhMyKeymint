@@ -17,6 +17,23 @@ import { isDev } from '../utils/dev'
 
 type LoadStatus = 'loading' | 'ready' | 'error'
 const RANDOM_SELECTION = '__random__'
+const preview = isDev()
+const previewDevices = [
+  { model: 'Pixel 6a', product: 'bluejay_beta', sdk: 32 },
+  { model: 'Pixel 9 Pro', product: 'caiman_beta', sdk: 34 },
+  { model: 'Pixel 11 Pro XL', product: 'kodiak_beta', sdk: 37 },
+]
+let previewState: PifFingerprintState = {
+  enabled: true,
+  model: 'Pixel 6a',
+  product: 'bluejay_beta',
+  fingerprint: 'google/bluejay_beta/bluejay:CANARY/ZP11.260918.007/16484274:user/release-keys',
+  security_patch: '2026-10-05',
+  device_initial_sdk_int: 32,
+  spoof_build: true,
+  spoof_props: true,
+  spoof_vending_build: false,
+}
 
 const props = defineProps<{
   modelValue: boolean
@@ -36,6 +53,9 @@ const catalogStatus = ref<LoadStatus>('loading')
 const stateError = ref('')
 const catalogError = ref('')
 const desiredEnabled = ref(false)
+const spoofBuild = ref(true)
+const spoofProps = ref(true)
+const spoofVendingBuild = ref(false)
 const selectedProduct = ref<string | null>(RANDOM_SELECTION)
 const loadGeneration = ref(0)
 const busy = ref(false)
@@ -78,6 +98,9 @@ function load(): void {
   stateError.value = ''
   catalogError.value = ''
   desiredEnabled.value = false
+  spoofBuild.value = true
+  spoofProps.value = true
+  spoofVendingBuild.value = false
   selectedProduct.value = RANDOM_SELECTION
   const generation = ++loadGeneration.value
   void loadState(generation)
@@ -86,18 +109,15 @@ function load(): void {
 
 async function loadState(generation: number): Promise<void> {
   try {
-    const state = isDev()
-      ? ({
-          enabled: true,
-          model: 'Pixel 9 Pro',
-          product: 'komodo',
-          fingerprint: 'google/komodo/komodo:16/BP2A/example:user/release-keys',
-          security_patch: '2026-08-05',
-        } satisfies PifFingerprintState)
+    const state = preview
+      ? previewState
       : await props.cli.getPifFingerprintState()
     if (!isActive(generation)) return
     currentState.value = state
     desiredEnabled.value = state.enabled
+    spoofBuild.value = state.enabled ? state.spoof_build : true
+    spoofProps.value = state.enabled ? state.spoof_props : true
+    spoofVendingBuild.value = state.enabled ? state.spoof_vending_build : false
     selectedProduct.value = state.enabled ? state.product : RANDOM_SELECTION
     stateStatus.value = 'ready'
     reconcileSelection()
@@ -110,13 +130,8 @@ async function loadState(generation: number): Promise<void> {
 
 async function loadCatalog(generation: number): Promise<void> {
   try {
-    const result = isDev()
-      ? [
-          { model: 'Pixel 9 Pro', product: 'komodo' },
-          { model: 'Pixel 9', product: 'tokay' },
-          { model: 'Pixel 8 Pro', product: 'husky' },
-          { model: 'Pixel 8', product: 'shiba' },
-        ]
+    const result = preview
+      ? previewDevices
       : await props.cli.listPifDevices()
     if (!isActive(generation)) return
     devices.value = result
@@ -167,16 +182,27 @@ async function apply(): Promise<void> {
 
   busy.value = true
   try {
+    if (preview) {
+      const sample = previewDevices.find(item => item.product === device?.product)
+      previewState = sample ? {
+        enabled: true,
+        model: sample.model,
+        product: sample.product,
+        fingerprint: `google/${sample.product}/${sample.product.replace(/_beta$/, '')}:CANARY/ZP11.260918.007/16484274:user/release-keys`,
+        security_patch: '2026-10-05',
+        device_initial_sdk_int: sample.sdk,
+        spoof_build: spoofBuild.value,
+        spoof_props: spoofProps.value,
+        spoof_vending_build: spoofVendingBuild.value,
+      } : { enabled: false }
+      currentState.value = previewState
+      emit('notify', tr('pif_preview_applied', 'Preview updated only; no phone settings were changed.'))
+      return
+    }
     if (device) {
-      const state = isDev()
-        ? ({
-            enabled: true,
-            model: device.model,
-            product: device.product,
-            fingerprint: `google/${device.product}/${device.product}:16/preview:user/release-keys`,
-            security_patch: '2026-08-05',
-          } satisfies PifFingerprintState)
-        : await props.cli.applyPifFingerprint(device.product)
+      const state = await props.cli.applyPifFingerprint(
+        device.product, spoofBuild.value, spoofProps.value, spoofVendingBuild.value,
+      )
       currentState.value = state
       emit('notify', tr(
         'prompt_pif_applied',
@@ -185,9 +211,7 @@ async function apply(): Promise<void> {
         state.security_patch,
       ))
     } else {
-      currentState.value = isDev()
-        ? { enabled: false }
-        : await props.cli.disablePifFingerprint()
+      currentState.value = await props.cli.disablePifFingerprint()
       emit('notify', tr('prompt_pif_disabled', 'PIF fingerprint spoofing disabled.'))
     }
     emit('changed')
@@ -212,6 +236,9 @@ async function apply(): Promise<void> {
     @close="requestClose"
   >
     <div class="pif-sheet" :aria-busy="busy">
+      <p v-if="preview" class="pif-preview" role="status">
+        {{ tr('pif_preview', 'Browser preview with example data. No device configuration is changed.') }}
+      </p>
       <MiuixCard class="pif-card" press-feedback="none">
         <MiuixSwitchPreference
           v-model="desiredEnabled"
@@ -221,6 +248,27 @@ async function apply(): Promise<void> {
         >
           <template #start><MiuixIcon :icon="Tune" :size="23" /></template>
         </MiuixSwitchPreference>
+      </MiuixCard>
+
+      <MiuixCard v-if="desiredEnabled && stateStatus === 'ready'" class="pif-card" press-feedback="none">
+        <MiuixSwitchPreference
+          v-model="spoofBuild"
+          :title="tr('pif_spoof_build', 'Spoof Build')"
+          :summary="tr('pif_spoof_build_desc', 'Apply Pixel Build fields and the launch SDK to Google Play services only; the running Android SDK stays unchanged.')"
+          :disabled="busy"
+        />
+        <MiuixSwitchPreference
+          v-model="spoofVendingBuild"
+          :title="tr('pif_spoof_vending', 'Spoof Build (Play Store)')"
+          :summary="tr('pif_spoof_vending_desc', 'Apply the selected Pixel Build fields to Play Store, including model, fingerprint and patch date. Independent of GMS; SDK and native properties stay unchanged.')"
+          :disabled="busy"
+        />
+        <MiuixSwitchPreference
+          v-model="spoofProps"
+          :title="tr('pif_spoof_props', 'Spoof Props')"
+          :summary="tr('pif_spoof_props_desc', 'Override selected property reads in Google Play services only; global and Play Store properties stay unchanged.')"
+          :disabled="busy"
+        />
       </MiuixCard>
 
       <MiuixCard
@@ -235,6 +283,10 @@ async function apply(): Promise<void> {
               <span v-if="currentState.enabled">
                 {{ tr('pif_security_patch', 'Security patch: %s', currentState.security_patch) }}
               </span>
+              <span v-if="currentState.enabled">
+                {{ tr('pif_initial_sdk', 'Initial SDK: %s', currentState.device_initial_sdk_int) }}
+              </span>
+              <code v-if="currentState.enabled" class="current-fingerprint">{{ currentState.fingerprint }}</code>
             </div>
           </template>
         </MiuixBasicComponent>
@@ -270,7 +322,13 @@ async function apply(): Promise<void> {
         </MiuixButton>
       </div>
       <template v-else>
-        <h3>{{ tr('pif_choose_device', 'Choose a Pixel device') }}</h3>
+        <div class="catalog-heading">
+          <h3>{{ tr('pif_choose_device', 'Choose a Pixel device') }}</h3>
+          <MiuixButton :disabled="busy" @click="retryCatalog">
+            <MiuixIcon :icon="Refresh" :size="18" />
+            {{ tr('pif_refresh_devices', 'Refresh list') }}
+          </MiuixButton>
+        </div>
         <MiuixCard class="pif-card device-list" press-feedback="none">
           <MiuixRadioButtonPreference
             :model-value="selectedProduct === RANDOM_SELECTION"
@@ -301,7 +359,7 @@ async function apply(): Promise<void> {
             :size="19"
             :stroke-width="2.5"
           />
-          {{ tr(busy ? 'pif_applying' : 'functional_button_apply', busy ? 'Applying...' : 'Apply') }}
+          {{ busy ? tr('pif_applying', 'Applying...') : preview ? tr('pif_preview_apply', 'Preview changes') : tr('functional_button_apply', 'Apply') }}
         </MiuixButton>
       </div>
     </div>
@@ -319,6 +377,14 @@ async function apply(): Promise<void> {
   flex: none;
 }
 
+.pif-preview {
+  margin: 0;
+  padding: 0 16px;
+  color: var(--m-color-on-surface-variant-summary);
+  font-size: var(--m-text-body2-size);
+  line-height: 1.5;
+}
+
 .current-config-values {
   display: grid;
   gap: 3px;
@@ -328,6 +394,27 @@ async function apply(): Promise<void> {
 .current-config-values strong,
 .current-config-values span {
   overflow-wrap: anywhere;
+}
+
+.current-fingerprint {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--m-color-on-surface-variant-summary);
+}
+
+.catalog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.catalog-heading .m-button {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
 }
 
 .current-config-values span {
@@ -342,6 +429,8 @@ async function apply(): Promise<void> {
 
 .device-list {
   max-height: min(45vh, 390px);
+  /* The card's inner radius scrolls away; clip its outer viewport as well. */
+  border-radius: var(--m-radius-md);
   overflow: hidden auto;
   scrollbar-width: none;
 }

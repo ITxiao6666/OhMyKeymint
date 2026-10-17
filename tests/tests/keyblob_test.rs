@@ -19,7 +19,7 @@ use kmr_crypto_boring::aes::BoringAes;
 use kmr_crypto_boring::eq::BoringEq;
 use kmr_crypto_boring::hmac::BoringHmac;
 use kmr_crypto_boring::rng::BoringRng;
-use kmr_wire::{keymint, keymint::KeyParam};
+use kmr_wire::{keymint, keymint::KeyParam, AsCborValue};
 
 #[test]
 fn test_encrypted_keyblob_roundtrip() {
@@ -62,6 +62,85 @@ fn test_encrypted_keyblob_roundtrip() {
     let recovered_keyblob =
         keyblob::decrypt(None, &aes, &hmac, &root_key, encrypted_keyblob, hidden).unwrap();
     assert_eq!(plaintext_keyblob, recovered_keyblob);
+}
+
+#[test]
+fn test_encrypted_keyblob_requires_the_original_verified_boot_key() {
+    let aes = BoringAes;
+    let hmac = BoringHmac;
+    let mut rng = BoringRng;
+    let root_key = crypto::OpaqueOr::Explicit(crypto::hmac::Key(vec![0x41; 32]));
+    let original_rot = keyblob::RootOfTrustInfo {
+        verified_boot_key: vec![0x12; 32],
+        device_boot_locked: true,
+        verified_boot_state: keymint::VerifiedBootState::Verified,
+    };
+    let original_rot_bytes = original_rot.clone().into_vec().unwrap();
+    let hidden = kmr_common::tag::hidden(&[], &original_rot_bytes).unwrap();
+    let changed_rot = keyblob::RootOfTrustInfo {
+        verified_boot_key: vec![0x34; 32],
+        ..original_rot
+    };
+    let changed_hidden = kmr_common::tag::hidden(&[], &changed_rot.into_vec().unwrap()).unwrap();
+
+    for security_level in [
+        keymint::SecurityLevel::TrustedEnvironment,
+        keymint::SecurityLevel::Strongbox,
+    ] {
+        let plaintext_keyblob = keyblob::PlaintextKeyBlob {
+            characteristics: vec![keymint::KeyCharacteristics {
+                security_level,
+                authorizations: vec![
+                    KeyParam::Algorithm(keymint::Algorithm::Aes),
+                    KeyParam::BlockMode(keymint::BlockMode::Ecb),
+                    KeyParam::Padding(keymint::PaddingMode::None),
+                ],
+            }],
+            key_material: crypto::KeyMaterial::Aes(crypto::aes::Key::Aes128([0x56; 16]).into()),
+        };
+        let encoded_keyblob = keyblob::encrypt(
+            security_level,
+            None,
+            &aes,
+            &hmac,
+            &mut rng,
+            &root_key,
+            &[],
+            plaintext_keyblob.clone(),
+            hidden.clone(),
+            keyblob::SlotPurpose::KeyGeneration,
+        )
+        .unwrap()
+        .into_vec()
+        .unwrap();
+
+        let error = keyblob::decrypt(
+            None,
+            &aes,
+            &hmac,
+            &root_key,
+            keyblob::EncryptedKeyBlob::new(&encoded_keyblob).unwrap(),
+            changed_hidden.clone(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            kmr_common::ErrorKind::Hal(keymint::ErrorCode::InvalidKeyBlob, _)
+        ));
+
+        // Reusing the pinned boot key decrypts the exact same stored blob;
+        // neither key regeneration nor deleting any persisted state is needed.
+        let recovered_keyblob = keyblob::decrypt(
+            None,
+            &aes,
+            &hmac,
+            &root_key,
+            keyblob::EncryptedKeyBlob::new(&encoded_keyblob).unwrap(),
+            hidden.clone(),
+        )
+        .unwrap();
+        assert_eq!(plaintext_keyblob, recovered_keyblob);
+    }
 }
 
 #[test]

@@ -1,5 +1,5 @@
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::mpsc,
@@ -7,9 +7,14 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
-use kmr_common::crypto::{Rng, Sha256};
+use kmr_common::{
+    consts::{KEYSTORE_GID, KEYSTORE_UID},
+    crypto::{Rng, Sha256},
+    runtime::fs::atomic_replace_preserving_metadata,
+};
 use kmr_crypto_boring::{rng::BoringRng, sha256::BoringSha256};
 use rsbinder::Strong;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     android::{
@@ -27,6 +32,8 @@ use crate::{
         ConfigFile, OsVersionSpec, RawTrustConfig, ResolvedTrust, TrustValueSource, TrustValueSpec,
     },
     plat::{attestation, resetprop, utils::get_keystore_service},
+    root_path,
+    security_patch::OperationLock,
 };
 
 const SECURITY_PATCH_PROP: &str = "ro.build.version.security_patch";
@@ -35,6 +42,9 @@ const VENDOR_PATCH_PROP: &str = "ro.vendor.build.security_patch";
 const BOOT_PATCH_PROP: &str = "ro.vendor.boot_security_patch";
 const VBMETA_KEY_PROP: &str = "ro.boot.vbmeta.public_key_digest";
 const VBMETA_HASH_PROP: &str = "ro.boot.vbmeta.digest";
+const VBMETA_STATE_PATH: &str = root_path!("data/vbmeta_state.toml");
+const VBMETA_STATE_VERSION: u32 = 1;
+const MAX_VBMETA_STATE_BYTES: u64 = 4096;
 const ORIGINAL_HASH_TIMEOUT: Duration = Duration::from_secs(5);
 const AVB_HEADER_SIZE: usize = 256;
 const AVB_FOOTER_SIZE: usize = 64;
@@ -60,10 +70,17 @@ const BUILD_PROP_PATHS: &[&str] = &[
     "/default.prop",
 ];
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedField {
     value: [u8; 32],
     source: TrustValueSource,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VbmetaState {
+    version: u32,
+    vb_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +93,10 @@ pub(crate) struct ResolvedPatchLevels {
     pub write_security_patch: bool,
 }
 
-pub fn bootstrap_vbmeta(config_file: &ConfigFile) -> Result<ResolvedTrust> {
+pub(crate) fn bootstrap_vbmeta(
+    config_file: &ConfigFile,
+    state_lock: &OperationLock,
+) -> Result<ResolvedTrust> {
     let slot_suffix = resetprop::read_string_property("ro.boot.slot_suffix").unwrap_or_default();
     let patches = resolve_patch_levels(&config_file.trust)?;
     let os_version = match config_file.trust.os_version {
@@ -84,11 +104,18 @@ pub fn bootstrap_vbmeta(config_file: &ConfigFile) -> Result<ResolvedTrust> {
         OsVersionSpec::Fixed(value) => value,
     };
 
-    let vb_key = resolve_vb_key(
+    let vb_key = resolve_stable_vb_key(
         &config_file.trust.vb_key,
-        config_file.trust.device_locked,
-        &slot_suffix,
-    );
+        Path::new(VBMETA_STATE_PATH),
+        state_lock,
+        || {
+            resolve_vb_key(
+                &config_file.trust.vb_key,
+                config_file.trust.device_locked,
+                &slot_suffix,
+            )
+        },
+    )?;
     let vb_hash = resolve_vb_hash(&config_file.trust.vb_hash);
 
     sync_sysprops_if_needed(&vb_key, &vb_hash)?;
@@ -162,6 +189,66 @@ fn resolve_vb_key(spec: &TrustValueSpec, device_locked: bool, slot_suffix: &str)
             }
         }
     }
+}
+
+// The caller holds the existing OMK data-directory lock, including while
+// creating the first snapshot. Never serve keys using an unpersisted auto
+// value: changing this input on a later start makes existing blobs unreadable.
+fn resolve_stable_vb_key(
+    spec: &TrustValueSpec,
+    state_path: &Path,
+    _state_lock: &OperationLock,
+    resolve: impl FnOnce() -> ResolvedField,
+) -> Result<ResolvedField> {
+    if !matches!(spec, TrustValueSpec::Auto) {
+        return Ok(resolve());
+    }
+
+    match fs::symlink_metadata(state_path) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_file() || metadata.len() > MAX_VBMETA_STATE_BYTES {
+                bail!(
+                    "vbmeta state must be a regular file of at most {MAX_VBMETA_STATE_BYTES} bytes"
+                );
+            }
+            let mut contents = String::new();
+            File::open(state_path)?
+                .take(MAX_VBMETA_STATE_BYTES + 1)
+                .read_to_string(&mut contents)
+                .context("failed to read saved vbmeta state")?;
+            if contents.len() as u64 > MAX_VBMETA_STATE_BYTES {
+                bail!("vbmeta state is too large");
+            }
+            let saved: VbmetaState = toml::from_str(&contents)
+                .context("invalid saved vbmeta state; refusing to replace the pinned boot key")?;
+            if saved.version != VBMETA_STATE_VERSION {
+                bail!("unsupported vbmeta state version {}", saved.version);
+            }
+            return Ok(ResolvedField {
+                value: parse_hex_32(&saved.vb_key)
+                    .context("invalid saved vb_key; refusing to replace the pinned boot key")?,
+                source: TrustValueSource::Persisted,
+            });
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("failed to inspect saved vbmeta state"),
+    }
+
+    let resolved = resolve();
+    let saved = VbmetaState {
+        version: VBMETA_STATE_VERSION,
+        vb_key: hex::encode(resolved.value),
+    };
+    let contents = toml::to_string_pretty(&saved).context("failed to serialize vbmeta state")?;
+    let (uid, gid) = if state_path == Path::new(VBMETA_STATE_PATH) {
+        (KEYSTORE_UID, KEYSTORE_GID)
+    } else {
+        (unsafe { libc::geteuid() }, unsafe { libc::getegid() })
+    };
+    atomic_replace_preserving_metadata(state_path, contents.as_bytes(), 0o600, uid, gid)
+        .context("failed to persist auto vb_key; refusing to use an unstable boot key")?;
+    log::info!("Saved auto vb_key to {}", state_path.display());
+    Ok(resolved)
 }
 
 fn resolve_vb_hash(spec: &TrustValueSpec) -> ResolvedField {
@@ -950,6 +1037,192 @@ mod tests {
     use super::*;
 
     #[test]
+    fn auto_vb_key_reuses_the_saved_value_across_starts() {
+        for source in [
+            TrustValueSource::Property,
+            TrustValueSource::Computed,
+            TrustValueSource::RandomFallback,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("vbmeta_state.toml");
+            let original = ResolvedField {
+                value: [0x42; 32],
+                source,
+            };
+            {
+                let lock = crate::security_patch::acquire_data_operation_lock(&path).unwrap();
+                assert_eq!(
+                    resolve_stable_vb_key(&TrustValueSpec::Auto, &path, &lock, || original.clone())
+                        .unwrap(),
+                    original
+                );
+            }
+            let contents = fs::read(&path).unwrap();
+            // A new startup must not consult properties, the active slot, or
+            // a random fallback, even if they now produce a different value.
+            let lock = crate::security_patch::acquire_data_operation_lock(&path).unwrap();
+            let restored = resolve_stable_vb_key(&TrustValueSpec::Auto, &path, &lock, || {
+                panic!("saved auto key must not be resolved again")
+            })
+            .unwrap();
+            assert_eq!(restored.value, original.value);
+            assert_eq!(restored.source, TrustValueSource::Persisted);
+            assert!(!restored.source.needs_sysprop_write());
+            assert_eq!(fs::read(&path).unwrap(), contents);
+            let saved: VbmetaState =
+                toml::from_str(std::str::from_utf8(&contents).unwrap()).unwrap();
+            assert_eq!(saved.version, VBMETA_STATE_VERSION);
+            assert_eq!(saved.vb_key, hex::encode(original.value));
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_vb_key_modes_do_not_create_or_replace_the_auto_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vbmeta_state.toml");
+        let lock = crate::security_patch::acquire_data_operation_lock(&path).unwrap();
+        for existing in [None, Some("invalid snapshot must remain untouched")] {
+            if let Some(contents) = existing {
+                fs::write(&path, contents).unwrap();
+            }
+            for (spec, source) in [
+                (
+                    TrustValueSpec::Hex([0x11; 32]),
+                    TrustValueSource::ExplicitHex,
+                ),
+                (TrustValueSpec::Random, TrustValueSource::RandomExplicit),
+            ] {
+                let expected = ResolvedField {
+                    value: [0x11; 32],
+                    source,
+                };
+                assert_eq!(
+                    resolve_stable_vb_key(&spec, &path, &lock, || expected.clone()).unwrap(),
+                    expected
+                );
+                assert_eq!(fs::read_to_string(&path).ok().as_deref(), existing);
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_vbmeta_state_is_not_silently_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vbmeta_state.toml");
+        let lock = crate::security_patch::acquire_data_operation_lock(&path).unwrap();
+        let key = "42".repeat(32);
+        for contents in [
+            String::new(),
+            "not TOML".into(),
+            format!("version = 2\nvb_key = '{key}'\n"),
+            "version = 1\nvb_key = '42'\n".into(),
+            format!("version = 1\nvb_key = '{}'\n", "xx".repeat(32)),
+            format!("version = 1\nvb_key = '{key}'\nextra = true\n"),
+            " ".repeat(MAX_VBMETA_STATE_BYTES as usize + 1),
+        ] {
+            fs::write(&path, &contents).unwrap();
+            assert!(
+                resolve_stable_vb_key(&TrustValueSpec::Auto, &path, &lock, || {
+                    panic!("invalid saved state must not generate a replacement")
+                })
+                .is_err()
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+        }
+    }
+
+    #[test]
+    fn vbmeta_snapshot_rejects_non_regular_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vbmeta_state.toml");
+        let lock = crate::security_patch::acquire_data_operation_lock(&path).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("missing"), &path).unwrap();
+        assert!(
+            resolve_stable_vb_key(&TrustValueSpec::Auto, &path, &lock, || {
+                panic!("symlink must not be followed")
+            })
+            .is_err()
+        );
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(
+            resolve_stable_vb_key(&TrustValueSpec::Auto, &path, &lock, || {
+                panic!("directory must not be overwritten")
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn auto_vb_key_is_not_returned_when_snapshot_cannot_be_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vbmeta_state.toml");
+        let lock = crate::security_patch::acquire_data_operation_lock(&path).unwrap();
+        let blocked = dir
+            .path()
+            .join(format!(".vbmeta_state.toml.tmp-{}", std::process::id()));
+        fs::create_dir(&blocked).unwrap();
+        let error = resolve_stable_vb_key(&TrustValueSpec::Auto, &path, &lock, || ResolvedField {
+            value: [0x42; 32],
+            source: TrustValueSource::RandomFallback,
+        })
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("refusing to use an unstable boot key"));
+        assert!(!path.exists());
+        fs::remove_dir(blocked).unwrap();
+    }
+
+    #[test]
+    fn concurrent_vbmeta_bootstraps_share_the_first_saved_key() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Barrier,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vbmeta_state.toml");
+        let barrier = Barrier::new(2);
+        let calls = AtomicUsize::new(0);
+        let results = std::thread::scope(|scope| {
+            let mut workers = Vec::new();
+            for value in [0x11, 0x22] {
+                let (path, barrier, calls) = (&path, &barrier, &calls);
+                workers.push(scope.spawn(move || {
+                    barrier.wait();
+                    let lock = crate::security_patch::acquire_data_operation_lock(path).unwrap();
+                    resolve_stable_vb_key(&TrustValueSpec::Auto, path, &lock, || {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        ResolvedField {
+                            value: [value; 32],
+                            source: TrustValueSource::Property,
+                        }
+                    })
+                    .unwrap()
+                }));
+            }
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(results[0].value, results[1].value);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|value| value.source == TrustValueSource::Persisted)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn avb_public_key_digest_matches_embedded_blob_hash() {
         let public_key = b"test-public-key-material";
         let vbmeta = build_test_vbmeta(public_key, 64, 96);
@@ -1217,6 +1490,7 @@ ro.vendor.boot_security_patch.extra = ignored
         assert!(TrustValueSource::RandomFallback.needs_sysprop_write());
         assert!(!TrustValueSource::ExplicitHex.needs_sysprop_write());
         assert!(!TrustValueSource::Property.needs_sysprop_write());
+        assert!(!TrustValueSource::Persisted.needs_sysprop_write());
     }
 
     fn build_test_vbmeta(

@@ -422,14 +422,25 @@ pub fn find_resetprop_command() -> Result<ResetpropCommand> {
     Err(anyhow!("no usable resetprop binary found"))
 }
 
-fn execute_write_and_verify(command: &ResetpropCommand, property: &str, value: &str) -> Result<()> {
+fn property_write_command(command: &ResetpropCommand, property: &str, value: &str) -> Command {
     let mut process = Command::new(&command.program);
     if let Some(prepend_arg) = &command.prepend_arg {
         process.arg(prepend_arg);
     }
-    let status = process
-        .arg(property)
-        .arg(value)
+    // Patch-level updates bypass property_service; unrelated properties retain
+    // their existing notification behavior. This also covers rollback writes.
+    if matches!(
+        property,
+        SYSTEM_SECURITY_PATCH_PROPERTY | VENDOR_SECURITY_PATCH_PROPERTY
+    ) {
+        process.arg("-n");
+    }
+    process.arg(property).arg(value);
+    process
+}
+
+fn execute_write_and_verify(command: &ResetpropCommand, property: &str, value: &str) -> Result<()> {
+    let status = property_write_command(command, property, value)
         .status()
         .with_context(|| format!("failed to execute resetprop for {property}"))?;
     if !status.success() {
@@ -774,6 +785,44 @@ fn parse_request(line: &str) -> Result<(String, String)> {
 mod tests {
     use super::*;
     use std::{cell::RefCell, collections::HashMap};
+
+    #[test]
+    fn security_patch_commands_bypass_property_service_for_every_backend() {
+        for (program, prepend_arg) in [
+            ("/data/adb/ksu/bin/resetprop", None),
+            ("/data/adb/magisk/resetprop", None),
+            ("/data/adb/ap/bin/resetprop", None),
+            ("/data/adb/ksud", Some("resetprop")),
+            ("/data/adb/apd", Some("resetprop")),
+            ("/system_ext/bin/resetprop", None),
+            ("/system/bin/resetprop", None),
+        ] {
+            let command = ResetpropCommand {
+                program: program.to_string(),
+                prepend_arg: prepend_arg.map(str::to_string),
+            };
+            for property in [
+                SYSTEM_SECURITY_PATCH_PROPERTY,
+                VENDOR_SECURITY_PATCH_PROPERTY,
+                "ro.boot.vbmeta.digest",
+            ] {
+                let process = property_write_command(&command, property, "2026-10-05");
+                let mut expected: Vec<&str> = prepend_arg.into_iter().collect();
+                if property != "ro.boot.vbmeta.digest" {
+                    expected.push("-n");
+                }
+                expected.extend([property, "2026-10-05"]);
+                assert_eq!(process.get_program(), std::ffi::OsStr::new(program));
+                assert_eq!(
+                    process.get_args().collect::<Vec<_>>(),
+                    expected
+                        .iter()
+                        .map(std::ffi::OsStr::new)
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
 
     fn patch_properties(system: &str, vendor: &str) -> SecurityPatchProperties {
         SecurityPatchProperties {

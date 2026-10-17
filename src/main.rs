@@ -878,13 +878,28 @@ fn handle_webui_pif_command() -> Option<Result<String, String>> {
                     ))
                 }
             };
-            if args.next().is_some() {
-                return Some(Err(
-                    "--webui-apply-pif-fingerprint accepts exactly one product".to_string(),
-                ));
-            }
+            let options: Vec<String> = args.collect();
+            let (spoof_build, spoof_props, spoof_vending_build) = match options.as_slice() {
+                [] => (true, true, false),
+                [build, props] if matches!(build.as_str(), "0" | "1")
+                    && matches!(props.as_str(), "0" | "1") => (build == "1", props == "1", false),
+                [build, props, vending] if matches!(build.as_str(), "0" | "1")
+                    && matches!(props.as_str(), "0" | "1")
+                    && matches!(vending.as_str(), "0" | "1") => (build == "1", props == "1", vending == "1"),
+                _ => return Some(Err(
+                    "--webui-apply-pif-fingerprint accepts a product, optional spoofBuild spoofProps flags, and an optional spoofVendingBuild flag (0 or 1)".to_string(),
+                )),
+            };
             prepare_android_storage();
-            Some(pif_spoof::apply_fingerprint(&product).map_err(|error| format!("{error:#}")))
+            Some(
+                pif_spoof::apply_fingerprint(
+                    &product,
+                    spoof_build,
+                    spoof_props,
+                    spoof_vending_build,
+                )
+                .map_err(|error| format!("{error:#}")),
+            )
         }
         "--webui-disable-pif-fingerprint" => {
             if args.next().is_some() {
@@ -1112,8 +1127,8 @@ fn run() -> Result<()> {
     info!("initial process state");
     let _ = rsbinder::ProcessState::init_default();
 
-    let resolved_trust =
-        plat::vbmeta::bootstrap_vbmeta(&config_file).context("failed to bootstrap vbmeta")?;
+    let resolved_trust = plat::vbmeta::bootstrap_vbmeta(&config_file, &security_patch_lock)
+        .context("failed to bootstrap vbmeta")?;
     prepare_android_storage();
     config::install_runtime_config(config_file, resolved_trust)
         .context("failed to install runtime config")?;

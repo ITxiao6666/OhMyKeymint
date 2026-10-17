@@ -2421,6 +2421,77 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn restarted_ta_binds_keyblobs_to_boot_key_and_state_but_not_boot_hash() {
+        use kmr_wire::keymint::{Algorithm, Digest, KeyPurpose, SecurityLevel};
+
+        let start = |level, key, hash, locked, state| {
+            let mut ta = test_ta_with_profile(KeyMintDevice::KEY_MINT_V5, level, None);
+            assert_eq!(
+                ta.process_req(PerformOpReq::SetBootInfo(kmr_wire::SetBootInfoRequest {
+                    verified_boot_state: state,
+                    verified_boot_hash: vec![hash; 32],
+                    verified_boot_key: vec![key; 32],
+                    device_boot_locked: locked,
+                    boot_patchlevel: 20250605,
+                }))
+                .error_code,
+                0
+            );
+            assert_eq!(
+                ta.process_req(PerformOpReq::SetHalInfo(SetHalInfoRequest {
+                    os_version: 160000,
+                    os_patchlevel: 202506,
+                    vendor_patchlevel: 20250605,
+                }))
+                .error_code,
+                0
+            );
+            ta
+        };
+
+        for level in [SecurityLevel::TrustedEnvironment, SecurityLevel::Strongbox] {
+            let mut original = start(level, 0x12, 0x34, true, 0);
+            let generated =
+                original.process_req(PerformOpReq::DeviceGenerateKey(GenerateKeyRequest {
+                    key_params: vec![
+                        KeyParam::Purpose(KeyPurpose::Sign),
+                        KeyParam::Algorithm(Algorithm::Hmac),
+                        KeyParam::KeySize(KeySizeInBits(256)),
+                        KeyParam::Digest(Digest::Sha256),
+                        KeyParam::MinMacLength(128),
+                        KeyParam::NoAuthRequired,
+                    ],
+                    attestation_key: None,
+                }));
+            assert_eq!(generated.error_code, 0, "{generated:?}");
+            let blob = match generated.rsp {
+                Some(PerformOpRsp::DeviceGenerateKey(response)) => response.ret.key_blob,
+                response => panic!("unexpected generate response: {response:?}"),
+            };
+            drop(original);
+
+            for (key, hash, locked, state, expected) in [
+                (0x12, 0x34, true, 0, 0),
+                (0x12, 0x56, true, 0, 0),
+                (0x99, 0x34, true, 0, ErrorCode::INVALID_KEY_BLOB.0),
+                (0x12, 0x34, false, 0, ErrorCode::INVALID_KEY_BLOB.0),
+                (0x12, 0x34, true, 2, ErrorCode::INVALID_KEY_BLOB.0),
+                (0x12, 0x34, true, 0, 0),
+            ] {
+                let mut restarted = start(level, key, hash, locked, state);
+                let recovered = restarted.process_req(PerformOpReq::DeviceGetKeyCharacteristics(
+                    GetKeyCharacteristicsRequest {
+                        key_blob: blob.clone(),
+                        app_id: vec![],
+                        app_data: vec![],
+                    },
+                ));
+                assert_eq!(recovered.error_code, expected, "{level:?}: {recovered:?}");
+            }
+        }
+    }
+
+    #[test]
     fn patchlevel_update_preserves_operations_and_use_counts() {
         let mut ta = test_ta();
         assert_eq!(set_boot_info(&mut ta), 0);

@@ -26,6 +26,8 @@ use zygisk_api::{
 
 use libc::{c_char, c_void};
 
+#[cfg(target_arch = "aarch64")]
+mod property_area;
 mod soter;
 
 const PROFILE_PATH: &str = "/data/misc/keystore/omk/data/pif_fingerprint.json";
@@ -40,7 +42,7 @@ const PROPERTY_FIND_SYMBOL: &CStr = c"__system_property_find";
 const PROPERTY_GET_SYMBOL: &CStr = c"__system_property_get";
 const PROPERTY_READ_LEGACY_SYMBOL: &CStr = c"__system_property_read";
 const PROPERTY_VALUE_MAX: usize = 92;
-const DEVICE_INITIAL_SDK_INT: &str = "21";
+const BOARD_FIRST_API_LEVEL: &CStr = c"32";
 const MAX_CALLBACK_WRAPPER_INSTRUCTIONS: usize = 16;
 const INLINE_PATCH_BYTES: usize = 24;
 const MAX_DISPATCH_SPAN: usize = 32 * 1024 * 1024;
@@ -81,9 +83,38 @@ static SYSTEM_PROPERTIES_READ_CALLBACK: AtomicPtr<c_void> = AtomicPtr::new(ptr::
 static PROPERTY_SPOOF: OnceLock<PropertyValues> = OnceLock::new();
 static INLINE_PROPERTY_READ_HOOKED: OnceLock<()> = OnceLock::new();
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PifTarget {
+    Gms,
+    PlayStore,
+}
+
+impl PifTarget {
+    fn spoof_build(self, profile: &PifProfile) -> bool {
+        match self {
+            Self::Gms => profile.spoof_build,
+            Self::PlayStore => profile.spoof_vending_build,
+        }
+    }
+
+    fn spoof_props(self, profile: &PifProfile) -> bool {
+        self == Self::Gms && profile.spoof_props
+    }
+
+    fn build_fields(
+        self,
+        profile: &PifProfile,
+    ) -> impl Iterator<Item = (&'static str, &str, BuildClass)> {
+        profile
+            .build_fields()
+            .into_iter()
+            .filter(move |_| self.spoof_build(profile))
+    }
+}
+
 #[derive(Default)]
 struct PifSpoofModule {
-    profile: Mutex<Option<PifProfile>>,
+    profile: Mutex<Option<(PifProfile, PifTarget)>>,
 }
 
 impl ZygiskModule for PifSpoofModule {
@@ -119,10 +150,10 @@ impl ZygiskModule for PifSpoofModule {
             }
             return;
         }
-        if !is_target_process(process.as_deref(), data_dir.as_deref()) {
+        let Some(target) = target_process(process.as_deref(), data_dir.as_deref()) else {
             api.set_option(ZygiskOption::DlCloseModuleLibrary);
             return;
-        }
+        };
 
         log_android(&format!(
             "PIF target selected: process={}, data_dir={}",
@@ -149,33 +180,59 @@ impl ZygiskModule for PifSpoofModule {
             return;
         };
 
-        // Zygisk only permits its API (including PLT registration) before app
-        // specialization.  Register every available native path while the
-        // process still has zygote privileges; the Java fields are applied in
-        // post_app_specialize after Android has finished specialization.
-        match install_property_hook(&mut api, &profile) {
-            Ok(count) => log_android(&format!(
-                "PIF native PLT hooks installed for {count} imported symbol(s)"
-            )),
-            Err(error) => log_android(&format!(
-                "PIF native PLT hooks unavailable; continuing with inline/Java spoof: {error}"
-            )),
+        if !target.spoof_build(&profile) && !target.spoof_props(&profile) {
+            log_android("PIF spoofing is disabled for this process");
+            api.set_option(ZygiskOption::DlCloseModuleLibrary);
+            return;
         }
-        // libc is already mapped in the specialized child, while native app
-        // initialization has not started yet. Install the process-wide
-        // callback fallback here so later-loaded native code sees the profile.
-        match install_inline_property_hook() {
-            Ok(bytes) if bytes > 0 => log_android(&format!(
-                "PIF inline property callback hook installed ({bytes} bytes)"
-            )),
-            Ok(_) => log_android("PIF inline property callback hook already installed"),
-            Err(error) => log_android(&format!(
-                "PIF inline property callback hook unavailable: {error}"
-            )),
+
+        if target.spoof_props(&profile) {
+            initialize_property_spoof(&profile).unwrap_or_else(|error| {
+                log_android(&format!(
+                    "PIF property table initialization failed: {error}"
+                ));
+            });
+            let mut private_properties = false;
+            #[cfg(target_arch = "aarch64")]
+            if let Some(values) = PROPERTY_SPOOF.get() {
+                match property_area::install(values) {
+                    Ok(count) => {
+                        private_properties = true;
+                        log_android(&format!(
+                            "PIF private property areas installed ({count} properties)"
+                        ));
+                    }
+                    Err(error) => log_android(&format!(
+                        "PIF private property areas unavailable; using hooks: {error}"
+                    )),
+                }
+            }
+            if !private_properties {
+                // Zygisk only permits its API (including PLT registration) before
+                // app specialization. Java fields are applied afterwards.
+                match install_property_hook(&mut api, &profile) {
+                    Ok(count) => log_android(&format!(
+                        "PIF native PLT hooks installed for {count} imported symbol(s)"
+                    )),
+                    Err(error) => log_android(&format!(
+                        "PIF native PLT hooks unavailable; continuing with inline/Java spoof: {error}"
+                    )),
+                }
+                // Cover native libraries loaded after specialization as well.
+                match install_inline_property_hook() {
+                    Ok(bytes) if bytes > 0 => log_android(&format!(
+                        "PIF inline property callback hook installed ({bytes} bytes)"
+                    )),
+                    Ok(_) => log_android("PIF inline property callback hook already installed"),
+                    Err(error) => log_android(&format!(
+                        "PIF inline property callback hook unavailable: {error}"
+                    )),
+                }
+            }
         }
         api.set_option(ZygiskOption::ForceDenylistUnmount);
         if let Ok(mut current) = self.profile.lock() {
-            *current = Some(profile);
+            *current = Some((profile, target));
         } else {
             log_android("PIF profile state lock is poisoned");
         }
@@ -188,7 +245,7 @@ impl ZygiskModule for PifSpoofModule {
         _args: &'a AppSpecializeArgs<'a>,
     ) {
         soter::activate();
-        let Some(profile) = self
+        let Some((profile, target)) = self
             .profile
             .lock()
             .ok()
@@ -196,12 +253,21 @@ impl ZygiskModule for PifSpoofModule {
         else {
             return;
         };
-        match apply_build_fields(&mut env, &profile) {
-            Ok(()) => log_android("PIF Build fields applied to the target Google process"),
-            Err(error) => log_android(&format!("failed to apply PIF Build fields: {error}")),
+        if target.spoof_build(&profile) {
+            match apply_build_fields(&mut env, &profile, target) {
+                Ok(()) => log_android(match target {
+                    PifTarget::Gms => "PIF GMS Build fields and launch SDK applied",
+                    PifTarget::PlayStore => {
+                        "PIF Play Store Build fields applied; SDK and native properties unchanged"
+                    }
+                }),
+                Err(error) => log_android(&format!("failed to apply PIF Build fields: {error}")),
+            }
         }
 
-        log_property_probe();
+        if PROPERTY_SPOOF.get().is_some() {
+            log_property_probe();
+        }
     }
 
     fn pre_server_specialize<'a>(
@@ -246,7 +312,7 @@ impl PropertyValues {
             build_type: property_string("build_type", &profile.build_type)?,
             tags: property_string("tags", &profile.tags)?,
             security_patch: property_string("security_patch", &profile.security_patch)?,
-            api_level: property_string("api_level", DEVICE_INITIAL_SDK_INT)?,
+            api_level: property_string("api_level", &profile.initial_sdk_int().to_string())?,
         })
     }
 
@@ -254,7 +320,10 @@ impl PropertyValues {
         if name.ends_with(b".build.fingerprint") {
             return Some(self.fingerprint.as_c_str());
         }
-        if name.ends_with(b"api_level") {
+        if name == b"ro.board.first_api_level" {
+            return Some(BOARD_FIRST_API_LEVEL);
+        }
+        if name == b"ro.product.first_api_level" {
             return Some(self.api_level.as_c_str());
         }
         if name.ends_with(b".build.id") {
@@ -1339,25 +1408,24 @@ fn is_soter_target(process: Option<&str>, data_dir: Option<&str>) -> bool {
         }
 }
 
-fn is_target_process(process: Option<&str>, data_dir: Option<&str>) -> bool {
-    match (process, data_dir) {
-        // A few Zygisk loaders expose the process name before the app data
-        // directory has been converted to a Java string.  The exact process
-        // names are supplied by Android's zygote, so accepting a missing or
-        // empty directory preserves compatibility without matching arbitrary
-        // applications.
-        (Some(process), None) if process_name_matches(process, GMS_PROCESS) => true,
-        (Some(process), None) if process_name_matches(process, VENDING_PROCESS) => true,
-        (Some(process), Some("")) if process_name_matches(process, GMS_PROCESS) => true,
-        (Some(process), Some("")) if process_name_matches(process, VENDING_PROCESS) => true,
-        (Some(process), Some(path)) if process_name_matches(process, GMS_PROCESS) => {
-            is_gms_data_dir(path)
-        }
-        (Some(process), Some(path)) if process_name_matches(process, VENDING_PROCESS) => {
-            is_package_data_dir(path, VENDING_PACKAGE)
-        }
-        _ => false,
-    }
+fn target_process(process: Option<&str>, data_dir: Option<&str>) -> Option<PifTarget> {
+    let process = process?;
+    let target = if process_name_matches(process, GMS_PROCESS) {
+        PifTarget::Gms
+    } else if process_name_matches(process, VENDING_PROCESS) {
+        PifTarget::PlayStore
+    } else {
+        return None;
+    };
+    // Some loaders supply the zygote process name before the data directory.
+    let valid_directory = match data_dir {
+        None | Some("") => true,
+        Some(path) => match target {
+            PifTarget::Gms => is_gms_data_dir(path),
+            PifTarget::PlayStore => is_package_data_dir(path, VENDING_PACKAGE),
+        },
+    };
+    valid_directory.then_some(target)
 }
 
 fn process_name_matches(process: &str, base: &str) -> bool {
@@ -1482,7 +1550,11 @@ fn load_profile_for_companion() -> Result<Vec<u8>, String> {
     Ok(canonical)
 }
 
-fn apply_build_fields(env: &mut JNIEnv<'_>, profile: &PifProfile) -> Result<(), String> {
+fn apply_build_fields(
+    env: &mut JNIEnv<'_>,
+    profile: &PifProfile,
+    target: PifTarget,
+) -> Result<(), String> {
     profile.validate()?;
     let build = env
         .find_class("android/os/Build")
@@ -1491,7 +1563,7 @@ fn apply_build_fields(env: &mut JNIEnv<'_>, profile: &PifProfile) -> Result<(), 
         .find_class("android/os/Build$VERSION")
         .map_err(|error| format!("cannot find android.os.Build.VERSION: {error}"))?;
 
-    for (name, value, owner) in profile.build_fields() {
+    for (name, value, owner) in target.build_fields(profile) {
         let class = match owner {
             BuildClass::Build => &build,
             BuildClass::Version => &version,
@@ -1508,6 +1580,18 @@ fn apply_build_fields(env: &mut JNIEnv<'_>, profile: &PifProfile) -> Result<(), 
         .map_err(|error| format!("cannot set {name}: {error}"))?;
         env.delete_local_ref(object)
             .map_err(|error| format!("cannot release {name} value: {error}"))?;
+    }
+    if target == PifTarget::Gms && target.spoof_build(profile) {
+        // This is the device launch SDK, not the running platform's SDK_INT.
+        // Keep it consistent with ro.product.first_api_level when both paths
+        // are enabled. Play Store Build spoofing follows v4.9-inject-s and
+        // updates the string fields only, leaving both SDK integers unchanged.
+        env.set_static_field(
+            &version,
+            (&version, "DEVICE_INITIAL_SDK_INT", "I"),
+            JValue::Int(profile.initial_sdk_int()),
+        )
+        .map_err(|error| format!("cannot set DEVICE_INITIAL_SDK_INT: {error}"))?;
     }
     Ok(())
 }
@@ -1617,6 +1701,10 @@ mod tests {
             build_type: "user".to_string(),
             tags: "release-keys".to_string(),
             security_patch: "2024-09-05".to_string(),
+            device_initial_sdk_int: None,
+            spoof_build: true,
+            spoof_props: true,
+            spoof_vending_build: false,
         }
     }
 
@@ -1641,45 +1729,118 @@ mod tests {
 
     #[test]
     fn targets_gms_unstable_and_play_store_only() {
-        assert!(is_target_process(
-            Some(GMS_PROCESS),
-            Some("/data/user/0/com.google.android.gms")
-        ));
-        assert!(is_target_process(
-            Some(VENDING_PROCESS),
-            Some("/data/user/0/com.android.vending")
-        ));
-        assert!(is_target_process(
-            Some(VENDING_PROCESS),
-            Some("/data/data/com.android.vending")
-        ));
-        assert!(is_target_process(
-            Some("com.google.android.gms.unstable:background"),
-            Some("/data/user/0/com.google.android.gms")
-        ));
-        assert!(is_target_process(
-            Some("com.android.vending:instant"),
-            Some("/data/user/0/com.android.vending")
-        ));
-        assert!(!is_target_process(
-            Some("com.google.android.gms"),
-            Some("/data/user/0/com.google.android.gms")
-        ));
-        assert!(!is_target_process(
-            Some("com.google.android.gms.unstable:"),
-            Some("/data/user/0/com.google.android.gms")
-        ));
-        assert!(!is_target_process(
-            Some("com.android.vending.evil"),
-            Some("/data/user/0/com.android.vending")
-        ));
-        assert!(!is_target_process(
-            Some(VENDING_PROCESS),
-            Some("/data/user/0/com.google.android.gms")
-        ));
-        assert!(is_target_process(Some(GMS_PROCESS), None));
-        assert!(is_target_process(Some(VENDING_PROCESS), Some("")));
-        assert!(!is_target_process(Some("com.google.android.gms"), None));
+        for (process, directory, expected) in [
+            (
+                GMS_PROCESS,
+                "/data/user/0/com.google.android.gms",
+                PifTarget::Gms,
+            ),
+            (
+                "com.google.android.gms.unstable:background",
+                "/data/user/0/com.google.android.gms",
+                PifTarget::Gms,
+            ),
+            (
+                VENDING_PROCESS,
+                "/data/user/0/com.android.vending",
+                PifTarget::PlayStore,
+            ),
+            (
+                VENDING_PROCESS,
+                "/data/data/com.android.vending",
+                PifTarget::PlayStore,
+            ),
+            (
+                "com.android.vending:instant",
+                "/data/user/0/com.android.vending",
+                PifTarget::PlayStore,
+            ),
+        ] {
+            for path in [Some(directory), None, Some("")] {
+                assert_eq!(target_process(Some(process), path), Some(expected));
+            }
+        }
+        for (process, directory) in [
+            (
+                "com.google.android.gms",
+                "/data/user/0/com.google.android.gms",
+            ),
+            (
+                "com.google.android.gms.unstable:",
+                "/data/user/0/com.google.android.gms",
+            ),
+            (
+                "com.android.vending.evil",
+                "/data/user/0/com.android.vending",
+            ),
+            ("com.android.vending:", "/data/user/0/com.android.vending"),
+            (VENDING_PROCESS, "/data/user/0/com.google.android.gms"),
+            (GMS_PROCESS, "/data/user/0/com.android.vending"),
+        ] {
+            assert_eq!(target_process(Some(process), Some(directory)), None);
+        }
+        assert_eq!(target_process(Some("com.google.android.gms"), None), None);
+        assert_eq!(target_process(None, None), None);
+    }
+
+    #[test]
+    fn store_build_scope_is_independent_and_covers_the_complete_profile() {
+        for build in [false, true] {
+            for props in [false, true] {
+                for vending in [false, true] {
+                    let mut profile = test_profile();
+                    profile.version = pif_common::PROFILE_VERSION;
+                    profile.spoof_build = build;
+                    profile.spoof_props = props;
+                    profile.spoof_vending_build = vending;
+                    profile.validate().unwrap();
+                    assert_eq!(PifTarget::Gms.spoof_build(&profile), build);
+                    assert_eq!(PifTarget::Gms.spoof_props(&profile), props);
+                    assert_eq!(PifTarget::PlayStore.spoof_build(&profile), vending);
+                    assert!(!PifTarget::PlayStore.spoof_props(&profile));
+                    let fields: Vec<_> = PifTarget::PlayStore.build_fields(&profile).collect();
+                    if vending {
+                        let expected = profile.build_fields();
+                        assert_eq!(fields.len(), expected.len());
+                        assert_eq!(
+                            fields.iter().map(|(name, _, _)| *name).collect::<Vec<_>>(),
+                            [
+                                "MANUFACTURER",
+                                "MODEL",
+                                "FINGERPRINT",
+                                "BRAND",
+                                "PRODUCT",
+                                "DEVICE",
+                                "RELEASE",
+                                "ID",
+                                "INCREMENTAL",
+                                "TYPE",
+                                "TAGS",
+                                "SECURITY_PATCH"
+                            ]
+                        );
+                        for (actual, expected) in fields.iter().zip(expected) {
+                            assert_eq!(actual.0, expected.0);
+                            assert_eq!(actual.1, expected.1);
+                            assert_eq!(
+                                std::mem::discriminant(&actual.2),
+                                std::mem::discriminant(&expected.2)
+                            );
+                        }
+                        assert!(!fields.iter().any(|(name, _, _)| matches!(
+                            *name,
+                            "SDK_INT" | "DEVICE_INITIAL_SDK_INT"
+                        )));
+                    } else {
+                        assert!(fields.is_empty());
+                    }
+                    assert_eq!(
+                        PifTarget::Gms.build_fields(&profile).count(),
+                        if build { 12 } else { 0 }
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1741,7 +1902,7 @@ mod tests {
                 .value_for(b"ro.product.first_api_level")
                 .unwrap()
                 .to_bytes(),
-            b"21"
+            b"32"
         );
         assert_eq!(
             values.value_for(b"ro.build.product").unwrap().to_bytes(),
@@ -1752,6 +1913,33 @@ mod tests {
             b"panther_beta"
         );
         assert!(values.value_for(b"ro.boot.verifiedbootstate").is_none());
+        assert!(values.value_for(b"ro.vendor.api_level").is_none());
+        assert!(values.value_for(b"ro.board.api_level").is_none());
+    }
+
+    #[test]
+    fn uses_profile_launch_sdk_without_changing_board_or_vendor_api() {
+        for sdk in [21, 32, 34, 37] {
+            let mut profile = test_profile();
+            profile.version = pif_common::PROFILE_VERSION;
+            profile.device_initial_sdk_int = Some(sdk);
+            let values = PropertyValues::from_profile(&profile).unwrap();
+            assert_eq!(
+                values
+                    .value_for(b"ro.product.first_api_level")
+                    .unwrap()
+                    .to_bytes(),
+                sdk.to_string().as_bytes()
+            );
+            assert_eq!(
+                values
+                    .value_for(b"ro.board.first_api_level")
+                    .unwrap()
+                    .to_bytes(),
+                b"32"
+            );
+            assert!(values.value_for(b"ro.vendor.api_level").is_none());
+        }
     }
 
     #[test]

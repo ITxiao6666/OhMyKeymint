@@ -54,12 +54,29 @@ No TrickyStore code or binary is included in or required by Oh My Keymint.
 Pixel model names and PIF profile values are downloaded at runtime from the
 `bot` branch of
 [KOWX712/PlayIntegrityFix](https://github.com/KOWX712/PlayIntegrityFix). The
-feed format and generation path were checked against its `inject_s` commit
-[`2f8199a90a150ad98921438608e1e0e951ba2d5f`](https://github.com/KOWX712/PlayIntegrityFix/commit/2f8199a90a150ad98921438608e1e0e951ba2d5f).
+feed format, launch-SDK contract, and native property-area behavior follow
+[`v4.9-inject-s`](https://github.com/KOWX712/PlayIntegrityFix/releases/tag/v4.9-inject-s),
+commit [`9ad24d23ccbb24ff5acde6d77905dee9711b14ca`](https://github.com/KOWX712/PlayIntegrityFix/commit/9ad24d23ccbb24ff5acde6d77905dee9711b14ca).
 That project is licensed under GPL-3.0. Oh My Keymint does not copy or execute
 its WebUI or Autopif implementation; it independently validates the generated
 `device_list.json` and `device_prop/*.prop` data protocol before rendering the
-OMK PIF profile.
+OMK PIF profile. Its Rust process-private property-area implementation adapts
+the behavior of upstream `zygisk/src/main/cpp/property_virtualizer.cpp`, including
+lazy-area warmup, inline-value handling, and rollback. This third-party-derived
+portion remains subject to GPL-3.0. No upstream C++ library, DEX provider, or
+signature-spoofing payload is bundled. OMK retains its own validated hook fallback
+and does not apply upstream ADB/USB property overrides.
+
+The Java launch-SDK field type was checked against the configuration and Java
+field contracts in
+[osm0sis/PlayIntegrityFork](https://github.com/osm0sis/PlayIntegrityFork/tree/bfad5ecb068dd8ba84af7ea6b48b8c50dbc34441),
+commit `bfad5ecb068dd8ba84af7ea6b48b8c50dbc34441` (GPL-3.0). OMK implements
+the integer field update in its existing Rust/JNI payload without copying Fork
+code. The independent Play Store Build option follows KOWX712 `v4.9-inject-s`'s
+`spoofVendingBuild` contract: it applies the complete profile string field set,
+not just the fingerprint, and does not change either SDK integer or native
+properties. No provider, signature, or Play Store SDK spoofing implementation
+is bundled.
 
 ## Google attestation status snapshot
 

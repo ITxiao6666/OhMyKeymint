@@ -11,7 +11,8 @@ pub const MAX_CATALOG_ENTRIES: usize = 64;
 pub const MAX_PROP_BYTES: usize = 4 * 1024;
 pub const MAX_PROFILE_BYTES: usize = 4 * 1024;
 pub const MAX_VALUE_BYTES: usize = 126;
-pub const PROFILE_VERSION: u32 = 1;
+pub const PROFILE_VERSION: u32 = 2;
+pub const DEFAULT_INITIAL_SDK_INT: i32 = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -36,6 +37,26 @@ pub struct PifProfile {
     pub build_type: String,
     pub tags: String,
     pub security_patch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_initial_sdk_int: Option<i32>,
+    #[serde(default = "enabled_by_default", skip_serializing_if = "is_enabled")]
+    pub spoof_build: bool,
+    #[serde(default = "enabled_by_default", skip_serializing_if = "is_enabled")]
+    pub spoof_props: bool,
+    #[serde(default, skip_serializing_if = "is_disabled")]
+    pub spoof_vending_build: bool,
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+fn is_enabled(value: &bool) -> bool {
+    *value
+}
+
+fn is_disabled(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +65,7 @@ struct SourceProfile {
     manufacturer: String,
     model: String,
     security_patch: String,
+    device_initial_sdk_int: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -102,14 +124,29 @@ impl PifProfile {
             build_type: fingerprint.build_type.to_string(),
             tags: fingerprint.tags.to_string(),
             security_patch: source.security_patch,
+            device_initial_sdk_int: source.device_initial_sdk_int,
+            spoof_build: true,
+            spoof_props: true,
+            spoof_vending_build: false,
         };
         profile.validate()?;
         Ok(profile)
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.version != PROFILE_VERSION {
+        if !matches!(self.version, 1 | PROFILE_VERSION) {
             return Err(format!("unsupported PIF profile version {}", self.version));
+        }
+        if self.version == 1
+            && (self.device_initial_sdk_int.is_some()
+                || !self.spoof_build
+                || !self.spoof_props
+                || self.spoof_vending_build)
+        {
+            return Err("extended PIF settings require profile version 2".to_string());
+        }
+        if self.device_initial_sdk_int.is_some_and(|sdk| sdk <= 0) {
+            return Err("DEVICE_INITIAL_SDK_INT must be a positive 32-bit integer".to_string());
         }
         validate_display_value("model", &self.model)?;
         validate_product(&self.product)?;
@@ -160,6 +197,11 @@ impl PifProfile {
             .map_err(|error| format!("invalid PIF profile JSON: {error}"))?;
         profile.validate()?;
         Ok(profile)
+    }
+
+    pub fn initial_sdk_int(&self) -> i32 {
+        self.device_initial_sdk_int
+            .unwrap_or(DEFAULT_INITIAL_SDK_INT)
     }
 
     pub fn build_fields(&self) -> [(&'static str, &'_ str, BuildClass); 12] {
@@ -272,16 +314,16 @@ fn parse_source_profile(contents: &[u8]) -> Result<SourceProfile, String> {
         }
     }
 
-    // The feed may include the device's launch SDK. Accept validated metadata
-    // without changing OMK's separate process-local API-level override policy
-    // or the canonical profile consumed by already loaded Zygisk companions.
-    if let Some(value) = device_initial_sdk_int {
+    let device_initial_sdk_int = if let Some(value) = device_initial_sdk_int {
         if !value.bytes().all(|byte| byte.is_ascii_digit())
             || !matches!(value.parse::<i32>(), Ok(sdk) if sdk > 0)
         {
             return Err("DEVICE_INITIAL_SDK_INT must be a positive 32-bit integer".to_string());
         }
-    }
+        Some(value.parse::<i32>().map_err(|error| error.to_string())?)
+    } else {
+        None
+    };
 
     let source = SourceProfile {
         fingerprint: fingerprint
@@ -291,6 +333,7 @@ fn parse_source_profile(contents: &[u8]) -> Result<SourceProfile, String> {
         model: model.ok_or_else(|| "PIF source profile lacks MODEL".to_string())?,
         security_patch: security_patch
             .ok_or_else(|| "PIF source profile lacks SECURITY_PATCH".to_string())?,
+        device_initial_sdk_int,
     };
     validate_display_value("MANUFACTURER", &source.manufacturer)?;
     validate_display_value("MODEL", &source.model)?;
@@ -474,19 +517,88 @@ mod tests {
     }
 
     #[test]
-    fn source_profile_accepts_optional_launch_sdk_without_changing_stored_format() {
-        let expected = PifProfile::from_source(&selected(), PROP.as_bytes()).unwrap();
+    fn source_profile_preserves_optional_launch_sdk() {
+        let default = PifProfile::from_source(&selected(), PROP.as_bytes()).unwrap();
+        assert_eq!(default.initial_sdk_int(), 32);
         for sdk in ["21", "32", "34", "37"] {
             let source = format!("{PROP}DEVICE_INITIAL_SDK_INT={sdk}\n");
             for source in [source.clone(), source.replace('\n', "\r\n")] {
                 let profile = PifProfile::from_source(&selected(), source.as_bytes()).unwrap();
-                assert_eq!(profile, expected);
+                assert_eq!(profile.device_initial_sdk_int, Some(sdk.parse().unwrap()));
+                assert_eq!(profile.initial_sdk_int(), sdk.parse::<i32>().unwrap());
                 assert_eq!(
-                    profile.to_canonical_json().unwrap(),
-                    expected.to_canonical_json().unwrap()
+                    PifProfile::from_json(profile.to_canonical_json().unwrap().as_bytes()).unwrap(),
+                    profile
                 );
             }
         }
+    }
+
+    #[test]
+    fn legacy_profiles_remain_canonical_and_default_to_enabled_paths() {
+        let mut legacy = PifProfile::from_source(&selected(), PROP.as_bytes()).unwrap();
+        legacy.version = 1;
+        let json = legacy.to_canonical_json().unwrap();
+        assert!(!json.contains("device_initial_sdk_int"));
+        assert!(!json.contains("spoof_build"));
+        assert!(!json.contains("spoof_props"));
+        assert!(!json.contains("spoof_vending_build"));
+        let loaded = PifProfile::from_json(json.as_bytes()).unwrap();
+        assert_eq!(loaded.to_canonical_json().unwrap(), json);
+        assert!(loaded.spoof_build && loaded.spoof_props);
+        assert!(!loaded.spoof_vending_build);
+        assert_eq!(loaded.initial_sdk_int(), 32);
+        legacy.spoof_props = false;
+        assert!(legacy.validate().is_err());
+        legacy.spoof_props = true;
+        legacy.spoof_vending_build = true;
+        assert!(legacy.validate().is_err());
+    }
+
+    #[test]
+    fn profile_roundtrips_independent_spoof_options() {
+        for spoof_build in [false, true] {
+            for spoof_props in [false, true] {
+                for spoof_vending_build in [false, true] {
+                    let mut profile =
+                        PifProfile::from_source(&selected(), PROP.as_bytes()).unwrap();
+                    profile.spoof_build = spoof_build;
+                    profile.spoof_props = spoof_props;
+                    profile.spoof_vending_build = spoof_vending_build;
+                    let json = profile.to_canonical_json().unwrap();
+                    assert_eq!(PifProfile::from_json(json.as_bytes()).unwrap(), profile);
+                    assert_eq!(json.contains("spoof_vending_build"), spoof_vending_build);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn profiles_without_store_option_remain_canonical_and_default_to_off() {
+        let profile = PifProfile::from_source(&selected(), PROP.as_bytes()).unwrap();
+        let json = profile.to_canonical_json().unwrap();
+        assert!(!json.contains("spoof_vending_build"));
+        let loaded = PifProfile::from_json(json.as_bytes()).unwrap();
+        assert!(!loaded.spoof_vending_build);
+        assert_eq!(loaded.to_canonical_json().unwrap(), json);
+        for value in ["1", "null", "\"true\""] {
+            let invalid = format!(
+                "{},\"spoof_vending_build\":{value}}}",
+                json.trim_end_matches('}')
+            );
+            assert!(PifProfile::from_json(invalid.as_bytes()).is_err());
+        }
+    }
+
+    #[test]
+    fn fingerprint_only_option_does_not_implicitly_enable_store_build() {
+        let profile = PifProfile::from_source(&selected(), PROP.as_bytes()).unwrap();
+        let json = profile.to_canonical_json().unwrap();
+        let unsupported = format!(
+            "{},\"spoof_vending_fingerprint\":true}}",
+            json.trim_end_matches('}')
+        );
+        assert!(PifProfile::from_json(unsupported.as_bytes()).is_err());
     }
 
     #[test]

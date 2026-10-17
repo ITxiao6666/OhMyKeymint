@@ -80,6 +80,10 @@ struct EnabledState<'a> {
     product: &'a str,
     fingerprint: &'a str,
     security_patch: &'a str,
+    device_initial_sdk_int: i32,
+    spoof_build: bool,
+    spoof_props: bool,
+    spoof_vending_build: bool,
 }
 
 pub fn list_devices() -> Result<String> {
@@ -91,7 +95,12 @@ pub fn fingerprint_state() -> Result<String> {
     state_json(load_profile(Path::new(PROFILE_PATH))?.as_ref())
 }
 
-pub fn apply_fingerprint(product: &str) -> Result<String> {
+pub fn apply_fingerprint(
+    product: &str,
+    spoof_build: bool,
+    spoof_props: bool,
+    spoof_vending_build: bool,
+) -> Result<String> {
     validate_product(product).map_err(anyhow::Error::msg)?;
     let catalog = download_catalog()?;
     let selected = catalog
@@ -100,9 +109,12 @@ pub fn apply_fingerprint(product: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("selected product is not present in the current PIF catalog"))?;
     let resource = FeedResource::Profile(product.to_string());
     let contents = download_feed(&resource)?;
-    let profile = PifProfile::from_source(selected, contents.as_bytes())
+    let mut profile = PifProfile::from_source(selected, contents.as_bytes())
         .map_err(anyhow::Error::msg)
         .context("downloaded PIF profile failed validation")?;
+    profile.spoof_build = spoof_build;
+    profile.spoof_props = spoof_props;
+    profile.spoof_vending_build = spoof_vending_build;
 
     let path = Path::new(PROFILE_PATH);
     let _lock = security_patch::acquire_data_operation_lock(path)?;
@@ -193,6 +205,10 @@ fn state_json(profile: Option<&PifProfile>) -> Result<String> {
                 product: &profile.product,
                 fingerprint: &profile.fingerprint,
                 security_patch: &profile.security_patch,
+                device_initial_sdk_int: profile.initial_sdk_int(),
+                spoof_build: profile.spoof_build,
+                spoof_props: profile.spoof_props,
+                spoof_vending_build: profile.spoof_vending_build,
             })
         }
         None => serde_json::to_string(&DisabledState { enabled: false }),
@@ -412,15 +428,38 @@ mod tests {
         assert_eq!(state_json(None).unwrap(), r#"{"enabled":false}"#);
         assert_eq!(
             state_json(Some(&profile)).unwrap(),
-            r#"{"enabled":true,"model":"Pixel 6","product":"oriole_beta","fingerprint":"google/oriole_beta/oriole:CANARY/ZP11.260717.006/16004061:user/release-keys","security_patch":"2026-08-05"}"#
+            r#"{"enabled":true,"model":"Pixel 6","product":"oriole_beta","fingerprint":"google/oriole_beta/oriole:CANARY/ZP11.260717.006/16004061:user/release-keys","security_patch":"2026-08-05","device_initial_sdk_int":32,"spoof_build":true,"spoof_props":true,"spoof_vending_build":false}"#
         );
+    }
+
+    #[test]
+    fn state_json_preserves_all_three_independent_switches() {
+        for build in [false, true] {
+            for props in [false, true] {
+                for vending in [false, true] {
+                    let mut profile = sample_profile();
+                    profile.spoof_build = build;
+                    profile.spoof_props = props;
+                    profile.spoof_vending_build = vending;
+                    let value: serde_json::Value =
+                        serde_json::from_str(&state_json(Some(&profile)).unwrap()).unwrap();
+                    assert_eq!(value["spoof_build"], build);
+                    assert_eq!(value["spoof_props"], props);
+                    assert_eq!(value["spoof_vending_build"], vending);
+                    assert!(value.get("spoof_vending_fingerprint").is_none());
+                }
+            }
+        }
     }
 
     #[test]
     fn profile_persistence_is_atomic_and_verified() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("pif_fingerprint.json");
-        let profile = sample_profile();
+        let mut profile = sample_profile();
+        profile.spoof_build = false;
+        profile.spoof_props = false;
+        profile.spoof_vending_build = true;
         let uid = unsafe { libc::geteuid() };
         let gid = unsafe { libc::getegid() };
         fs::write(&path, b"stale").unwrap();

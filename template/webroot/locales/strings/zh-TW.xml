@@ -46,6 +46,14 @@
     <string name="pif_enable_spoofing">啟用 PIF 指紋偽裝</string>
     <string name="pif_zygisk_next_required">需自行安裝並啟用 Zygisk Next；OMK 不內建、下載或安裝該模組。</string>
     <string name="pif_current_config">目前設定</string>
+    <string name="pif_preview">瀏覽器預覽使用範例資料，不會修改手機設定。</string>
+    <string name="pif_spoof_build">Spoof Build</string>
+    <string name="pif_spoof_build_desc">僅向 Google Play 服務套用 Pixel 欄位及初始 SDK，不修改目前 Android SDK。</string>
+    <string name="pif_spoof_props">Spoof Props</string>
+    <string name="pif_spoof_props_desc">僅替換 Google Play 服務內的指定屬性讀取，不修改全域或 Play 商店屬性。</string>
+    <string name="pif_spoof_vending">Spoof Build（Play Store）</string>
+    <string name="pif_spoof_vending_desc">向 Play 商店套用 Pixel 機型、指紋、安全修補程式等整套 Build 欄位。獨立於 GMS，不改 SDK 或原生屬性。</string>
+    <string name="pif_initial_sdk">初始 SDK：%s</string>
     <string name="pif_security_patch">安全性修補程式：%s</string>
     <string name="pif_disabled">已停用</string>
     <string name="pif_loading_config">正在載入 PIF 設定…</string>
@@ -54,6 +62,9 @@
     <string name="pif_devices_load_error">載入 Pixel 裝置失敗</string>
     <string name="pif_choose_device">選擇 Pixel 裝置</string>
     <string name="pif_random_device">隨機</string>
+    <string name="pif_refresh_devices">重新整理清單</string>
+    <string name="pif_preview_apply">預覽變更</string>
+    <string name="pif_preview_applied">僅更新瀏覽器預覽，未修改手機設定。</string>
     <string name="pif_applying">正在套用…</string>
     <string name="prompt_pif_applied">已套用 %1$s 的 PIF 指紋，安全性修補程式為 %2$s。</string>
     <string name="prompt_pif_disabled">已停用 PIF 指紋偽裝。</string>

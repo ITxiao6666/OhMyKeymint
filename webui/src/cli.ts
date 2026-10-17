@@ -41,6 +41,10 @@ export interface EnabledPifFingerprintState {
   product: string
   fingerprint: string
   security_patch: string
+  device_initial_sdk_int: number
+  spoof_build: boolean
+  spoof_props: boolean
+  spoof_vending_build: boolean
 }
 
 export type PifFingerprintState = {
@@ -227,12 +231,22 @@ function parsePifState(output: string): PifFingerprintState {
     }
     return { enabled: false }
   }
-  if (!hasOnlyKeys(parsed, ['enabled', 'model', 'product', 'fingerprint', 'security_patch'])
+  if (!hasOnlyKeys(parsed, [
+        'enabled', 'model', 'product', 'fingerprint', 'security_patch',
+        'device_initial_sdk_int', 'spoof_build', 'spoof_props', 'spoof_vending_build',
+      ])
       || !isSafeText(parsed.model, MAX_PIF_MODEL_LENGTH)
       || !isPifProduct(parsed.product)
       || !isSafeText(parsed.fingerprint, MAX_PIF_FINGERPRINT_LENGTH)
       || !isSafeText(parsed.security_patch, 10)
-      || !isSecurityPatchDate(parsed.security_patch)) {
+      || !isSecurityPatchDate(parsed.security_patch)
+      || typeof parsed.device_initial_sdk_int !== 'number'
+      || !Number.isInteger(parsed.device_initial_sdk_int)
+      || parsed.device_initial_sdk_int <= 0
+      || parsed.device_initial_sdk_int > 2147483647
+      || typeof parsed.spoof_build !== 'boolean'
+      || typeof parsed.spoof_props !== 'boolean'
+      || typeof parsed.spoof_vending_build !== 'boolean') {
     throw new Error('OMK returned an invalid enabled PIF fingerprint state')
   }
   return {
@@ -241,6 +255,10 @@ function parsePifState(output: string): PifFingerprintState {
     product: parsed.product,
     fingerprint: parsed.fingerprint,
     security_patch: parsed.security_patch,
+    device_initial_sdk_int: parsed.device_initial_sdk_int,
+    spoof_build: parsed.spoof_build,
+    spoof_props: parsed.spoof_props,
+    spoof_vending_build: parsed.spoof_vending_build,
   }
 }
 
@@ -691,16 +709,30 @@ export class Cli {
     return devices
   }
 
-  async applyPifFingerprint(product: string): Promise<EnabledPifFingerprintState> {
+  async applyPifFingerprint(
+    product: string,
+    spoofBuild = true,
+    spoofProps = true,
+    spoofVendingBuild = false,
+  ): Promise<EnabledPifFingerprintState> {
     if (!isPifProduct(product)) throw new Error('Invalid PIF product')
+    if (typeof spoofBuild !== 'boolean' || typeof spoofProps !== 'boolean'
+        || typeof spoofVendingBuild !== 'boolean') {
+      throw new Error('Invalid PIF spoofing options')
+    }
     const { keymint } = await this.#getHelperPaths()
     const output = await this.#run(
       keymint,
-      ['--webui-apply-pif-fingerprint', product],
+      [
+        '--webui-apply-pif-fingerprint', product,
+        spoofBuild ? '1' : '0', spoofProps ? '1' : '0', spoofVendingBuild ? '1' : '0',
+      ],
       MAX_PIF_STATE_BYTES,
     )
     const state = parsePifState(output)
-    if (!state.enabled || state.product !== product) {
+    if (!state.enabled || state.product !== product
+        || state.spoof_build !== spoofBuild || state.spoof_props !== spoofProps
+        || state.spoof_vending_build !== spoofVendingBuild) {
       throw new Error('OMK returned an unexpected PIF fingerprint state')
     }
     return state

@@ -2,6 +2,8 @@
 
 MODDIR=${0%/*}
 TARGET_DIR=/data/misc/keystore/omk
+# Keymint pins auto vb_key in data/vbmeta_state.toml. Preserve this device-local
+# snapshot across updates; it must not be seeded from the module template.
 LOG_DIR=$TARGET_DIR/logs
 SOTER_DIR=$TARGET_DIR/data/soterta
 TARGET_KEYBOX=$TARGET_DIR/keybox.xml
@@ -146,18 +148,18 @@ reapply_security_patch_early() (
   [ -n "$RESETPROP_BIN" ] || return 0
 
   if [ "$RESETPROP_MODE" = ksud ]; then
-    "$RESETPROP_BIN" resetprop ro.vendor.build.security_patch "$PATCH_DATE" \
+    "$RESETPROP_BIN" resetprop -n ro.vendor.build.security_patch "$PATCH_DATE" \
       >/dev/null 2>&1
-    "$RESETPROP_BIN" resetprop ro.build.version.security_patch "$PATCH_DATE" \
+    "$RESETPROP_BIN" resetprop -n ro.build.version.security_patch "$PATCH_DATE" \
       >/dev/null 2>&1
   elif [ "$RESETPROP_MODE" = apd ]; then
-    "$RESETPROP_BIN" resetprop ro.vendor.build.security_patch "$PATCH_DATE" \
+    "$RESETPROP_BIN" resetprop -n ro.vendor.build.security_patch "$PATCH_DATE" \
       >/dev/null 2>&1
-    "$RESETPROP_BIN" resetprop ro.build.version.security_patch "$PATCH_DATE" \
+    "$RESETPROP_BIN" resetprop -n ro.build.version.security_patch "$PATCH_DATE" \
       >/dev/null 2>&1
   else
-    "$RESETPROP_BIN" ro.vendor.build.security_patch "$PATCH_DATE" >/dev/null 2>&1
-    "$RESETPROP_BIN" ro.build.version.security_patch "$PATCH_DATE" >/dev/null 2>&1
+    "$RESETPROP_BIN" -n ro.vendor.build.security_patch "$PATCH_DATE" >/dev/null 2>&1
+    "$RESETPROP_BIN" -n ro.build.version.security_patch "$PATCH_DATE" >/dev/null 2>&1
   fi
 
   GETPROP_BIN=/system/bin/getprop
