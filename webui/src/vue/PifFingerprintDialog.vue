@@ -8,6 +8,7 @@ import {
   MiuixIcon,
   MiuixProgressIndicator,
   MiuixRadioButtonPreference,
+  MiuixSwitch,
   MiuixSwitchPreference,
 } from 'miuix-vue'
 import { Info, Refresh, Tune } from 'miuix-vue/icons'
@@ -240,14 +241,30 @@ async function apply(): Promise<void> {
         {{ tr('pif_preview', 'Browser preview with example data. No device configuration is changed.') }}
       </p>
       <MiuixCard class="pif-card" press-feedback="none">
-        <MiuixSwitchPreference
-          v-model="desiredEnabled"
+        <!-- Toggle on click, not the switch's pointerup: collapsing this sheet
+             before click can retarget it to the backdrop and discard the edit. -->
+        <MiuixBasicComponent
+          clickable
+          role="switch"
+          :aria-checked="desiredEnabled"
+          :aria-label="tr('pif_enable_spoofing', 'Enable PIF fingerprint spoofing')"
+          :aria-disabled="busy || stateStatus !== 'ready'"
           :title="tr('pif_enable_spoofing', 'Enable PIF fingerprint spoofing')"
           :summary="tr('pif_zygisk_next_required', 'Install and enable Zygisk Next separately. OMK does not bundle it.')"
           :disabled="busy || stateStatus !== 'ready'"
+          @click="desiredEnabled = !desiredEnabled"
         >
           <template #start><MiuixIcon :icon="Tune" :size="23" /></template>
-        </MiuixSwitchPreference>
+          <template #end>
+            <MiuixSwitch
+              class="pif-enable-control"
+              :model-value="desiredEnabled"
+              :disabled="busy || stateStatus !== 'ready'"
+              tabindex="-1"
+              aria-hidden="true"
+            />
+          </template>
+        </MiuixBasicComponent>
       </MiuixCard>
 
       <MiuixCard v-if="desiredEnabled && stateStatus === 'ready'" class="pif-card" press-feedback="none">
@@ -375,6 +392,10 @@ async function apply(): Promise<void> {
 
 .pif-card {
   flex: none;
+}
+
+.pif-enable-control {
+  pointer-events: none;
 }
 
 .pif-preview {
