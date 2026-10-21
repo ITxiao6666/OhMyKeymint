@@ -115,7 +115,16 @@ const teeState = computed(() => ({
 const keyboxChains = computed(() => {
   const inspector = props.keyboxInspector
   if (!inspector) return []
-  return [inspector.rsa, inspector.ec].filter((chain): chain is NonNullable<typeof chain> => chain !== null)
+  return [inspector.rsa, inspector.ec]
+    .filter((chain): chain is NonNullable<typeof chain> => chain !== null)
+    .map(chain => ({
+      ...chain,
+      certificates: [...chain.certificates].reverse().map(certificate => ({
+        ...certificate,
+        validFromLabel: certificateDate(certificate.valid_from),
+        validUntilLabel: certificateDate(certificate.valid_until),
+      })),
+    }))
 })
 
 const serviceRows = computed(() => {
@@ -136,14 +145,18 @@ const hardwareRows = computed(() => {
   ]
 })
 
-function diagnosticStatusLabel(status: string): string {
+function diagnosticStatusLabel(status: string, hardware = false): string {
   switch (status) {
     case 'running': return tr('home_diag_running', 'Running')
     case 'stopped': return tr('home_diag_stopped', 'Stopped')
     case 'configured': return tr('home_diag_configured', 'Configured')
     case 'disabled': return tr('home_diag_disabled', 'Disabled')
-    case 'available': return tr('home_diag_available', 'Available')
-    case 'unavailable': return tr('home_diag_unavailable', 'Not registered')
+    case 'available': return hardware
+      ? tr('home_diag_device_supported', 'Device supported')
+      : tr('home_diag_available', 'Available')
+    case 'unavailable': return hardware
+      ? tr('home_diag_device_unsupported', 'Device not supported')
+      : tr('home_diag_unavailable', 'Not registered')
     case 'error': return tr('home_diag_error', 'Probe failed')
     default: return tr('home_diag_unknown', 'Unknown')
   }
@@ -153,19 +166,22 @@ function diagnosticTone(status: string): string {
   return status === 'error' ? 'error' : 'muted'
 }
 
+// Language selection reloads the WebUI; one formatter serves this view.
+const certificateDateFormatter = new Intl.DateTimeFormat(i18n.lang, {
+  timeZone: 'UTC',
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+})
+
 function certificateDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  const parts = new Intl.DateTimeFormat(i18n.lang, {
-    timeZone: 'UTC',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date)
+  const parts = certificateDateFormatter.formatToParts(date)
   if (i18n.lang.startsWith('zh')) {
     const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find(value => value.type === type)?.value ?? ''
     return `${part('year')}年${date.getUTCMonth() + 1}月${part('day')}日 ${part('hour')}:${part('minute')}:${part('second')} UTC`
@@ -227,7 +243,7 @@ function certificateDate(value: string): string {
           {{ tr('tools_diagnostics_refresh', 'Refresh') }}
         </MiuixButton>
       </header>
-      <div v-if="diagnosticsStatus === 'loading'" class="diagnostics-empty" role="status">
+      <div v-if="diagnosticsStatus === 'loading' && !diagnostics" class="diagnostics-empty" role="status">
         <MiuixProgressIndicator type="circular" :size="22" :stroke-width="2" />
         <span>{{ tr('home_status_loading', 'Checking') }}</span>
       </div>
@@ -249,7 +265,7 @@ function certificateDate(value: string): string {
         <div v-for="row in hardwareRows" :key="row.id" class="diagnostics-service">
           <dt>{{ row.label }}</dt>
           <dd :data-tone="row.value.status === 'error' ? 'error' : 'muted'">
-            {{ diagnosticStatusLabel(row.value.status) }}
+            {{ diagnosticStatusLabel(row.value.status, true) }}
             <small v-if="'name' in row.value && row.value.name">
               {{ row.value.name }}<template v-if="row.value.version !== null"> · v{{ row.value.version }}</template>
             </small>
@@ -293,7 +309,7 @@ function certificateDate(value: string): string {
             >
               <div class="keybox-certificates">
                 <article
-                  v-for="(certificate, index) in [...chain.certificates].reverse()"
+                  v-for="(certificate, index) in chain.certificates"
                   :key="`${chain.algorithm}-${certificate.serial}-${index}`"
                   class="keybox-certificate"
                 >
@@ -305,11 +321,11 @@ function certificateDate(value: string): string {
                     </div>
                     <div>
                       <dt>{{ tr('home_keybox_valid_from', 'Not before') }}</dt>
-                      <dd>{{ certificateDate(certificate.valid_from) }}</dd>
+                      <dd>{{ certificate.validFromLabel }}</dd>
                     </div>
                     <div>
                       <dt>{{ tr('home_keybox_valid_until', 'Not after') }}</dt>
-                      <dd>{{ certificateDate(certificate.valid_until) }}</dd>
+                      <dd>{{ certificate.validUntilLabel }}</dd>
                     </div>
                     <div>
                       <dt>{{ tr('home_keybox_serial', 'Serial number') }}</dt>

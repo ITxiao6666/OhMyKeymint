@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import {
   MiuixBasicComponent,
   MiuixBottomSheet,
@@ -12,6 +12,7 @@ import {
   MiuixSwitchPreference,
 } from 'miuix-vue'
 import { Info, Refresh, Tune } from 'miuix-vue/icons'
+import { afterPaint } from '../app_list/app_list'
 import { Cli, type PifDevice, type PifFingerprintState } from '../cli'
 import { i18n } from '../i18n'
 import { isDev } from '../utils/dev'
@@ -47,8 +48,10 @@ const emit = defineEmits<{
   notify: [message: string, error?: boolean]
 }>()
 
-const currentState = ref<PifFingerprintState | null>(null)
-const devices = ref<PifDevice[]>([])
+const currentState = shallowRef<PifFingerprintState | null>(null)
+const devices = shallowRef<PifDevice[]>([])
+const renderedDeviceCount = ref(0)
+const renderedDevices = computed(() => devices.value.slice(0, renderedDeviceCount.value))
 const stateStatus = ref<LoadStatus>('loading')
 const catalogStatus = ref<LoadStatus>('loading')
 const stateError = ref('')
@@ -58,7 +61,8 @@ const spoofBuild = ref(true)
 const spoofProps = ref(true)
 const spoofVendingBuild = ref(false)
 const selectedProduct = ref<string | null>(RANDOM_SELECTION)
-const loadGeneration = ref(0)
+let loadGeneration = 0
+let catalogRequested = false
 const busy = ref(false)
 
 function tr(key: string, fallback: string, ...args: unknown[]): string {
@@ -76,11 +80,33 @@ const canApply = computed(() => stateStatus.value === 'ready'
 
 watch(() => props.modelValue, open => {
   if (open) load()
-  else loadGeneration.value++
-})
+  else loadGeneration++
+}, { immediate: true })
+
+// Radio preferences carry their own animations. Fill the visible viewport first
+// instead of mounting the full downloaded catalog in one opening frame.
+watch([() => props.modelValue, desiredEnabled, catalogStatus, devices], async ([open, enabled, status, items], _, onCleanup) => {
+  let cancelled = false
+  onCleanup(() => { cancelled = true })
+  // A disabled profile can be inspected or disabled without downloading the
+  // catalog. Fetch it only when device selection is actually displayed.
+  if (open && enabled && status === 'loading' && !catalogRequested) {
+    catalogRequested = true
+    void loadCatalog(loadGeneration)
+  }
+  renderedDeviceCount.value = open && enabled && status === 'ready' ? Math.min(16, items.length) : 0
+  if (!renderedDeviceCount.value) return
+  while (renderedDeviceCount.value < items.length) {
+    await afterPaint()
+    if (cancelled) return
+    renderedDeviceCount.value = Math.min(renderedDeviceCount.value + 16, items.length)
+  }
+}, { immediate: true })
+
+onBeforeUnmount(() => { loadGeneration++ })
 
 function isActive(generation: number): boolean {
-  return generation === loadGeneration.value && props.modelValue
+  return generation === loadGeneration && props.modelValue
 }
 
 function reconcileSelection(): void {
@@ -92,6 +118,8 @@ function reconcileSelection(): void {
 }
 
 function load(): void {
+  if (!props.modelValue || busy.value) return
+  catalogRequested = false
   currentState.value = null
   devices.value = []
   stateStatus.value = 'loading'
@@ -103,13 +131,14 @@ function load(): void {
   spoofProps.value = true
   spoofVendingBuild.value = false
   selectedProduct.value = RANDOM_SELECTION
-  const generation = ++loadGeneration.value
+  const generation = ++loadGeneration
   void loadState(generation)
-  void loadCatalog(generation)
 }
 
 async function loadState(generation: number): Promise<void> {
   try {
+    await afterPaint()
+    if (!isActive(generation)) return
     const state = preview
       ? previewState
       : await props.cli.getPifFingerprintState()
@@ -131,6 +160,8 @@ async function loadState(generation: number): Promise<void> {
 
 async function loadCatalog(generation: number): Promise<void> {
   try {
+    await afterPaint()
+    if (!isActive(generation)) return
     const result = preview
       ? previewDevices
       : await props.cli.listPifDevices()
@@ -146,17 +177,17 @@ async function loadCatalog(generation: number): Promise<void> {
 }
 
 function retryState(): void {
-  if (busy.value || !props.modelValue) return
+  if (busy.value || !props.modelValue || stateStatus.value === 'loading') return
   stateStatus.value = 'loading'
   stateError.value = ''
-  void loadState(loadGeneration.value)
+  void loadState(loadGeneration)
 }
 
 function retryCatalog(): void {
-  if (busy.value || !props.modelValue) return
+  if (busy.value || !props.modelValue || catalogStatus.value === 'loading') return
   catalogStatus.value = 'loading'
   catalogError.value = ''
-  void loadCatalog(loadGeneration.value)
+  void loadCatalog(loadGeneration)
 }
 
 function requestClose(): boolean {
@@ -354,7 +385,7 @@ async function apply(): Promise<void> {
             @select="selectedProduct = RANDOM_SELECTION"
           />
           <MiuixRadioButtonPreference
-            v-for="device in devices"
+            v-for="device in renderedDevices"
             :key="device.product"
             :model-value="selectedProduct === device.product"
             :title="device.model"
@@ -385,7 +416,9 @@ async function apply(): Promise<void> {
 
 <style scoped>
 .pif-sheet {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  min-height: min(50vh, 420px);
   gap: 12px;
   padding: 2px 0 max(18px, env(safe-area-inset-bottom));
 }
@@ -461,6 +494,7 @@ async function apply(): Promise<void> {
 }
 
 .pif-status {
+  flex: 1;
   min-height: 112px;
   display: flex;
   flex-direction: column;
@@ -483,6 +517,7 @@ async function apply(): Promise<void> {
 }
 
 .sheet-actions {
+  flex: none;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;

@@ -318,43 +318,8 @@ fn remove_profile(path: &Path) -> Result<()> {
 }
 
 fn refresh_target_processes() -> Result<()> {
-    let entries = fs::read_dir("/proc").context("failed to scan processes after PIF update")?;
-    let mut failures = Vec::new();
-    for entry in entries.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|value| value.parse::<i32>().ok())
-        else {
-            continue;
-        };
-        let Ok(cmdline) = fs::read(entry.path().join("cmdline")) else {
-            continue;
-        };
-        let name = cmdline.split(|byte| *byte == 0).next().unwrap_or_default();
-        if !is_target_process_name(name) {
-            continue;
-        }
-        if unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
-            let error = std::io::Error::last_os_error();
-            // A matching process can exit between the /proc scan and kill.
-            // Treat that expected race as an already-refreshed process.
-            if error.raw_os_error() != Some(libc::ESRCH) {
-                failures.push(format!(
-                    "{} (pid {pid}): {error}",
-                    String::from_utf8_lossy(name)
-                ));
-            }
-        }
-    }
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        bail!(
-            "failed to stop PIF target process(es): {}",
-            failures.join("; ")
-        );
-    }
+    crate::utils::stop_processes_matching(is_target_process_name)
+        .context("failed to refresh processes after PIF update")
 }
 
 fn is_target_process_name(name: &[u8]) -> bool {

@@ -107,6 +107,14 @@ html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
   -ms-overflow-style: none;
 }
 .m-bottom-sheet__inner { padding-bottom: var(--omk-bottom-inset); }
+// These layers exist only while their overlay is mounted. Prepare separate
+// compositor surfaces for the scrim and moving panel, including drag/rebound,
+// instead of repeatedly rasterizing the rounded panel with the whole page.
+.m-dialog__backdrop,
+.m-bottom-sheet__backdrop { will-change: opacity; }
+.m-dialog__content,
+.m-bottom-sheet__sheet,
+.m-bottom-sheet__inner { will-change: transform; }
 .m-bottom-sheet__content::-webkit-scrollbar,
 .m-dialog__content::-webkit-scrollbar {
   display: none;
@@ -422,6 +430,17 @@ button { touch-action: manipulation; }
    * beneath it.  Keep an rgba fallback for older Android WebViews, then use
    * the active MIUIX surface token so dark/AMOLED themes never turn white. */
   background: var(--omk-bar-background);
+  background: color-mix(in srgb, var(--m-color-surface) 87%, transparent);
+  -webkit-backdrop-filter: blur(25px) saturate(1.2);
+  backdrop-filter: blur(25px) saturate(1.2);
+}
+// The dock's safe-area padding lies outside the navigation surface. Paint it
+// independently in viewport coordinates so scrolling text cannot leak beneath
+// the gesture handle, including when the navigation itself is scaled.
+:root[data-bar-blur='true'][data-floating-bottom-bar='false'] body::after {
+  background: var(--m-color-surface);
+}
+:root[data-backdrop-blur-supported='true'][data-bar-blur='true'][data-floating-bottom-bar='false'] body::after {
   background: color-mix(in srgb, var(--m-color-surface) 87%, transparent);
   -webkit-backdrop-filter: blur(25px) saturate(1.2);
   backdrop-filter: blur(25px) saturate(1.2);

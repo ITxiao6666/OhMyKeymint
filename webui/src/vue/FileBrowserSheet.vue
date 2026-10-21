@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   MiuixBasicComponent,
   MiuixBottomSheet,
@@ -12,6 +12,7 @@ import {
 import { Back, File, Folder, Import } from 'miuix-vue/icons'
 import type { FileSelector } from '../file_selector/file_selector'
 import { i18n } from '../i18n'
+import { afterPaint } from '../app_list/app_list'
 
 const props = defineProps<{ selector: FileSelector }>()
 const revision = ref(0)
@@ -27,7 +28,25 @@ const state = computed(() => {
     canGoBack: props.selector.canGoBack,
   }
 })
-onBeforeUnmount(unsubscribe)
+const visibleEntryCount = ref(16)
+let renderGeneration = 0
+watch([() => state.value.open, () => state.value.entries], async ([open, entries]) => {
+  const generation = ++renderGeneration
+  visibleEntryCount.value = 16
+  if (!open) return
+  // Shared-storage folders can contain hundreds of entries. Let the sheet
+  // paint and accept Back between batches instead of mounting them at once.
+  while (visibleEntryCount.value < entries.length) {
+    await afterPaint()
+    if (generation !== renderGeneration || !state.value.open) return
+    visibleEntryCount.value += 16
+  }
+}, { immediate: true })
+const renderedEntries = computed(() => state.value.entries.slice(0, visibleEntryCount.value))
+onBeforeUnmount(() => {
+  renderGeneration++
+  unsubscribe()
+})
 </script>
 
 <template>
@@ -76,7 +95,7 @@ onBeforeUnmount(unsubscribe)
         </div>
         <MiuixCard v-if="state.entries.length > 0" class="file-list" press-feedback="none">
           <MiuixBasicComponent
-            v-for="entry in state.entries"
+            v-for="entry in renderedEntries"
             :key="entry.name"
             :title="entry.name"
             clickable

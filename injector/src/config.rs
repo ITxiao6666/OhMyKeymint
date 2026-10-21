@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
@@ -175,6 +176,34 @@ static CONFIG: OnceLock<RwLock<Arc<InjectorConfig>>> = OnceLock::new();
 static WATCHER_STARTED: OnceLock<()> = OnceLock::new();
 static CONFIG_FILE_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
+/// A stable directory inode serializes atomic replacements across the WebUI
+/// command processes and the automatic package selector without a lock file.
+pub(crate) struct DirectoryLock(fs::File);
+
+impl DirectoryLock {
+    pub(crate) fn acquire(directory: &Path) -> io::Result<Self> {
+        let file = fs::File::open(directory)?;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self(file))
+    }
+}
+
+impl Drop for DirectoryLock {
+    fn drop(&mut self) {
+        let _ = unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+fn lock_config_directory(path: &Path) -> io::Result<DirectoryLock> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("config has no parent"))?;
+    fs::create_dir_all(parent)?;
+    DirectoryLock::acquire(parent)
+}
+
 impl LoadContext {
     fn label(self) -> &'static str {
         match self {
@@ -218,6 +247,7 @@ fn load_from_path(path: &Path, allow_migration: bool) -> Result<InjectorConfig, 
     let _write_guard = CONFIG_FILE_WRITE_LOCK
         .lock()
         .map_err(|_| LoadError::Io(io::Error::other("config file write lock poisoned")))?;
+    let _directory_guard = lock_config_directory(path).map_err(LoadError::Io)?;
     let contents = fs::read_to_string(path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
             LoadError::Missing(error)
@@ -335,6 +365,7 @@ fn write_config(path: &Path, config: &InjectorConfig) -> io::Result<()> {
     let _write_guard = CONFIG_FILE_WRITE_LOCK
         .lock()
         .map_err(|_| io::Error::other("config file write lock poisoned"))?;
+    let _directory_guard = lock_config_directory(path)?;
     let contents = render_config(config)?;
     write_config_contents(path, &contents)
 }
@@ -365,6 +396,7 @@ fn replace_scoop_at_path(path: &Path, packages: Vec<String>) -> Result<(), Strin
     let _write_guard = CONFIG_FILE_WRITE_LOCK
         .lock()
         .map_err(|_| "config file write lock poisoned".to_string())?;
+    let _directory_guard = lock_config_directory(path).map_err(|error| error.to_string())?;
     let contents = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let (mut config, _) = parse_versioned_config(&contents, false)?;
@@ -382,6 +414,53 @@ fn replace_scoop_at_path(path: &Path, packages: Vec<String>) -> Result<(), Strin
         .map_err(|error| format!("refusing to write invalid {}: {error}", path.display()))?;
     write_config_contents(path, &rendered)
         .map_err(|error| format!("failed to update {}: {error}", path.display()))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ScoopDelta {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+pub(crate) fn update_scoop_for_webui(delta: ScoopDelta) -> Result<Vec<String>, String> {
+    update_scoop_at_path(&config_path(), delta)
+}
+
+fn update_scoop_at_path(path: &Path, delta: ScoopDelta) -> Result<Vec<String>, String> {
+    let _write_guard = CONFIG_FILE_WRITE_LOCK
+        .lock()
+        .map_err(|_| "config file write lock poisoned".to_string())?;
+    let _directory_guard = lock_config_directory(path).map_err(|error| error.to_string())?;
+    let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let (mut config, _) = parse_versioned_config(&contents, false)?;
+    for target in delta.added.iter().chain(&delta.removed) {
+        if parse_scoop_target(target).is_none() {
+            return Err(format!("invalid caller target in scoop: {target}"));
+        }
+    }
+    let previous = config.scoop.clone();
+    let added = normalize_packages(delta.added);
+    let removed = normalize_packages(delta.removed);
+    config.scoop.retain(|target| !removed.contains(target));
+    for target in added {
+        let covered = match parse_scoop_target(&target) {
+            Some(ScoopTarget::PackageUser(package, _)) => config.scoop.iter().any(|p| p == package),
+            _ => false,
+        };
+        if !covered && !config.scoop.contains(&target) {
+            config.scoop.push(target);
+        }
+    }
+    if config.scoop == previous {
+        return Ok(config.scoop);
+    }
+    let rendered = render_config(&config).map_err(|error| error.to_string())?;
+    parse_versioned_config(&rendered, false)?;
+    if rendered != contents {
+        write_config_contents(path, &rendered).map_err(|error| error.to_string())?;
+    }
+    Ok(config.scoop)
 }
 
 fn is_valid_exact_package_name(value: &str) -> bool {

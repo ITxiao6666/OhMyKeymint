@@ -27,6 +27,7 @@ pub mod att_mgr;
 pub mod config;
 pub mod consts;
 pub mod global;
+pub mod gms_cache;
 pub mod keybox;
 pub mod keymaster;
 pub mod keymint;
@@ -35,6 +36,7 @@ pub mod macros;
 pub mod pif_spoof;
 pub mod plat;
 pub mod proto;
+pub mod rkp_repair;
 pub mod security_patch;
 pub mod selinux;
 pub mod soter_beta;
@@ -767,7 +769,7 @@ fn handle_webui_soter_hal_command(
                 Ok(config) => config,
                 Err(error) => return Some(Err(format!("{error:#}"))),
             };
-            if config.enabled {
+            if config.enabled || config.app_enabled {
                 if let Err(error) = ensure_soter_features_are_exclusive(
                     true,
                     soter_beta::is_enabled(),
@@ -783,6 +785,19 @@ fn handle_webui_soter_hal_command(
             Some(
                 soter_hal::save(config)
                     .map(|()| "soter_hal_saved".to_string())
+                    .map_err(|error| format!("{error:#}")),
+            )
+        }
+        "--webui-set-soter-app-target-base64" => {
+            let Some(payload) = args.next() else {
+                return Some(Err("Soter app selection requires one encoded change".into()));
+            };
+            if args.next().is_some() {
+                return Some(Err("Soter app selection accepts only one change".into()));
+            }
+            Some(
+                soter_hal::AppTargetChange::parse_base64(&payload)
+                    .and_then(soter_hal::save_app_target)
                     .map_err(|error| format!("{error:#}")),
             )
         }
@@ -982,6 +997,33 @@ fn handle_webui_activity_command() -> Option<Result<String, String>> {
     }
 }
 
+fn handle_webui_maintenance_command(
+    mut args: impl Iterator<Item = String>,
+) -> Option<Result<String, String>> {
+    match args.next()?.as_str() {
+        "--webui-clear-gms-cache" => {
+            if args.next().is_some() {
+                return Some(Err(
+                    "--webui-clear-gms-cache does not accept arguments".into()
+                ));
+            }
+            Some(gms_cache::clear().map_err(|error| format!("{error:#}")))
+        }
+        "--webui-repair-rkp" => {
+            if args.next().as_deref() != Some("--confirm-persistent-write") || args.next().is_some()
+            {
+                return Some(Err("RKP repair requires --confirm-persistent-write; the vendor tool can permanently modify persist/TEE data".into()));
+            }
+            Some(
+                rkp_repair::run()
+                    .map(|()| "rkp_tool_completed".into())
+                    .map_err(|error| format!("{error:#}")),
+            )
+        }
+        _ => None,
+    }
+}
+
 fn main() {
     // WebUI diagnostics query the registered Binder services before entering
     // the long-running KeyMint server path. Initialize the Binder process
@@ -990,6 +1032,7 @@ fn main() {
     let _ = rsbinder::ProcessState::init_default();
     if let Some(result) = handle_webui_diagnostics_command()
         .or_else(|| handle_webui_app_patch_command(std::env::args().skip(1)))
+        .or_else(|| handle_webui_maintenance_command(std::env::args().skip(1)))
     {
         match result {
             Ok(output) => println!("{output}"),
@@ -1229,6 +1272,9 @@ mod tests {
             vec!["--webui-set-soter-hal-base64", "not-base64"],
             vec!["--webui-set-soter-hal-base64", "/w=="],
             vec!["--webui-set-soter-hal-base64", "e30="],
+            vec!["--webui-set-soter-app-target-base64"],
+            vec!["--webui-set-soter-app-target-base64", "e30="],
+            vec!["--webui-set-soter-app-target-base64", "bad", "extra"],
         ] {
             assert!(
                 handle_webui_soter_hal_command(arguments.into_iter().map(str::to_string))
@@ -1236,6 +1282,23 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn maintenance_requires_exact_arguments_before_any_side_effect() {
+        for arguments in [
+            vec!["--webui-clear-gms-cache", "extra"],
+            vec!["--webui-repair-rkp"],
+            vec!["--webui-repair-rkp", "true"],
+            vec!["--webui-repair-rkp", "--confirm-persistent-write", "extra"],
+        ] {
+            assert!(
+                handle_webui_maintenance_command(arguments.into_iter().map(str::to_string))
+                    .unwrap()
+                    .is_err()
+            );
+        }
+        assert!(handle_webui_maintenance_command(["unknown".to_string()].into_iter()).is_none());
     }
 
     #[test]

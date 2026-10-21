@@ -31,15 +31,19 @@ pub fn is_enabled() -> Result<bool> {
 
 pub fn save(enabled: bool) -> Result<()> {
     require_root()?;
-    save_to(
+    let changed = save_to(
         Path::new(soter::STATE_PATH),
         enabled,
         KEYSTORE_UID,
         KEYSTORE_GID,
-    )
+    )?;
+    if changed {
+        crate::utils::refresh_soter_host()?;
+    }
+    Ok(())
 }
 
-fn save_to(path: &Path, enabled: bool, uid: u32, gid: u32) -> Result<()> {
+fn save_to(path: &Path, enabled: bool, uid: u32, gid: u32) -> Result<bool> {
     let parent = path
         .parent()
         .context("Soter Beta state has no parent directory")?;
@@ -56,6 +60,7 @@ fn save_to(path: &Path, enabled: bool, uid: u32, gid: u32) -> Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error).context("failed to inspect Soter Beta state"),
     }
+    let previous = soter::read_from(path).context("failed to read previous Soter Beta state")?;
     atomic_replace_preserving_metadata(path, soter::canonical_bytes(enabled), 0o600, uid, gid)
         .context("failed to save Soter Beta state")?;
 
@@ -77,7 +82,7 @@ fn save_to(path: &Path, enabled: bool, uid: u32, gid: u32) -> Result<()> {
     if soter::read_from(path).context("failed to verify Soter Beta state")? != enabled {
         bail!("Soter Beta state changed while being saved");
     }
-    Ok(())
+    Ok(previous != enabled)
 }
 
 #[cfg(test)]
@@ -108,6 +113,19 @@ mod tests {
             assert_eq!(metadata.gid(), gid);
             fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
         }
+    }
+
+    #[test]
+    fn only_changed_beta_modes_require_host_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("state");
+        let uid = unsafe { libc::geteuid() };
+        let gid = unsafe { libc::getegid() };
+        assert!(!save_to(&path, false, uid, gid).unwrap());
+        assert!(save_to(&path, true, uid, gid).unwrap());
+        assert!(!save_to(&path, true, uid, gid).unwrap());
+        assert!(save_to(&path, false, uid, gid).unwrap());
+        assert!(!save_to(&path, false, uid, gid).unwrap());
     }
 
     #[test]

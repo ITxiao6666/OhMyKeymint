@@ -7,8 +7,12 @@ license = "AGPL-3.0-or-later"
 description = "Software Soter TA (A-side): local key ledger, blob codec and AIDL reply encoder"
 
 [lib]
-# rlib for the workspace and its tests, staticlib for the soter-svc daemon.
+# The daemon and the workspace share the same Rust implementation.
 crate-type = ["rlib", "staticlib"]
+
+[[bin]]
+name = "soterta-svc"
+path = "src/bin/soterta-svc.rs"
 
 [dependencies]
 pif-common = { path = "../pif-common", features = ["soter-crypto"] }
@@ -19,3 +23,7 @@ serde_json = "1.0"
 hex = "0.4"
 base64 = "0.23"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+libc = "0.2.189"
+log = "0.4.34"
+android_logger = "0.15.1"
+rsbinder = { version = "0.10.0", features = ["android_12_plus"] }

@@ -42,6 +42,8 @@ const PROPERTY_FIND_SYMBOL: &CStr = c"__system_property_find";
 const PROPERTY_GET_SYMBOL: &CStr = c"__system_property_get";
 const PROPERTY_READ_LEGACY_SYMBOL: &CStr = c"__system_property_read";
 const PROPERTY_VALUE_MAX: usize = 92;
+// AOSP prop_info's legacy value for read-only properties that exceed PROP_VALUE_MAX.
+const LONG_LEGACY_ERROR: &CStr = c"Must use __system_property_read_callback() to read";
 const BOARD_FIRST_API_LEVEL: &CStr = c"32";
 const MAX_CALLBACK_WRAPPER_INSTRUCTIONS: usize = 16;
 const INLINE_PATCH_BYTES: usize = 24;
@@ -129,7 +131,7 @@ impl ZygiskModule for PifSpoofModule {
         let process = read_java_string(&mut env, args.nice_name);
         let data_dir = read_java_string(&mut env, args.app_data_dir);
         if is_soter_target(process.as_deref(), data_dir.as_deref()) {
-            soter::log("Soter Beta target selected: com.tencent.soter.soterserver");
+            soter::log("Soter host selected: com.tencent.soter.soterserver");
             match api.with_companion(read_soter_from_companion) {
                 Ok(Ok(true)) => {
                     // Native Binder callbacks may outlive a partially installed
@@ -139,12 +141,23 @@ impl ZygiskModule for PifSpoofModule {
                         Err(error) => soter::log(&format!("Soter Beta hook unavailable: {error}")),
                     }
                 }
-                result => {
-                    if matches!(result, Ok(Ok(false))) {
-                        soter::log("Soter Beta is disabled");
-                    } else {
-                        soter::log(&format!("Soter Beta companion unavailable: {result:?}"));
+                Ok(Ok(false)) => {
+                    match soter::prepare_relay(&mut api) {
+                        Ok(()) => {
+                            // Once installation is attempted, native callbacks
+                            // can retain this library even if PLT commit fails.
+                            if let Err(error) = soter::install(&mut api) {
+                                soter::log(&format!("Per-app Soter hook unavailable: {error}"));
+                            }
+                        }
+                        Err(error) => {
+                            soter::log(&format!("Per-app Soter companion unavailable: {error}"));
+                            api.set_option(ZygiskOption::DlCloseModuleLibrary);
+                        }
                     }
+                }
+                result => {
+                    soter::log(&format!("Soter mode configuration unavailable: {result:?}"));
                     api.set_option(ZygiskOption::DlCloseModuleLibrary);
                 }
             }
@@ -256,9 +269,11 @@ impl ZygiskModule for PifSpoofModule {
         if target.spoof_build(&profile) {
             match apply_build_fields(&mut env, &profile, target) {
                 Ok(()) => log_android(match target {
-                    PifTarget::Gms => "PIF GMS Build fields and launch SDK applied",
+                    PifTarget::Gms => {
+                        "PIF GMS Build fields, TYPE flags and launch SDK readback verified"
+                    }
                     PifTarget::PlayStore => {
-                        "PIF Play Store Build fields applied; SDK and native properties unchanged"
+                        "PIF Play Store Build fields and TYPE flags readback verified"
                     }
                 }),
                 Err(error) => log_android(&format!("failed to apply PIF Build fields: {error}")),
@@ -526,6 +541,9 @@ fn initialize_property_spoof(profile: &PifProfile) -> Result<(), String> {
 }
 
 fn log_property_probe() {
+    let Some(values) = PROPERTY_SPOOF.get() else {
+        return;
+    };
     let Some(find_address) = resolve_symbol_address(PROPERTY_FIND_SYMBOL) else {
         log_android("PIF property probe could not resolve __system_property_find");
         return;
@@ -536,34 +554,59 @@ fn log_property_probe() {
     };
     let find: PropertyFind = unsafe { std::mem::transmute(find_address) };
     let read: PropertyReadCallbackApi = unsafe { std::mem::transmute(read_address) };
-    let name = c"ro.build.fingerprint";
-    let property = unsafe { find(name.as_ptr()) };
-    if property.is_null() {
-        log_android("PIF property probe could not find ro.build.fingerprint");
-        return;
+    let names = [
+        c"ro.build.fingerprint",
+        c"ro.product.manufacturer",
+        c"ro.product.model",
+        c"ro.product.brand",
+        c"ro.product.name",
+        c"ro.product.device",
+        c"ro.build.version.release",
+        c"ro.build.id",
+        c"ro.build.version.incremental",
+        c"ro.build.type",
+        c"ro.build.tags",
+        c"ro.build.version.security_patch",
+        c"ro.product.first_api_level",
+        c"ro.board.first_api_level",
+    ];
+    let mut matched = 0;
+    let mut missing = 0;
+    for name in names {
+        let Some(expected) = values.value_for(name.to_bytes()) else {
+            continue;
+        };
+        let property = unsafe { find(name.as_ptr()) };
+        if property.is_null() {
+            missing += 1;
+            log_android(&format!(
+                "PIF property probe {}: missing",
+                name.to_string_lossy()
+            ));
+            continue;
+        }
+        let mut probe = PropertyProbe::default();
+        unsafe {
+            read(
+                property,
+                Some(property_probe_callback),
+                (&mut probe as *mut PropertyProbe).cast(),
+            );
+        }
+        if probe.value.as_deref().map(str::as_bytes) == Some(expected.to_bytes()) {
+            matched += 1;
+        } else {
+            log_android(&format!(
+                "PIF property probe {}: observed={}, expected={}, matched=false",
+                name.to_string_lossy(),
+                probe.value.as_deref().unwrap_or("<no callback value>"),
+                expected.to_string_lossy(),
+            ));
+        }
     }
-    let mut probe = PropertyProbe::default();
-    unsafe {
-        read(
-            property,
-            Some(property_probe_callback),
-            (&mut probe as *mut PropertyProbe).cast(),
-        );
-    }
-    let Some(observed) = probe.value else {
-        log_android("PIF property probe callback returned no value");
-        return;
-    };
-    let expected = PROPERTY_SPOOF
-        .get()
-        .map(|values| values.fingerprint.to_string_lossy())
-        .unwrap_or_default();
     log_android(&format!(
-        "PIF property probe {}: observed={}, expected={}, matched={}",
-        name.to_string_lossy(),
-        observed,
-        expected,
-        observed == expected.as_ref()
+        "PIF property callback probe: matched={matched}/{}, missing={missing}",
+        names.len(),
     ));
 }
 
@@ -1313,9 +1356,8 @@ fn forward_property_get(
     let Some(replacement) = property_value_for_name(name) else {
         return result;
     };
-    let Some(bytes) = legacy_replacement_bytes(replacement) else {
-        return result;
-    };
+    let replacement = legacy_replacement_value(replacement);
+    let bytes = replacement.to_bytes();
     unsafe {
         ptr::copy_nonoverlapping(
             replacement.as_ptr().cast::<u8>(),
@@ -1350,15 +1392,29 @@ fn forward_property_read_legacy(
     }
     let original: PropertyReadLegacy = unsafe { std::mem::transmute(original) };
     let result = unsafe { original(property, name, value) };
-    if result <= 0 || name.is_null() || value.is_null() {
+    if result < 0 || property.is_null() || value.is_null() {
         return result;
     }
-    let Some(replacement) = property_value_for_name(name) else {
+    let Some(values) = PROPERTY_SPOOF.get() else {
         return result;
     };
-    let Some(bytes) = legacy_replacement_bytes(replacement) else {
+    // The legacy output name is optional and limited to PROP_NAME_MAX (32).
+    // Resolve the full name via bionic's callback, independently of that buffer.
+    let mut callback = ORIGINAL_PLT_PROPERTY_READ.load(Ordering::Acquire);
+    if callback.is_null() {
+        callback = resolve_symbol_address(PROPERTY_READ_SYMBOL).unwrap_or(ptr::null_mut());
+    }
+    let replacement = if callback.is_null() {
+        property_value_for_name(name)
+    } else {
+        let read: PropertyReadCallbackApi = unsafe { std::mem::transmute(callback) };
+        property_value_for_info(values, read, property)
+    };
+    let Some(replacement) = replacement else {
         return result;
     };
+    let replacement = legacy_replacement_value(replacement);
+    let bytes = replacement.to_bytes();
     unsafe {
         ptr::copy_nonoverlapping(
             replacement.as_ptr().cast::<u8>(),
@@ -1369,9 +1425,57 @@ fn forward_property_read_legacy(
     bytes.len().try_into().unwrap_or(result)
 }
 
-fn legacy_replacement_bytes(replacement: &CStr) -> Option<&[u8]> {
-    let bytes = replacement.to_bytes();
-    (bytes.len() < PROPERTY_VALUE_MAX).then_some(bytes)
+struct PropertyLookup<'a> {
+    values: &'a PropertyValues,
+    replacement: Option<&'a CStr>,
+}
+
+fn property_value_for_info(
+    values: &PropertyValues,
+    read: PropertyReadCallbackApi,
+    property: *const c_void,
+) -> Option<&CStr> {
+    if property.is_null() {
+        return None;
+    }
+    let mut lookup = PropertyLookup {
+        values,
+        replacement: None,
+    };
+    unsafe {
+        read(
+            property,
+            Some(property_lookup_callback),
+            (&mut lookup as *mut PropertyLookup<'_>).cast(),
+        );
+    }
+    lookup.replacement
+}
+
+unsafe extern "C" fn property_lookup_callback(
+    cookie: *mut c_void,
+    name: *const c_char,
+    _value: *const c_char,
+    _serial: u32,
+) {
+    if cookie.is_null() || name.is_null() {
+        return;
+    }
+    let lookup = unsafe { &mut *cookie.cast::<PropertyLookup<'_>>() };
+    lookup.replacement = lookup
+        .values
+        .value_for(unsafe { CStr::from_ptr(name) }.to_bytes());
+}
+
+fn legacy_replacement_value(replacement: &CStr) -> &CStr {
+    // These deprecated APIs only accept a PROP_VALUE_MAX-sized output buffer.
+    // Match bionic's long-property representation instead of exposing the
+    // original fingerprint or truncating a value that callbacks return in full.
+    if replacement.to_bytes().len() < PROPERTY_VALUE_MAX {
+        replacement
+    } else {
+        LONG_LEGACY_ERROR
+    }
 }
 
 fn property_value_for_name(name: *const c_char) -> Option<&'static CStr> {
@@ -1395,6 +1499,9 @@ unsafe extern "C" fn property_value_callback(
     };
     let replacement = property_value_for_name(name);
     let value = replacement.map_or(value, |replacement| replacement.as_ptr());
+    // Preserve bionic's change token in the hook fallback. Rewriting only this
+    // callback's serial would disagree with __system_property_serial/wait for
+    // the same prop_info. The private-area path updates the actual metadata.
     unsafe { (context.callback)(context.cookie, name, value, serial) };
 }
 
@@ -1528,7 +1635,9 @@ fn companion(stream: &mut std::os::unix::net::UnixStream) {
         .and_then(|()| stream.write_all(&frame))
     {
         log_android(&format!("PIF companion write failed: {error}"));
+        return;
     }
+    soter::relay::companion(stream);
 }
 
 fn load_profile_for_companion() -> Result<Vec<u8>, String> {
@@ -1556,42 +1665,117 @@ fn apply_build_fields(
     target: PifTarget,
 ) -> Result<(), String> {
     profile.validate()?;
-    let build = env
-        .find_class("android/os/Build")
-        .map_err(|error| format!("cannot find android.os.Build: {error}"))?;
-    let version = env
-        .find_class("android/os/Build$VERSION")
-        .map_err(|error| format!("cannot find android.os.Build.VERSION: {error}"))?;
-
-    for (name, value, owner) in target.build_fields(profile) {
-        let class = match owner {
-            BuildClass::Build => &build,
-            BuildClass::Version => &version,
-        };
-        let java_value = env
-            .new_string(value)
-            .map_err(|error| format!("cannot create {name} value: {error}"))?;
-        let object = JObject::from(java_value);
-        env.set_static_field(
-            class,
-            (class, name, "Ljava/lang/String;"),
-            JValue::Object(&object),
-        )
-        .map_err(|error| format!("cannot set {name}: {error}"))?;
-        env.delete_local_ref(object)
-            .map_err(|error| format!("cannot release {name} value: {error}"))?;
+    if !target.spoof_build(profile) {
+        return Ok(());
     }
-    if target == PifTarget::Gms && target.spoof_build(profile) {
-        // This is the device launch SDK, not the running platform's SDK_INT.
-        // Keep it consistent with ro.product.first_api_level when both paths
-        // are enabled. Play Store Build spoofing follows v4.9-inject-s and
-        // updates the string fields only, leaving both SDK integers unchanged.
-        env.set_static_field(
-            &version,
-            (&version, "DEVICE_INITIAL_SDK_INT", "I"),
-            JValue::Int(profile.initial_sdk_int()),
-        )
-        .map_err(|error| format!("cannot set DEVICE_INITIAL_SDK_INT: {error}"))?;
+    if env
+        .exception_check()
+        .map_err(|error| format!("cannot check Java exception state: {error}"))?
+    {
+        return Err("cannot apply Build fields with a pre-existing Java exception".to_string());
+    }
+
+    let result = env
+        .with_local_frame(8, |env| {
+            let result: Result<(), String> = (|| {
+                let build = env
+                    .find_class("android/os/Build")
+                    .map_err(|error| format!("cannot find android.os.Build: {error}"))?;
+                let version = env
+                    .find_class("android/os/Build$VERSION")
+                    .map_err(|error| format!("cannot find android.os.Build.VERSION: {error}"))?;
+
+                for (name, value, owner) in target.build_fields(profile) {
+                    let class = match owner {
+                        BuildClass::Build => &build,
+                        BuildClass::Version => &version,
+                    };
+                    let java_value = env
+                        .new_string(value)
+                        .map_err(|error| format!("cannot create {name} value: {error}"))?;
+                    let object = JObject::from(java_value);
+                    env.set_static_field(
+                        class,
+                        (class, name, "Ljava/lang/String;"),
+                        JValue::Object(&object),
+                    )
+                    .map_err(|error| format!("cannot set {name}: {error}"))?;
+                    env.delete_local_ref(object)
+                        .map_err(|error| format!("cannot release {name} value: {error}"))?;
+
+                    let actual = env
+                        .get_static_field(class, name, "Ljava/lang/String;")
+                        .and_then(|value| value.l())
+                        .map(JString::from)
+                        .map_err(|error| format!("cannot read back {name}: {error}"))?;
+                    let actual_value: String = env
+                        .get_string(&actual)
+                        .map_err(|error| format!("cannot read back {name} string: {error}"))?
+                        .into();
+                    env.delete_local_ref(actual)
+                        .map_err(|error| format!("cannot release {name} readback: {error}"))?;
+                    if actual_value != value {
+                        return Err(format!("{name} readback does not match the PIF profile"));
+                    }
+                }
+
+                // AOSP initializes these once from TYPE. Updating TYPE alone leaves
+                // a contradictory cached view on devices running eng/userdebug builds.
+                for (name, value) in [
+                    ("IS_ENG", profile.build_type == "eng"),
+                    ("IS_USERDEBUG", profile.build_type == "userdebug"),
+                    ("IS_USER", profile.build_type == "user"),
+                ] {
+                    env.set_static_field(&build, (&build, name, "Z"), JValue::Bool(value.into()))
+                        .map_err(|error| format!("cannot set {name}: {error}"))?;
+                    let actual = env
+                        .get_static_field(&build, name, "Z")
+                        .and_then(|value| value.z())
+                        .map_err(|error| format!("cannot read back {name}: {error}"))?;
+                    if actual != value {
+                        return Err(format!("{name} readback does not match TYPE"));
+                    }
+                }
+
+                if target == PifTarget::Gms {
+                    // This is the device launch SDK, not the running platform's SDK_INT.
+                    // Keep it consistent with ro.product.first_api_level when both paths
+                    // are enabled. Play Store leaves both SDK integers unchanged.
+                    let initial_sdk = profile.initial_sdk_int();
+                    env.set_static_field(
+                        &version,
+                        (&version, "DEVICE_INITIAL_SDK_INT", "I"),
+                        JValue::Int(initial_sdk),
+                    )
+                    .map_err(|error| format!("cannot set DEVICE_INITIAL_SDK_INT: {error}"))?;
+                    let actual = env
+                        .get_static_field(&version, "DEVICE_INITIAL_SDK_INT", "I")
+                        .and_then(|value| value.i())
+                        .map_err(|error| {
+                            format!("cannot read back DEVICE_INITIAL_SDK_INT: {error}")
+                        })?;
+                    if actual != initial_sdk {
+                        return Err(
+                            "DEVICE_INITIAL_SDK_INT readback does not match the PIF profile".into(),
+                        );
+                    }
+                }
+                Ok(())
+            })();
+            Ok::<_, jni::errors::Error>(result)
+        })
+        .map_err(|error| format!("cannot manage Build local references: {error}"))
+        .and_then(std::convert::identity);
+
+    if let Err(error) = result {
+        // Errors such as a missing field leave a pending JNI exception. It
+        // belongs to this best-effort integration, not to the target app.
+        return match env.exception_clear() {
+            Ok(()) => Err(error),
+            Err(clear_error) => Err(format!(
+                "{error}; cannot clear Java exception: {clear_error}"
+            )),
+        };
     }
     Ok(())
 }
@@ -1961,13 +2145,64 @@ mod tests {
         let values = PropertyValues::from_profile(&profile).unwrap();
         let fingerprint = values.value_for(b"ro.build.fingerprint").unwrap();
         assert_eq!(fingerprint.to_bytes(), profile.fingerprint.as_bytes());
-        assert!(legacy_replacement_bytes(fingerprint).is_none());
+        assert_eq!(legacy_replacement_value(fingerprint), LONG_LEGACY_ERROR);
 
         let short = CString::new("x".repeat(PROPERTY_VALUE_MAX - 1)).unwrap();
         assert_eq!(
-            legacy_replacement_bytes(short.as_c_str()).unwrap().len(),
+            legacy_replacement_value(short.as_c_str()).to_bytes().len(),
             PROPERTY_VALUE_MAX - 1
         );
+        for length in [PROPERTY_VALUE_MAX, pif_common::MAX_VALUE_BYTES] {
+            let long = CString::new("x".repeat(length)).unwrap();
+            let legacy = legacy_replacement_value(&long);
+            assert_eq!(legacy, LONG_LEGACY_ERROR);
+            assert!(legacy.to_bytes_with_nul().len() <= PROPERTY_VALUE_MAX);
+        }
+    }
+
+    #[test]
+    fn android_legacy_read_spoofs_with_null_or_truncated_output_name() {
+        initialize_property_spoof(&test_profile()).unwrap();
+        let original = resolve_symbol_address(PROPERTY_READ_LEGACY_SYMBOL).unwrap();
+        let name = c"ro.product.system_ext.manufacturer";
+        assert!(name.to_bytes().len() >= 32);
+        // An aligned, owned prop_info fixture read by the actual bionic API.
+        // No system property mapping or libc code is changed by this test.
+        let mut storage = [0u32; 64];
+        let bytes = unsafe {
+            std::slice::from_raw_parts_mut(storage.as_mut_ptr().cast::<u8>(), storage.len() * 4)
+        };
+        bytes[..4].copy_from_slice(&(8u32 << 24).to_ne_bytes());
+        bytes[4..13].copy_from_slice(b"original\0");
+        bytes[96..96 + name.to_bytes_with_nul().len()].copy_from_slice(name.to_bytes_with_nul());
+        let property = bytes.as_ptr().cast();
+        for with_name in [false, true] {
+            let mut output_name = [0xa5u8; 32 + 8];
+            let name_ptr = if with_name {
+                output_name[4..].as_mut_ptr().cast()
+            } else {
+                ptr::null_mut()
+            };
+            let mut output = [0xa5u8; PROPERTY_VALUE_MAX + 8];
+            let length = forward_property_read_legacy(
+                original,
+                property,
+                name_ptr,
+                output[4..].as_mut_ptr().cast(),
+            );
+            assert_eq!(length, 6);
+            assert_eq!(&output[4..11], b"Google\0");
+            assert_eq!(&output[..4], &[0xa5; 4]);
+            assert_eq!(&output[output.len() - 4..], &[0xa5; 4]);
+            if with_name {
+                assert_eq!(&output_name[4..35], &name.to_bytes()[..31]);
+                assert_eq!(output_name[35], 0);
+                assert_eq!(&output_name[..4], &[0xa5; 4]);
+                assert_eq!(&output_name[36..], &[0xa5; 4]);
+            } else {
+                assert_eq!(output_name, [0xa5; 40]);
+            }
+        }
     }
 
     #[test]

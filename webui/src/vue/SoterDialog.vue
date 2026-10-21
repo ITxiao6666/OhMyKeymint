@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   MiuixButton,
   MiuixDialog,
@@ -7,6 +7,7 @@ import {
   MiuixSwitchPreference,
 } from 'miuix-vue'
 import { Cli } from '../cli'
+import { afterPaint } from '../app_list/app_list'
 import { i18n } from '../i18n'
 import { isDev } from '../utils/dev'
 
@@ -44,13 +45,15 @@ async function load(): Promise<void> {
   enabled.value = false
   soterHalEnabled.value = false
   try {
+    await afterPaint()
+    if (currentGeneration !== generation || !props.modelValue) return
     const [state, halState] = preview
-      ? [{ enabled: false }, { enabled: false }]
+      ? [{ enabled: false }, { enabled: false, app_enabled: false }]
       : await Promise.all([props.cli.getSoterBeta(), props.cli.getSoterHal()])
     if (currentGeneration !== generation || !props.modelValue) return
     enabled.value = state.enabled
     savedEnabled.value = state.enabled
-    soterHalEnabled.value = halState.enabled
+    soterHalEnabled.value = halState.enabled || halState.app_enabled
     status.value = 'ready'
   } catch (error) {
     if (currentGeneration !== generation || !props.modelValue) return
@@ -62,7 +65,9 @@ async function load(): Promise<void> {
 watch(() => props.modelValue, open => {
   if (open) void load()
   else generation++
-})
+}, { immediate: true })
+
+onBeforeUnmount(() => { generation++ })
 
 function requestClose(): boolean {
   if (busy.value) return false
@@ -79,7 +84,7 @@ async function apply(): Promise<void> {
   try {
     await props.cli.setSoterBeta(enabled.value)
     savedEnabled.value = enabled.value
-    emit('notify', tr('soter_beta_saved', 'Soter Beta preference saved. Restart the device to apply. Compatibility is not verified.'))
+    emit('notify', tr('soter_beta_applied', 'Settings saved; SoterServer will reconnect using the selected mode. No device reboot is needed.'))
     emit('update:modelValue', false)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error)
@@ -93,17 +98,17 @@ async function apply(): Promise<void> {
 <template>
   <MiuixDialog
     :model-value="modelValue"
-    :title="tr('tools_soter_beta', 'Tencent Soter compatibility (Beta)')"
+    :title="tr('tools_soter_beta', 'Fix Tencent Soter Server (Testing)')"
     :close-on-click-modal="!busy"
     @update:model-value="value => { if (!value) requestClose() }"
   >
     <div class="soter-dialog" :aria-busy="busy || status === 'loading'">
       <p class="soter-dialog__warning">
-        {{ tr('soter_beta_warning', 'Beta software test only: uses a publicly known test key and fixed test CPU ID for dynamically signed key exports. Key state resets when Tencent SoterServer restarts. It provides no fingerprint, TEE or payment authentication and does not change KeyMint.') }}
+        {{ tr('soter_beta_warning', 'This feature is in testing and only addresses some detector checks. It does not repair TEE fingerprint functionality.') }}
       </p>
-      <p>{{ tr('soter_beta_reboot', 'Install and enable Zygisk Next separately. Restart the device after enabling or disabling. Compatibility is not verified.') }}</p>
+      <p>{{ tr('soter_beta_reboot', 'Install the Zygisk Next module before enabling this feature.') }}</p>
       <p v-if="soterHalEnabled" class="soter-dialog__warning">
-        Only one Soter service can be enabled at a time. Disable Qualcomm Soter HAL before enabling Tencent Soter Beta.
+        {{ tr('soter_beta_mode_exclusive', 'Disable global HAL takeover and per-app remote SOTER before enabling Tencent Soter Server (Testing).') }}
       </p>
 
       <div v-if="status === 'loading'" class="soter-dialog__loading" role="status">

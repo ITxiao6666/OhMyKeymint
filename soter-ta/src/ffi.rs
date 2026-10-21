@@ -1,13 +1,7 @@
-//! C ABI for `soterta-svc`, the A-side daemon that owns the vendor Soter
-//! service name while the stock HAL is stopped.
+//! Shared Soter runtime and its retained C ABI compatibility entry points.
 //!
-//! The daemon owns the parcel: it reads the request arguments with the NDK
-//! binder C API and writes the reply, because only the process holding the
-//! `AParcel` can do either. Everything that is not parcel plumbing stays here —
-//! the ledger, the key material, the blob codec and the answers — so the AIDL
-//! semantics keep the host tests they already had.
-//!
-//! `soterta-svc/soter-svc.c` mirrors the declarations below; keep the two in sync.
+//! The Rust Binder daemon uses the safe `initialize`, `answer` and `save`
+//! functions. The ABI wrappers share exactly the same routing and persistence.
 
 use std::ffi::{c_char, CStr};
 use std::path::{Path, PathBuf};
@@ -141,7 +135,7 @@ fn fill(reply: &mut SotertaReply, outcome: Outcome) {
     }
 }
 
-fn persist() -> Result<(), String> {
+pub fn save() -> Result<(), String> {
     let mut slot = lock(&SHARED);
     let Some(shared) = slot.as_mut() else {
         return Err("state is not initialized".to_string());
@@ -231,11 +225,21 @@ pub unsafe extern "C" fn soterta_init(state_path: *const c_char) -> i32 {
         set_error("state path is missing");
         return SOTERTA_ERROR;
     };
-    let path = PathBuf::from(path);
+    match initialize(Path::new(&path)) {
+        Ok(created) => i32::from(created),
+        Err(error) => {
+            set_error(error);
+            SOTERTA_ERROR
+        }
+    }
+}
+
+/// Load the existing local ledger, or create it at the configured state path.
+pub fn initialize(path: &Path) -> Result<bool, String> {
+    let path = path.to_path_buf();
     if let Some(parent) = path.parent() {
         if let Err(error) = create_state_dir(parent) {
-            set_error(format!("cannot create {}: {error}", parent.display()));
-            return SOTERTA_ERROR;
+            return Err(format!("cannot create {}: {error}", parent.display()));
         }
     }
     let (state, created) = match TaState::load_or_error(&path) {
@@ -243,40 +247,33 @@ pub unsafe extern "C" fn soterta_init(state_path: *const c_char) -> i32 {
         Ok(None) => match TaState::generate_local() {
             Some(state) => (state, true),
             None => {
-                set_error("cannot generate a local device key");
-                return SOTERTA_ERROR;
+                return Err("cannot generate a local device key".into());
             }
         },
         Err(message) => {
             // An identity file that exists but cannot be read is not a fresh
             // device: minting a new one here would silently change the device id
             // (and with it every blob a client may still hold). Refuse instead.
-            set_error(message);
-            return SOTERTA_ERROR;
+            return Err(message);
         }
     };
     if created {
         if let Err(error) = state.store(&path) {
-            set_error(format!("cannot write {}: {error}", path.display()));
-            return SOTERTA_ERROR;
+            return Err(format!("cannot write {}: {error}", path.display()));
         }
     }
     *lock(&SHARED) = Some(Shared { path, state });
     REMOTE_WAS_ACTIVE.store(false, Ordering::Release);
     clear_error();
-    if created {
-        1
-    } else {
-        0
-    }
+    Ok(created)
 }
 
 /// Install the daemon's platform hooks.
 ///
 /// `boot_ms` answers milliseconds on a boot-monotone clock and `bio_mark` the
-/// fingerprint evidence mark; either may be null, and a hook that answers a
-/// negative value means "cannot tell" for that transaction. A missing hook
-/// makes the software TA answer like the revision before the biometric gate.
+/// fingerprint evidence mark. A missing bio hook explicitly disables the gate;
+/// an installed bio hook whose evidence or clock cannot be read refuses local
+/// signing with `-26`, including when a probe returns a negative value.
 #[no_mangle]
 pub extern "C" fn soterta_set_platform(
     boot_ms: Option<platform::Probe>,
@@ -317,9 +314,23 @@ pub unsafe extern "C" fn soterta_handle(
             return SOTERTA_ERROR;
         }
     };
+    match answer(tx, request) {
+        Ok(Some(outcome)) => {
+            fill(&mut *reply, outcome);
+            SOTERTA_HANDLED
+        }
+        Ok(None) => SOTERTA_UNHANDLED,
+        Err(error) => {
+            set_error(error);
+            SOTERTA_ERROR
+        }
+    }
+}
+
+/// Dispatch parsed Rust arguments through the existing local/relay selection.
+pub fn answer(tx: u32, request: Request) -> Result<Option<Outcome>, String> {
     if lock(&SHARED).is_none() {
-        set_error("state is not initialized");
-        return SOTERTA_ERROR;
+        return Err("state is not initialized".into());
     }
     let remote_config = remote::Config::load();
     let relay_active = match &remote_config {
@@ -353,46 +364,55 @@ pub unsafe extern "C" fn soterta_handle(
                 outcome
             }
             Err(error) => {
-                eprintln!("soterta remote: {error}");
+                log::warn!("Soter relay request failed; local fallback is disabled");
                 set_error(error);
                 let Some(dead) = dispatch::dead_reply(tx) else {
-                    return SOTERTA_UNHANDLED;
+                    return Ok(None);
                 };
                 dead
             }
         };
-        fill(&mut *reply, outcome);
-        return SOTERTA_HANDLED;
+        return Ok(Some(outcome));
     }
     // The sign transactions read the platform before the ledger lock is taken:
     // the hooks spawn a platform dump, and that must not stall every other
     // transaction the daemon serves.
     let platform = if dispatch::consults_platform(tx) {
-        platform::current()
+        let Some(snapshot) = platform::current() else {
+            // An enabled but unreadable fingerprint gate is not permission to
+            // sign. Refuse without creating/consuming a local sign session.
+            let code = crate::error::SOTER_ERR_NO_FINGERPRINT;
+            return Ok(match tx {
+                dispatch::TX_INIT_SIGN => Some(Outcome::Init { code, session: 0 }),
+                dispatch::TX_FINISH_SIGN => Some(Outcome::Buffer {
+                    code,
+                    data: Vec::new(),
+                    field: 0,
+                }),
+                _ => None,
+            });
+        };
+        snapshot
     } else {
         Platform::default()
     };
     let outcome = {
         let mut slot = lock(&SHARED);
         let Some(shared) = slot.as_mut() else {
-            set_error("state is not initialized");
-            return SOTERTA_ERROR;
+            return Err("state is not initialized".into());
         };
         dispatch::handle_request(&mut shared.state, tx, request, platform)
     };
     let Some(outcome) = outcome else {
-        return SOTERTA_UNHANDLED;
+        return Ok(None);
     };
-    fill(&mut *reply, outcome);
-    if let Err(error) = persist() {
+    if let Err(error) = save() {
         // Do not hand out material the ledger cannot keep: a device id or a
         // signature that does not survive a restart would be worse than none.
-        set_error(format!("cannot persist state: {error}"));
-        soterta_free(reply);
-        return SOTERTA_ERROR;
+        return Err(format!("cannot persist state: {error}"));
     }
     clear_error();
-    SOTERTA_HANDLED
+    Ok(Some(outcome))
 }
 
 /// The answer the stock HAL gives for `tx` while its TA is dead.
@@ -423,7 +443,7 @@ pub unsafe extern "C" fn soterta_dead_reply(tx: u32, reply: *mut SotertaReply) -
 /// Persist the ledger now; the daemon calls this before it exits.
 #[no_mangle]
 pub extern "C" fn soterta_save() -> i32 {
-    match persist() {
+    match save() {
         Ok(()) => {
             clear_error();
             SOTERTA_HANDLED

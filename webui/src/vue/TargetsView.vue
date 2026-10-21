@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance, ComputedRef } from 'vue'
 import {
   MiuixBottomSheet,
@@ -9,10 +9,9 @@ import {
   MiuixFloatingActionButton,
   MiuixIcon,
   MiuixIconButton,
-  MiuixInput,
   MiuixProgressIndicator,
   MiuixSearchBar,
-  MiuixTabRow,
+  MiuixSwitchPreference,
   MiuixTopAppBar,
   showSnackbar,
 } from 'miuix-vue'
@@ -26,15 +25,14 @@ import {
   Ok,
   Refresh,
   SelectAll,
-  Tune,
 } from 'miuix-vue/icons'
 import {
+  afterPaint,
   parsePackageUserTarget,
   type AppList,
   type SelectableAppEntry,
-  type SelectionFilter,
 } from '../app_list/app_list'
-import { type AppPatchLevels, type AppPatchProfiles, type Cli, isAppPatchLevel } from '../cli'
+import { type Cli, type SoterHalState } from '../cli'
 import { i18n } from '../i18n'
 import { isDev } from '../utils/dev'
 
@@ -42,6 +40,7 @@ interface Props {
   appList: AppList
   cli: Cli
   loading?: boolean
+  refreshing?: boolean
   applyEnabled?: boolean
 }
 
@@ -53,6 +52,7 @@ type IconState = 'loading' | 'loaded' | 'error'
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
+  refreshing: false,
   applyEnabled: true,
 })
 
@@ -69,17 +69,9 @@ function translate(key: string, fallback: string): string {
   return value === key ? fallback : value
 }
 
-const FILTERS: readonly SelectionFilter[] = ['all', 'selected', 'unselected']
-const filterLabels = [
-  translate('filter_all', 'All'),
-  translate('filter_selected', 'Selected'),
-  translate('filter_unselected', 'Not selected'),
-]
-
 const revision = ref(props.appList.revision)
 const searchQuery = ref('')
 const searchExpanded = ref(false)
-const filterIndex = ref(0)
 const menuOpen = ref(false)
 const selectingRecommended = ref(false)
 const systemSheetOpen = ref(false)
@@ -87,42 +79,241 @@ const systemSearchQuery = ref('')
 const systemSelection = ref(new Set<string>())
 const iconStates = ref<Record<string, IconState>>({})
 const searchBar = ref<SearchBarInstance | null>(null)
-const patchTarget = ref<SelectableAppEntry | null>(null)
-const patchSheetOpen = ref(false)
-const patchStatus = ref<'loading' | 'ready' | 'error'>('loading')
-const patchBusy = ref(false)
-const patchError = ref('')
-const patchOs = ref('')
-const patchVendor = ref('')
-const patchBoot = ref('')
-const patchSaved = ref<AppPatchLevels | null>(null)
-let patchGeneration = 0
+const pullBody = ref<HTMLElement | null>(null)
+const pullIndicator = ref<HTMLElement | null>(null)
+const pullCapsule = ref<HTMLElement | null>(null)
+const pullActive = ref(false)
+const pullReady = ref(false)
+const autoEnabled = ref(false)
+const autoStatus = ref<'loading' | 'ready' | 'error'>('loading')
+const autoBusy = ref(false)
+const autoError = ref('')
+const appSheetOpen = ref(false)
+const appSettingsEntry = ref<SelectableAppEntry | null>(null)
+const appSettingsStatus = ref<'loading' | 'ready' | 'error'>('loading')
+const appSettingsBusy = ref(false)
+const appSettingsError = ref('')
+const soterSelection = ref<Pick<SoterHalState, 'enabled' | 'remote_enabled' | 'app_enabled' | 'app_targets'> | null>(null)
+let appSettingsGeneration = 0
+let returnToSystemSheet = false
+let disposed = false
 
-function patchInput(value: string): string | null {
-  const trimmed = value.trim()
-  return trimmed === '' || trimmed === 'auto' ? null : trimmed
+const appSoterSelected = computed(() => !!appSettingsEntry.value
+  && soterSelection.value?.app_targets.includes(appSettingsEntry.value.targetKey) === true)
+const appSoterReady = computed(() => soterSelection.value?.app_enabled === true
+  && soterSelection.value.remote_enabled && !soterSelection.value.enabled)
+
+function retainSoterSelection(state: SoterHalState): void {
+  soterSelection.value = {
+    enabled: state.enabled,
+    remote_enabled: state.remote_enabled,
+    app_enabled: state.app_enabled,
+    app_targets: [...state.app_targets],
+  }
 }
 
-const patchCurrent = computed<AppPatchLevels>(() => ({
-  os_patchlevel: patchInput(patchOs.value),
-  vendor_patchlevel: patchInput(patchVendor.value),
-  boot_patchlevel: patchInput(patchBoot.value),
-}))
+async function loadAppSettings(): Promise<void> {
+  if (!appSheetOpen.value || appSettingsBusy.value) return
+  const currentGeneration = ++appSettingsGeneration
+  appSettingsStatus.value = 'loading'
+  appSettingsError.value = ''
+  try {
+    await afterPaint()
+    if (disposed || currentGeneration !== appSettingsGeneration || !appSheetOpen.value) return
+    if (isDev()) {
+      soterSelection.value ??= { enabled: false, remote_enabled: false, app_enabled: false, app_targets: [] }
+    } else {
+      const state = await props.cli.getSoterHal()
+      if (disposed || currentGeneration !== appSettingsGeneration || !appSheetOpen.value) return
+      retainSoterSelection(state)
+    }
+    appSettingsStatus.value = 'ready'
+  } catch {
+    if (disposed || currentGeneration !== appSettingsGeneration || !appSheetOpen.value) return
+    appSettingsStatus.value = 'error'
+    appSettingsError.value = translate('soter_app_load_error', 'Unable to read app SOTER settings. Check that the installed module is up to date.')
+  }
+}
 
-const patchValid = computed(() => (
-  isAppPatchLevel(patchCurrent.value.os_patchlevel)
-  && isAppPatchLevel(patchCurrent.value.vendor_patchlevel)
-  && isAppPatchLevel(patchCurrent.value.boot_patchlevel, true)
-))
+function openAppSettings(entry: SelectableAppEntry): void {
+  if (props.loading || appSettingsBusy.value) return
+  returnToSystemSheet = systemSheetOpen.value
+  systemSheetOpen.value = false
+  menuOpen.value = false
+  appSettingsEntry.value = entry
+  appSheetOpen.value = true
+  void loadAppSettings()
+}
 
-const patchCanSave = computed(() => (
-  !isDev() && !patchBusy.value && patchStatus.value === 'ready' && patchValid.value
-  && JSON.stringify(patchCurrent.value) !== JSON.stringify(patchSaved.value)
-))
+function closeAppSettings(): void {
+  if (appSettingsBusy.value) return
+  appSettingsGeneration++
+  appSheetOpen.value = false
+  if (returnToSystemSheet) systemSheetOpen.value = true
+  returnToSystemSheet = false
+}
 
+async function setAppSoter(enabled: boolean): Promise<void> {
+  const entry = appSettingsEntry.value
+  if (!entry || appSettingsBusy.value || appSettingsStatus.value !== 'ready' || isDev()) return
+  appSettingsBusy.value = true
+  appSettingsError.value = ''
+  try {
+    const state = await props.cli.setSoterAppTarget(entry.targetKey, enabled)
+    if (disposed) return
+    retainSoterSelection(state)
+    void showSnackbar({ message: translate('soter_app_saved', 'App SOTER selection saved') })
+  } catch {
+    if (!disposed) {
+      appSettingsError.value = translate('soter_app_save_error', 'Unable to save this app SOTER selection. Retry to read the current setting.')
+      // A failed read-back can follow a successful write. Do not leave a
+      // stale switch actionable until the actual device state is reloaded.
+      appSettingsStatus.value = 'error'
+    }
+  } finally {
+    appSettingsBusy.value = false
+  }
+}
+
+async function loadAutoTargets(): Promise<void> {
+  autoStatus.value = 'loading'
+  autoError.value = ''
+  try {
+    const enabled = isDev() ? autoEnabled.value : await props.cli.getAutoTargets()
+    if (disposed) return
+    autoEnabled.value = enabled
+    autoStatus.value = 'ready'
+  } catch (error) {
+    if (disposed) return
+    autoStatus.value = 'error'
+    autoError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function setAutoTargets(enabled: boolean): Promise<void> {
+  if (autoBusy.value || autoStatus.value !== 'ready') return
+  autoBusy.value = true
+  autoError.value = ''
+  try {
+    if (!isDev()) await props.cli.setAutoTargets(enabled)
+    autoEnabled.value = enabled
+    void showSnackbar({ message: translate('app_targets_auto_saved', 'Automatic selection setting saved') })
+  } catch (error) {
+    autoError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    autoBusy.value = false
+  }
+}
+
+onMounted(() => { void loadAutoTargets() })
+let pullStart: { x: number, y: number, offset: number, scale: number } | null = null
+let pullDistance = 0
+let pullCaptured = false
+let pullFrame = 0
+const PULL_REFRESH_DISTANCE = 80
+const PULL_REFRESH_OFFSET = 64
+
+// Keep continuous gesture updates outside Vue's render effect. Only the
+// threshold/refresh state changes render; the app rows do not update per pixel.
+function paintPull(): void {
+  if (pullBody.value) pullBody.value.style.transform = `translate3d(0, ${pullDistance}px, 0)`
+  if (pullIndicator.value) {
+    pullIndicator.value.style.transform = `translate3d(0, ${pullDistance - PULL_REFRESH_OFFSET}px, 0)`
+    pullIndicator.value.style.opacity = String(Math.min(1, pullDistance / 48))
+  }
+  if (pullCapsule.value) {
+    pullCapsule.value.style.setProperty('--pull-stretch', String(Math.max(0, pullDistance - 62)))
+  }
+}
+
+function settlePull(distance: number): void {
+  cancelAnimationFrame(pullFrame)
+  pullFrame = 0
+  pullStart = null
+  pullCaptured = false
+  pullActive.value = false
+  pullReady.value = false
+  pullDistance = distance
+  for (const element of [pullBody.value, pullIndicator.value, pullCapsule.value]) {
+    if (element) element.style.transition = ''
+  }
+  paintPull()
+}
+
+function resetPull(): void {
+  settlePull(props.refreshing ? PULL_REFRESH_OFFSET : 0)
+}
+
+function startPull(event: TouchEvent): void {
+  if (props.loading || selectingRecommended.value || menuOpen.value || systemSheetOpen.value || appSheetOpen.value
+      || event.touches.length !== 1 || (document.scrollingElement?.scrollTop ?? window.scrollY) > 0
+      || (event.target instanceof Element && event.target.closest('input, button, [role="switch"]'))) {
+    if (pullStart) resetPull()
+    return
+  }
+  cancelAnimationFrame(pullFrame)
+  pullFrame = 0
+  // A second drag can start during the return animation. Read its displayed
+  // offset once, then freeze it instead of jumping back to the logical target.
+  const transform = pullBody.value ? getComputedStyle(pullBody.value).transform : 'none'
+  const offset = transform === 'none' ? 0 : Math.max(0, new DOMMatrixReadOnly(transform).m42)
+  const scale = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--omk-ui-scale')) || 1
+  const touch = event.touches[0]!
+  pullStart = { x: touch.clientX, y: touch.clientY, offset, scale }
+  pullCaptured = false
+  pullDistance = offset
+  for (const element of [pullBody.value, pullIndicator.value, pullCapsule.value]) {
+    if (element) element.style.transition = 'none'
+  }
+  paintPull()
+}
+
+function movePull(event: TouchEvent): void {
+  if (!pullStart) return
+  if (event.touches.length !== 1) { resetPull(); return }
+  const touch = event.touches[0]!
+  const dy = touch.clientY - pullStart.y
+  if (dy < 0 || Math.abs(touch.clientX - pullStart.x) > Math.max(12, dy)) {
+    resetPull()
+    return
+  }
+  if (!pullCaptured) {
+    if (dy <= 8) return
+    if (!event.cancelable || (document.scrollingElement?.scrollTop ?? window.scrollY) > 0) {
+      resetPull()
+      return
+    }
+    pullCaptured = true
+    pullActive.value = true
+  }
+  if (event.cancelable) event.preventDefault()
+  const distance = dy * 0.5 / pullStart.scale
+  pullDistance = Math.min(144, pullStart.offset + (distance <= PULL_REFRESH_DISTANCE
+    ? distance : PULL_REFRESH_DISTANCE + (distance - PULL_REFRESH_DISTANCE) * 0.35))
+  pullReady.value = pullDistance >= PULL_REFRESH_DISTANCE
+  if (!pullFrame) {
+    pullFrame = requestAnimationFrame(() => {
+      pullFrame = 0
+      paintPull()
+    })
+  }
+}
+
+function finishPull(event: TouchEvent): void {
+  if (!pullStart) return
+  // Use the latest logical distance even if its animation frame has not run.
+  const ready = pullCaptured && pullDistance >= PULL_REFRESH_DISTANCE
+  if (pullCaptured && event.cancelable) event.preventDefault()
+  settlePull(ready ? PULL_REFRESH_OFFSET : 0)
+  if (ready) refresh()
+}
+
+watch(() => props.refreshing, refreshing => {
+  settlePull(refreshing ? PULL_REFRESH_OFFSET : 0)
+})
 // A menu followed by the system sheet is one overlay in the parent's history.
 // Watching the combined state also avoids closing a second layer on Android Back.
-watch(() => menuOpen.value || systemSheetOpen.value || patchSheetOpen.value, open => {
+watch(() => menuOpen.value || systemSheetOpen.value || appSheetOpen.value, open => {
   if (open) emit('overlay-open')
   else emit('overlay-close')
 })
@@ -131,14 +322,21 @@ const unsubscribe = props.appList.subscribe(snapshot => {
   revision.value = snapshot.revision
 })
 
-const activeFilter = computed<SelectionFilter>(() => FILTERS[filterIndex.value] ?? 'all')
 const targetEntries = computed(() => {
   void revision.value
-  return props.appList.getTargetEntries(searchQuery.value, activeFilter.value)
+  return props.appList.getTargetEntries(searchQuery.value)
 })
 const systemEntries = computed(() => {
   void revision.value
   return props.appList.getSystemEntries(systemSearchQuery.value)
+})
+const showUserGroups = computed(() => {
+  void revision.value
+  return new Set(props.appList.getEntries().map(entry => entry.userId)).size > 1
+})
+const initialLoading = computed(() => {
+  void revision.value
+  return props.loading && props.appList.getEntries().length === 0
 })
 
 // MIUIX preferences include animated controls. Mount a small batch per paint so
@@ -180,10 +378,10 @@ function batchedEntries(
   return computed(() => entries.value.slice(0, count.value))
 }
 
-const renderedTargetEntries = batchedEntries(targetEntries, computed(() => !props.loading))
+const renderedTargetEntries = batchedEntries(targetEntries, computed(() => true))
 const renderedSystemEntries = batchedEntries(
   systemEntries,
-  computed(() => systemSheetOpen.value && !props.loading),
+  computed(() => systemSheetOpen.value),
 )
 
 function iconState(packageName: string): IconState {
@@ -198,68 +396,6 @@ function setIconState(packageName: string, state: IconState): void {
 function setSelected(entry: SelectableAppEntry, selected: boolean): void {
   if (props.loading || menuOpen.value || selectingRecommended.value) return
   props.appList.setTargetSelected(entry, selected)
-}
-
-function entrySummary(entry: SelectableAppEntry, allUsers = entry.selectedForAllUsers): string {
-  const userLabel = translate('app_target_user', 'User')
-  const currentLabel = entry.currentUser ? ` · ${translate('app_target_current_user', 'Current')}` : ''
-  const scope = allUsers ? ` · ${translate('app_target_global', 'All users')}` : ''
-  return `${userLabel} ${entry.userId}${currentLabel}${scope} · ${entry.packageName}`
-}
-
-async function loadPatchProfile(): Promise<void> {
-  const target = patchTarget.value
-  if (!target || patchBusy.value) return
-  const generation = ++patchGeneration
-  patchStatus.value = 'loading'
-  patchError.value = ''
-  patchSaved.value = null
-  try {
-    const profiles: AppPatchProfiles = isDev() ? {} : await props.cli.getAppPatchLevels()
-    if (generation !== patchGeneration || !patchSheetOpen.value) return
-    const saved = profiles[target.targetKey] ?? profiles[target.packageName]
-      ?? { os_patchlevel: null, vendor_patchlevel: null, boot_patchlevel: null }
-    patchOs.value = saved.os_patchlevel ?? ''
-    patchVendor.value = saved.vendor_patchlevel ?? ''
-    patchBoot.value = saved.boot_patchlevel ?? ''
-    patchSaved.value = saved
-    patchStatus.value = 'ready'
-  } catch (error) {
-    if (generation !== patchGeneration || !patchSheetOpen.value) return
-    patchStatus.value = 'error'
-    patchError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-function openPatchProfile(entry: SelectableAppEntry): void {
-  if (props.loading || selectingRecommended.value || patchBusy.value) return
-  menuOpen.value = false
-  patchTarget.value = entry
-  patchSheetOpen.value = true
-  void loadPatchProfile()
-}
-
-function closePatchProfile(): void {
-  if (patchBusy.value) return
-  patchGeneration++
-  patchSheetOpen.value = false
-}
-
-async function savePatchProfile(): Promise<void> {
-  const target = patchTarget.value
-  if (!target || !patchCanSave.value) return
-  patchBusy.value = true
-  patchError.value = ''
-  try {
-    const levels = { ...patchCurrent.value }
-    await props.cli.setAppPatchLevels(target.targetKey, levels)
-    patchSaved.value = levels
-    void showSnackbar({ message: translate('app_patch_saved', 'App patch levels saved'), duration: 'long' })
-  } catch (error) {
-    patchError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    patchBusy.value = false
-  }
 }
 
 async function selectRecommended(): Promise<void> {
@@ -286,6 +422,7 @@ function deselectAll(): void {
 }
 
 function refresh(): void {
+  if (props.loading || selectingRecommended.value) return
   menuOpen.value = false
   emit('refresh')
 }
@@ -340,8 +477,8 @@ function closeSystemApps(): void {
 }
 
 function dismissOverlay(): boolean {
-  if (patchSheetOpen.value) {
-    closePatchProfile()
+  if (appSheetOpen.value) {
+    closeAppSettings()
     return true
   }
   if (systemSheetOpen.value) {
@@ -356,6 +493,9 @@ function dismissOverlay(): boolean {
 }
 
 onBeforeUnmount(() => {
+  disposed = true
+  appSettingsGeneration++
+  cancelAnimationFrame(pullFrame)
   unsubscribe()
 })
 
@@ -371,7 +511,14 @@ defineExpose({
 </script>
 
 <template>
-  <section class="targets-view" aria-labelledby="targets-view-title">
+  <section
+    class="targets-view"
+    aria-labelledby="targets-view-title"
+    @touchstart.passive="startPull"
+    @touchmove="movePull"
+    @touchend="finishPull"
+    @touchcancel="resetPull"
+  >
     <div v-if="menuOpen" class="targets-menu-scrim" @click="menuOpen = false" />
     <div class="targets-top-bar">
       <MiuixTopAppBar
@@ -438,46 +585,63 @@ defineExpose({
         @focusin="menuOpen = false"
       />
 
-      <div class="targets-filter" :aria-label="translate('app_targets_filter_aria', 'Filter apps')">
-        <MiuixTabRow
-          contour
-          :model-value="filterIndex"
-          :tabs="filterLabels"
-          @update:model-value="filterIndex = $event; menuOpen = false"
-        />
-      </div>
     </div>
 
     <main class="targets-content" :aria-busy="loading">
-      <p v-if="!loading" class="targets-scope-note">
-        {{ translate('app_target_all_users', 'Select apps per Android user. Existing all-user rules remain until edited. Apps sharing a UID share routing.') }}
-      </p>
-      <div v-if="loading" class="targets-loading" role="status">
+      <div ref="pullIndicator" class="targets-pull"
+        :class="{ 'targets-pull--refreshing': refreshing }"
+        :aria-hidden="!pullActive && !refreshing" role="status" aria-live="polite">
+        <div class="targets-pull-content">
+          <MiuixProgressIndicator v-if="refreshing" type="circular" :size="24" :stroke-width="2.5" />
+          <span v-show="!refreshing" ref="pullCapsule" class="targets-pull-capsule" aria-hidden="true">
+            <span class="targets-pull-stem" />
+          </span>
+          <span>{{ refreshing
+            ? translate('app_targets_refreshing', 'Refreshing')
+            : pullReady
+              ? translate('app_targets_release_refresh', 'Release to refresh')
+              : translate('app_targets_pull_refresh', 'Pull down to refresh apps') }}</span>
+        </div>
+      </div>
+      <div ref="pullBody" class="targets-pull-body">
+      <MiuixCard class="targets-auto" press-feedback="none">
+        <MiuixSwitchPreference
+          :model-value="autoEnabled"
+          :disabled="autoBusy || autoStatus !== 'ready' || loading"
+          :title="translate('app_targets_auto_title', 'Automatically add new apps')"
+          :summary="translate('app_targets_auto_desc', 'Add newly installed user apps in the background. Existing apps are not selected. Saved immediately.')"
+          @update:model-value="setAutoTargets"
+        >
+          <template #start><MiuixIcon :icon="AddCircle" :size="23" /></template>
+        </MiuixSwitchPreference>
+        <div v-if="autoBusy || autoStatus === 'loading'" class="targets-auto-state" role="status">
+          <MiuixProgressIndicator type="circular" :size="18" />
+          {{ translate('home_status_loading', 'Checking') }}
+        </div>
+        <div v-if="autoError" class="targets-auto-state" role="alert">
+          <span>{{ translate('app_targets_auto_error', 'Unable to update automatic selection. Check that the module is up to date.') }}</span>
+          <MiuixButton v-if="autoStatus === 'error'" @click="loadAutoTargets">{{ translate('functional_button_retry', 'Retry') }}</MiuixButton>
+        </div>
+      </MiuixCard>
+      <div v-if="initialLoading" class="targets-loading" role="status">
         <MiuixProgressIndicator type="circular" :size="34" />
         <span class="sr-only">{{ translate('home_status_loading', 'Checking') }}</span>
       </div>
 
-      <MiuixCard v-else-if="targetEntries.length > 0" class="targets-list">
+      <div v-else-if="targetEntries.length > 0" class="targets-list">
+        <template v-for="(entry, index) in renderedTargetEntries" :key="entry.targetKey">
+        <h3 v-if="showUserGroups && (index === 0 || renderedTargetEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
+          {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
+        </h3>
+        <div class="target-app-row">
         <MiuixCheckboxPreference
-          v-for="entry in renderedTargetEntries"
-          v-memo="[entry.selected, entry.selectedForAllUsers, entry.appName, entry.targetKey, entry.currentUser, iconState(entry.packageName), selectingRecommended]"
-          :key="entry.targetKey"
           :model-value="entry.selected"
-          :disabled="selectingRecommended"
+          :disabled="loading || selectingRecommended"
           :title="entry.appName"
-          :summary="entrySummary(entry)"
+          :summary="entry.packageName"
           location="end"
           @update:model-value="setSelected(entry, $event)"
         >
-          <template #end>
-            <MiuixIconButton
-              :aria-label="translate('app_patch_title', 'App patch levels')"
-              :disabled="selectingRecommended"
-              @click.stop="openPatchProfile(entry)"
-            >
-              <MiuixIcon :icon="Tune" :size="20" />
-            </MiuixIconButton>
-          </template>
           <template #start>
             <span class="app-icon-frame" :class="`app-icon-frame--${iconState(entry.packageName)}`">
               <img
@@ -499,20 +663,33 @@ defineExpose({
             </span>
           </template>
         </MiuixCheckboxPreference>
+        <button
+          type="button"
+          class="target-app-settings"
+          :aria-label="`${translate('soter_app_settings', 'App settings')}: ${entry.appName}`"
+          :title="translate('soter_app_settings', 'App settings')"
+          :disabled="loading || selectingRecommended"
+          @click="openAppSettings(entry)"
+        >
+          <MiuixIcon :icon="More" :size="22" />
+        </button>
+        </div>
+        </template>
         <div v-if="renderedTargetEntries.length < targetEntries.length" class="app-list-batch-loading" role="status">
           <MiuixProgressIndicator type="circular" :size="24" />
           <span class="sr-only">{{ translate('home_status_loading', 'Checking') }}</span>
         </div>
-      </MiuixCard>
+      </div>
 
       <div v-else class="targets-empty">
         <MiuixIcon :icon="All" :size="34" />
         <p>{{ translate('app_targets_empty', 'No matching apps') }}</p>
       </div>
+      </div>
     </main>
 
     <MiuixFloatingActionButton
-      v-show="!systemSheetOpen && !patchSheetOpen"
+      v-show="!systemSheetOpen && !appSheetOpen"
       class="targets-apply"
       :disabled="loading || selectingRecommended || !applyEnabled"
       :aria-label="translate('functional_button_apply', 'Apply')"
@@ -520,7 +697,7 @@ defineExpose({
       @click="apply"
     >
       <MiuixProgressIndicator
-        v-if="loading"
+        v-if="loading && !refreshing"
         type="circular"
         :size="27"
         :stroke-width="3"
@@ -547,27 +724,27 @@ defineExpose({
       </template>
 
       <div class="system-app-sheet">
-        <p class="targets-scope-note">
-          {{ translate('app_target_all_users', 'Select apps per Android user. Existing all-user rules remain until edited. Apps sharing a UID share routing.') }}
-        </p>
         <MiuixSearchBar
           v-model="systemSearchQuery"
           :label="translate('search_bar_search_placeholder', 'Search')"
           :cancel-text="translate('functional_button_cancel', 'Cancel')"
         />
 
-        <div v-if="loading" class="system-app-loading" role="status">
+        <div v-if="initialLoading" class="system-app-loading" role="status">
           <MiuixProgressIndicator type="circular" :size="32" />
         </div>
 
-        <MiuixCard v-else-if="systemEntries.length > 0" class="system-app-list">
+        <div v-else-if="systemEntries.length > 0" class="system-app-list">
+          <template v-for="(entry, index) in renderedSystemEntries" :key="entry.targetKey">
+          <h3 v-if="showUserGroups && (index === 0 || renderedSystemEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
+            {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
+          </h3>
+          <div class="target-app-row">
           <MiuixCheckboxPreference
-            v-for="entry in renderedSystemEntries"
-            v-memo="[systemSelection.has(entry.targetKey), systemSelection.has(entry.packageName), entry.appName, entry.targetKey, entry.currentUser, iconState(entry.packageName)]"
-            :key="entry.targetKey"
             :model-value="systemSelection.has(entry.targetKey) || systemSelection.has(entry.packageName)"
+            :disabled="loading"
             :title="entry.appName"
-            :summary="entrySummary(entry, systemSelection.has(entry.packageName))"
+            :summary="entry.packageName"
             location="end"
             @update:model-value="setSystemSelected(entry.targetKey, $event)"
           >
@@ -592,11 +769,23 @@ defineExpose({
               </span>
             </template>
           </MiuixCheckboxPreference>
+          <button
+            type="button"
+            class="target-app-settings"
+            :aria-label="`${translate('soter_app_settings', 'App settings')}: ${entry.appName}`"
+            :title="translate('soter_app_settings', 'App settings')"
+            :disabled="loading"
+            @click="openAppSettings(entry)"
+          >
+            <MiuixIcon :icon="More" :size="22" />
+          </button>
+          </div>
+          </template>
           <div v-if="renderedSystemEntries.length < systemEntries.length" class="app-list-batch-loading" role="status">
             <MiuixProgressIndicator type="circular" :size="24" />
             <span class="sr-only">{{ translate('home_status_loading', 'Checking') }}</span>
           </div>
-        </MiuixCard>
+        </div>
 
         <div v-else class="targets-empty targets-empty--sheet">
           <MiuixIcon :icon="All" :size="32" />
@@ -606,94 +795,55 @@ defineExpose({
     </MiuixBottomSheet>
 
     <MiuixBottomSheet
-      :model-value="patchSheetOpen"
-      :title="translate('app_patch_title', 'App patch levels')"
-      :allow-dismiss="!patchBusy"
-      :close-on-click-modal="!patchBusy"
-      @update:model-value="value => { if (!value) closePatchProfile() }"
+      v-if="appSettingsEntry"
+      :model-value="appSheetOpen"
+      :title="appSettingsEntry.appName"
+      :close-on-click-modal="!appSettingsBusy"
+      @update:model-value="value => { if (!value) closeAppSettings() }"
     >
       <template #start-action>
         <MiuixIconButton
-          :disabled="patchBusy"
-          :aria-label="translate('functional_button_close', 'Close')"
-          @click="closePatchProfile"
-        >
-          <MiuixIcon :icon="Close" />
-        </MiuixIconButton>
+          :disabled="appSettingsBusy"
+          :aria-label="translate('functional_button_cancel', 'Close')"
+          @click="closeAppSettings"
+        ><MiuixIcon :icon="Close" /></MiuixIconButton>
       </template>
-      <template #end-action>
-        <MiuixButton type="primary" :disabled="!patchCanSave" @click="savePatchProfile">
-          <MiuixProgressIndicator v-if="patchBusy" type="circular" :size="18" />
-          {{ translate('functional_button_save', 'Save') }}
-        </MiuixButton>
-      </template>
-      <div v-if="patchTarget" class="app-patch-sheet" :aria-busy="patchBusy || patchStatus === 'loading'">
-        <div class="app-patch-identity">
-          <strong>{{ patchTarget.appName }}</strong>
-          <span>{{ patchTarget.packageName }} · {{ translate('app_target_user', 'User') }} {{ patchTarget.userId }}</span>
-        </div>
-        <p class="app-patch-hint">
-          {{ translate('app_patch_scope', 'This profile applies to this Android user. Leave a field empty or use auto to inherit the global patch level.') }}
-        </p>
-        <p class="app-patch-hint">
-          {{ translate('app_patch_shared_uid', 'Apps sharing a UID must resolve to the same patch dates. Conflicting profiles are rejected.') }}
-        </p>
-        <div v-if="patchStatus === 'loading'" class="system-app-loading" role="status">
+      <div class="target-app-sheet" :aria-busy="appSettingsStatus === 'loading' || appSettingsBusy">
+        <p class="target-app-identity">{{ appSettingsEntry.packageName }}</p>
+        <p class="target-app-profile">{{ translate('app_target_user', 'User') }} {{ appSettingsEntry.userId }}</p>
+        <div v-if="appSettingsStatus === 'loading'" class="target-app-pending" role="status">
           <MiuixProgressIndicator type="circular" :size="28" />
+          <span>{{ translate('home_status_loading', 'Checking') }}</span>
         </div>
-        <template v-else-if="patchStatus === 'ready'">
-          <MiuixInput
-            v-model="patchOs"
-            :disabled="patchBusy"
-            :label="translate('app_patch_os', 'OS patch level')"
-            placeholder="YYYY-MM-DD / auto"
+        <template v-else-if="appSettingsStatus === 'ready'">
+          <MiuixSwitchPreference
+            :model-value="appSoterSelected"
+            :title="translate('soter_app_enabled', 'Take over remote SOTER')"
+            :summary="translate('soter_app_enabled_desc', 'Only this app in this Android user is opted in. Independent of normal OMK selection; saved immediately.')"
+            :disabled="appSettingsBusy || isDev()"
+            @update:model-value="setAppSoter"
           />
-          <MiuixInput
-            v-model="patchVendor"
-            :disabled="patchBusy"
-            :label="translate('app_patch_vendor', 'Vendor patch level')"
-            placeholder="YYYY-MM-DD / auto"
-          />
-          <MiuixInput
-            v-model="patchBoot"
-            :disabled="patchBusy"
-            :label="translate('app_patch_boot', 'Boot patch level')"
-            placeholder="YYYY-MM-DD / auto"
-          />
-          <p v-if="!patchValid" class="app-patch-error" role="alert">
-            {{ translate('app_patch_invalid', 'Use a valid YYYY-MM-DD date, auto, or an empty field. Boot also accepts a raw unsigned 32-bit value.') }}
+          <p class="target-app-note">
+            {{ translate('soter_app_original', 'In per-app mode, apps not opted in continue using the original SOTER service.') }}
           </p>
-          <MiuixButton :disabled="patchBusy" @click="patchOs = ''; patchVendor = ''; patchBoot = ''">
-            {{ translate('app_patch_inherit', 'Use global defaults') }}
-          </MiuixButton>
+          <p v-if="!appSoterReady" class="target-app-note target-app-note--warning" role="status">
+            {{ translate('soter_app_inactive', 'Remote SOTER is not active: enable per-app takeover and the remote relay in SOTER settings.') }}
+          </p>
+          <div v-if="appSettingsBusy" class="target-app-pending" role="status">
+            <MiuixProgressIndicator type="circular" :size="22" />
+          </div>
         </template>
-        <p v-if="patchError" class="app-patch-error" role="alert">{{ patchError }}</p>
-        <MiuixButton v-if="patchStatus === 'error'" @click="loadPatchProfile">
+        <p v-if="appSettingsError" class="target-app-error" role="alert">{{ appSettingsError }}</p>
+        <MiuixButton v-if="appSettingsStatus === 'error'" @click="loadAppSettings">
           {{ translate('functional_button_retry', 'Retry') }}
         </MiuixButton>
-        <p v-if="isDev()" class="app-patch-hint">
-          {{ translate('app_patch_preview', 'Preview only. Device settings cannot be saved here.') }}
-        </p>
+        <p v-if="isDev()" class="target-app-note">{{ translate('soter_hal_preview', 'Preview only. Device settings cannot be saved here.') }}</p>
       </div>
     </MiuixBottomSheet>
   </section>
 </template>
 
 <style scoped>
-.app-patch-sheet { display: flex; flex-direction: column; gap: 14px; padding-bottom: 12px; }
-.app-patch-identity { display: grid; gap: 4px; min-width: 0; }
-.app-patch-identity strong { font-size: 17px; line-height: 1.4; color: var(--m-color-on-surface); }
-.app-patch-identity span { overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; color: var(--m-color-on-surface-variant-summary); }
-.app-patch-hint { margin: 0; font-size: 14px; line-height: 1.5; color: var(--m-color-on-surface-variant-summary); }
-.app-patch-error { margin: 0; font-size: 14px; line-height: 1.5; color: var(--m-color-error); overflow-wrap: anywhere; }
-
-.targets-scope-note {
-  margin: 0 0 12px;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--m-color-on-surface-variant-summary);
-}
-
 .targets-view {
   position: relative;
   box-sizing: border-box;
@@ -837,35 +987,160 @@ defineExpose({
   transform: translateY(-5px) scale(.97);
 }
 
-.targets-filter {
-  box-sizing: border-box;
-  width: min(100%, 680px);
-  margin: 7px auto 0;
-  padding: 0 12px 10px;
-}
-
-.targets-filter :deep(.m-tab-row__scroll) {
-  background: var(--m-color-surface-container-high);
-}
-
 .targets-content {
+  position: relative;
+  /* Clip translated content without creating a nested scroll container. */
+  contain: paint;
   box-sizing: border-box;
   width: min(100%, 680px);
   min-height: 240px;
-  margin: 0 auto;
-  padding: 8px 12px calc(96px + var(--omk-bottom-inset) / var(--omk-ui-scale));
+  /* Room for the maximum pull, without increasing the resting scroll extent. */
+  margin: 0 auto -48px;
+  padding: 8px 12px calc(144px + var(--omk-bottom-inset) / var(--omk-ui-scale));
 }
+
+.targets-pull {
+  position: absolute;
+  top: 8px;
+  inset-inline: 12px;
+  height: 64px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(0, -64px, 0);
+  color: var(--m-color-on-surface-variant-summary);
+  font-size: 14px;
+  font-weight: 500;
+  transition: transform 220ms cubic-bezier(.2, .8, .2, 1), opacity 180ms ease;
+}
+
+.targets-pull-body {
+  transform: translate3d(0, 0, 0);
+  transition: transform 220ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.targets-pull-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+}
+
+.targets-pull-capsule {
+  position: relative;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  transition: transform 220ms cubic-bezier(.2, .8, .2, 1);
+}
+
+/* Translate the round caps and stretch only the straight sides so the outline
+   stays 2px thick even at maximum pull. None of these updates change layout. */
+.targets-pull-capsule::before,
+.targets-pull-capsule::after,
+.targets-pull-stem {
+  position: absolute;
+  box-sizing: border-box;
+  inset-inline: 0;
+  border: 2px solid currentColor;
+  transition: inherit;
+}
+
+.targets-pull-capsule::before {
+  content: '';
+  top: 0;
+  height: 11px;
+  border-bottom: 0;
+  border-radius: 11px 11px 0 0;
+  transform: translate3d(0, calc(var(--pull-stretch, 0) * -1px), 0);
+}
+
+.targets-pull-capsule::after {
+  content: '';
+  top: 11px;
+  height: 11px;
+  border-top: 0;
+  border-radius: 0 0 11px 11px;
+}
+
+.targets-pull-stem {
+  top: 10px;
+  height: 1px;
+  border-block: 0;
+  transform-origin: center bottom;
+  transform: scaleY(calc(var(--pull-stretch, 0) + 1));
+}
+
+.targets-pull--refreshing { color: var(--m-color-primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .targets-pull, .targets-pull-body, .targets-pull-capsule { transition: none; }
+}
+
+.targets-auto { margin-bottom: 16px; }
+.targets-auto-state { display: flex; align-items: center; gap: 10px; padding: 0 16px 14px; font-size: 13px; color: var(--m-color-on-surface-variant-summary); }
+.targets-auto-state[role='alert'] { color: var(--m-color-error); }
+.targets-user-heading { margin: 8px 12px 0; color: var(--m-color-on-surface-variant-summary); font-size: 14px; font-weight: 500; }
 
 .targets-list,
 .system-app-list {
   width: 100%;
+  display: grid;
+  gap: 12px;
 }
 
 .targets-list :deep(.m-basic-component),
 .system-app-list :deep(.m-basic-component) {
-  min-height: 68px;
-  padding: 10px 14px;
+  min-height: 74px;
+  padding: 12px 14px;
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--m-color-surface-container);
 }
+
+.target-app-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--m-color-surface-container);
+}
+
+.target-app-row :deep(.m-basic-component) {
+  flex: 1;
+  min-width: 0;
+  padding-inline-end: 4px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.target-app-settings {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--m-color-on-surface-variant-summary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.target-app-settings:active { background: color-mix(in srgb, var(--m-color-primary) 10%, transparent); }
+.target-app-settings:focus-visible { outline: 2px solid var(--m-color-primary); outline-offset: -4px; }
+.target-app-settings:disabled { opacity: .45; cursor: default; }
+.target-app-sheet { padding: 0 4px 22px; }
+.target-app-identity { margin: 0; overflow-wrap: anywhere; color: var(--m-color-on-surface-variant-summary); font-size: 14px; }
+.target-app-profile { margin: 6px 0 16px; color: var(--m-color-on-surface-variant-summary); font-size: 13px; }
+.target-app-note, .target-app-error { margin: 14px 0; font-size: 14px; line-height: 1.55; color: var(--m-color-on-surface-variant-summary); }
+.target-app-note--warning { color: var(--m-color-primary); }
+.target-app-error { color: var(--m-color-error); }
+.target-app-pending { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 64px; }
 
 .targets-list :deep(.m-basic-component__row),
 .system-app-list :deep(.m-basic-component__row) {
@@ -885,10 +1160,6 @@ defineExpose({
   white-space: nowrap;
 }
 
-.targets-list :deep(.m-basic-component + .m-basic-component),
-.system-app-list :deep(.m-basic-component + .m-basic-component) {
-  border-top: 1px solid var(--m-color-divider-line);
-}
 
 .app-icon-frame {
   position: relative;
@@ -900,7 +1171,7 @@ defineExpose({
   width: 42px;
   height: 42px;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: 50%;
   color: var(--m-color-on-tertiary-container);
   background: var(--m-color-tertiary-container);
 }
@@ -913,6 +1184,8 @@ defineExpose({
   object-fit: cover;
   opacity: 0;
 }
+
+.app-icon-frame--loaded { background: transparent; }
 
 .app-icon-frame--loaded .app-icon {
   opacity: 1;
@@ -994,7 +1267,6 @@ defineExpose({
 }
 
 @media (max-width: 420px) {
-  .targets-filter,
   .targets-content {
     padding-inline: 10px;
   }

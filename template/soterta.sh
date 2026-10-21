@@ -257,9 +257,30 @@ stop_daemon() {
   rm -f "$PIDFILE"
 }
 
+# SoterServer caches its HAL proxy. Refresh it after each successful replacement
+# instance, not on every watchdog poll. A host started later has no old proxy.
+# No force-stop or app-data deletion: Android can rebind the service normally.
+restart_soter_host() {
+  local host_pid host_name
+  for host_pid in $(pidof com.tencent.soter.soterserver 2>/dev/null); do
+    case "$host_pid" in ''|*[!0-9]*) continue ;; esac
+    host_name=$(tr '\0' '\n' < "/proc/$host_pid/cmdline" 2>/dev/null | head -n 1)
+    [ "$host_name" = com.tencent.soter.soterserver ] || continue
+    if kill -TERM "$host_pid" 2>/dev/null; then
+      log "restarting SoterServer pid=$host_pid to reconnect to the software TA"
+    else
+      log "could not restart SoterServer pid=$host_pid; reopen the Soter client"
+    fi
+  done
+  return 0
+}
+
 # Start our daemon and wait until it owns the name.
 spawn_daemon_and_wait() {
   binary=$(find_binary) || return 1
+  # A live instance can have lost registration to the stock HAL. It must not
+  # survive when the pidfile is replaced with the next instance's PID.
+  stop_daemon
   mkdir -p "$TA_DIR"
   "$binary" --mode=answer >>"$ERRLOG" 2>&1 &
   pid=$!
@@ -269,6 +290,7 @@ spawn_daemon_and_wait() {
   i=0
   while [ "$i" -lt 20 ]; do
     if [ "$(service_owner)" = us ]; then
+      restart_soter_host
       return 0
     fi
     kill -0 "$pid" 2>/dev/null || break

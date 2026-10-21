@@ -5,6 +5,48 @@ use std::path::Path;
 
 pub const STATE_PATH: &str = "/data/misc/keystore/omk/data/soter_beta.conf";
 
+pub const MAX_APP_TARGETS: usize = 128;
+pub const MAX_APP_TARGET_BYTES: usize = 8192;
+
+/// A Soter opt-in always names one package in one Android user, never a wildcard.
+pub fn parse_app_target(target: &str) -> Option<(&str, u32)> {
+    let (package, user) = target.split_once('@')?;
+    if package.len() > 255 || !package.contains('.') {
+        return None;
+    }
+    for component in package.split('.') {
+        let mut bytes = component.bytes();
+        if !bytes
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == b'_')
+            || !bytes.all(|ch| ch.is_ascii_alphanumeric() || ch == b'_')
+        {
+            return None;
+        }
+    }
+    let id = user.parse::<u32>().ok()?;
+    if id > (i32::MAX as u32 - 99999) / 100000 || id.to_string() != user {
+        return None;
+    }
+    Some((package, id))
+}
+
+pub fn validate_app_targets(targets: &[String]) -> Result<(), String> {
+    if targets.len() > MAX_APP_TARGETS
+        || targets.iter().map(String::len).sum::<usize>() > MAX_APP_TARGET_BYTES
+    {
+        return Err("Soter application selection exceeds its size limit".into());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    if targets
+        .iter()
+        .any(|target| parse_app_target(target).is_none() || !seen.insert(target))
+    {
+        return Err("Soter application selection contains an invalid or duplicate target".into());
+    }
+    Ok(())
+}
+
 pub fn canonical_bytes(enabled: bool) -> &'static [u8] {
     if enabled {
         b"1"
@@ -59,6 +101,32 @@ mod tests {
     use std::ffi::CString;
     use std::fs;
     use std::os::unix::{ffi::OsStrExt, fs::symlink};
+
+    #[test]
+    fn app_targets_require_an_explicit_canonical_android_user() {
+        assert_eq!(
+            parse_app_target("com.example.wallet@0"),
+            Some(("com.example.wallet", 0))
+        );
+        assert_eq!(
+            parse_app_target("com.example.wallet@10"),
+            Some(("com.example.wallet", 10))
+        );
+        for target in [
+            "com.example",
+            "com.example@01",
+            "com.example@-1",
+            "com.example@21475",
+            "com..example@0",
+            "*.example@0",
+            "com.example@0@1",
+            "com.example@+1",
+        ] {
+            assert_eq!(parse_app_target(target), None, "{target}");
+        }
+        assert!(validate_app_targets(&[]).is_ok());
+        assert!(validate_app_targets(&["com.example@0".into(), "com.example@0".into()]).is_err());
+    }
 
     #[test]
     fn state_accepts_only_canonical_boolean_bytes() {

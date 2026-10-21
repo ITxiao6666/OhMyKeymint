@@ -3,6 +3,21 @@ Qualcomm Soter software TA and Binder service
 Source: Andrea-lyz/ommega, soter-ta and soterta-svc components
 License: GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
 
+Additional source: jiyin004-jpg/ommega
+https://github.com/jiyin004-jpg/ommega
+Reviewed revision: f86b7913829c379e112b46c71dd502ef534eb39e
+Relay package hints: c09567f2d1299c757a02a5a19dcf3dc154ad666a
+SoterServer reconnection: f5b2247e9b3240730a0b52d12f971a57ac98e352
+Transaction layouts: 6fdb8e1b4852b022cd37431d47a359b32230db0e
+Native replies and ASK confirmation: 91a896a8689e8ba8226aa05ba28e00b75c09d1c0
+Read-only diagnostic flow reference: ba75a57fd92749d6f52ad49065956dc5378c4af3
+Adapted in Rust for OMK; no automatic app-data or remote-key reset,
+Keybox forwarding or KeyMint forwarding.
+
+The optional Rust RKP repair action references the WebUI vendor-tool command
+at revision c6172dc553543aa8eea1b7e03cd50c2ff6f1efb1 of jiyin004-jpg/ommega.
+No KmInstallKeybox executable or real Keybox material is redistributed.
+
 This component is distributed as part of OhMyKeymint under the terms of the
 AGPL-3.0-or-later. See the repository LICENSE.md for the complete license
 text.

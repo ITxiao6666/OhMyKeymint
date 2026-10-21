@@ -6,11 +6,12 @@
 //! would mix two different ASK/AuthKey identities in the same application slot.
 
 use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use serde_json::{json, Value};
@@ -19,6 +20,8 @@ use crate::dispatch::{self, Outcome, Request};
 
 pub const CONFIG_PATH: &str = "/data/misc/keystore/omk/data/soterta/remote.conf";
 const MAX_RESPONSE_BYTES: u64 = 1024 * 1024;
+const MAX_PACKAGE_TABLE_BYTES: u64 = 4 * 1024 * 1024;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const DEFAULT_RELAY_URL: &str = "http://110.40.170.96:10886";
 const DEFAULT_RELAY_DEVICE_ID: &str = "device-b-c3f204aa";
 const DEFAULT_RELAY_TOKEN: &str = "aY7kRSDDR6PMmamlKwtgf7mQgr-X5uFd";
@@ -69,6 +72,8 @@ pub struct Config {
     pub device_id: String,
     pub tls_insecure: bool,
     pub uid_map: String,
+    pub app_enabled: bool,
+    pub app_targets: Vec<String>,
 }
 
 impl Config {
@@ -93,9 +98,15 @@ impl Config {
                 "device_id" => config.device_id = value.to_string(),
                 "tls_insecure" => config.tls_insecure = parse_bool(value)?,
                 "uid_map" => config.uid_map = value.to_string(),
+                "app_enabled" => config.app_enabled = parse_bool(value)?,
+                "app_targets" => {
+                    config.app_targets = serde_json::from_str(value)
+                        .map_err(|_| "invalid Soter application targets")?;
+                }
                 _ => return Err("unknown SOTER remote config key".to_string()),
             }
         }
+        pif_common::soter::validate_app_targets(&config.app_targets)?;
         if config.enabled {
             if config.url.is_empty() {
                 config.url = DEFAULT_RELAY_URL.to_string();
@@ -132,12 +143,78 @@ impl Config {
     }
 
     pub fn load() -> Result<Self, String> {
-        match std::fs::read_to_string(config_path()) {
-            Ok(raw) => Self::parse(&raw),
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+            .open(config_path())
+        {
+            Ok(file) => {
+                if !file
+                    .metadata()
+                    .map_err(|error| error.to_string())?
+                    .is_file()
+                {
+                    return Err("Soter remote config is not a regular file".into());
+                }
+                let mut raw = String::new();
+                file.take(32769)
+                    .read_to_string(&mut raw)
+                    .map_err(|error| error.to_string())?;
+                if raw.len() > 32768 {
+                    return Err("Soter remote config exceeds limit".into());
+                }
+                Self::parse(&raw)
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(format!("cannot read SOTER remote config: {error}")),
         }
     }
+}
+
+/// Resolve opt-ins in their exact Android user. Shared UIDs never grant access.
+/// This is used only with a kernel-authenticated Binder sender, not a HAL UID argument.
+pub fn app_uids(config: &Config) -> Result<Vec<u32>, String> {
+    let mut table = String::new();
+    std::fs::File::open("/data/system/packages.list")
+        .and_then(|file| {
+            file.take(MAX_PACKAGE_TABLE_BYTES + 1)
+                .read_to_string(&mut table)
+        })
+        .map_err(|error| format!("cannot resolve Soter application selection: {error}"))?;
+    if table.len() as u64 > MAX_PACKAGE_TABLE_BYTES {
+        return Err("Android package table exceeds limit".into());
+    }
+    Ok(app_uids_in_table(config, &table))
+}
+
+fn app_uids_in_table(config: &Config, table: &str) -> Vec<u32> {
+    let mut uids = Vec::new();
+    for target in &config.app_targets {
+        let Some((wanted, user)) = pif_common::soter::parse_app_target(target) else {
+            continue;
+        };
+        let id = table.lines().find_map(|line| {
+            let mut fields = line.split_ascii_whitespace();
+            (fields.next()? == wanted)
+                .then(|| fields.next()?.parse::<u32>().ok())
+                .flatten()
+        });
+        let Some(id) = id.filter(|id| (10000..20000).contains(id)) else {
+            continue;
+        };
+        let Some(uid) = user
+            .checked_mul(100000)
+            .and_then(|base| base.checked_add(id))
+        else {
+            continue;
+        };
+        if package_in_table(table, uid) == Some(wanted) {
+            uids.push(uid);
+        }
+    }
+    uids.sort_unstable();
+    uids.dedup();
+    uids
 }
 
 fn parse_bool(value: &str) -> Result<bool, String> {
@@ -160,7 +237,60 @@ fn mapped_uid(uid: u32, mapping: &str) -> u32 {
         .unwrap_or(uid)
 }
 
-fn request_body(config: &Config, tx: u32, request: &Request) -> Result<Value, String> {
+// The HAL's Binder caller is SoterServer, not the application. Resolve only
+// the argument UID as a best-effort hint, never as authenticated identity.
+// Read the existing Android table without a cache or a persistent OMK copy so
+// package installs/removals and UID reuse cannot leave a stale attribution.
+fn package_for_uid(uid: u32) -> Option<String> {
+    let mut table = String::new();
+    std::fs::File::open("/data/system/packages.list")
+        .ok()?
+        .take(MAX_PACKAGE_TABLE_BYTES + 1)
+        .read_to_string(&mut table)
+        .ok()?;
+    if table.len() as u64 > MAX_PACKAGE_TABLE_BYTES {
+        return None;
+    }
+    package_in_table(&table, uid).map(str::to_owned)
+}
+
+fn package_in_table(table: &str, uid: u32) -> Option<&str> {
+    // packages.list records app IDs shared by Android user profiles. System
+    // and isolated UIDs cannot identify an installed application this way.
+    let app_id = uid % 100_000;
+    if !(10_000..20_000).contains(&app_id) {
+        return None;
+    }
+    let mut found = None;
+    for line in table.lines() {
+        let mut fields = line.split_ascii_whitespace();
+        let (Some(package), Some(id)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        if id.parse::<u32>().ok() != Some(app_id) {
+            continue;
+        }
+        if !package.contains('.')
+            || !package
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_'))
+            || found.is_some_and(|previous| previous != package)
+        {
+            // A shared UID is ambiguous; do not guess a foreground app or
+            // infer identity from a key alias supplied by the application.
+            return None;
+        }
+        found = Some(package);
+    }
+    found
+}
+
+fn request_body(
+    config: &Config,
+    tx: u32,
+    request: &Request,
+    lookup_package: impl FnOnce(u32) -> Option<String>,
+) -> Result<Value, String> {
     use dispatch::*;
     let op = match tx {
         TX_EXPORT_ASK => "export_ask_public_key",
@@ -208,10 +338,26 @@ fn request_body(config: &Config, tx: u32, request: &Request) -> Result<Value, St
             return Err("ATTK transactions are answered locally, not relayed".to_string())
         }
     }
+    let uid = match request {
+        Request::Uid(uid) | Request::UidKey { uid, .. } | Request::InitSign { uid, .. } => {
+            Some(*uid)
+        }
+        _ => None,
+    };
+    if let Some(package) = uid.and_then(lookup_package) {
+        // Resolve the source UID, before the optional A-to-B UID mapping.
+        // `arg` is required by the relay protocol: this is NOT a trusted
+        // Binder caller and must not grant access to remote key material.
+        body["caller_pkg"] = json!(package);
+        body["caller_pkg_src"] = json!("arg");
+    }
     Ok(body)
 }
 
 fn decode_reply(tx: u32, body: &Value) -> Result<Outcome, String> {
+    if body.get("local_only").and_then(Value::as_bool) == Some(true) {
+        return Err("SOTER relay declined remote handling; local fallback is disabled".to_string());
+    }
     let code = body
         .get("error_code")
         .and_then(Value::as_i64)
@@ -302,7 +448,10 @@ fn http_client(tls_insecure: bool) -> Result<reqwest::blocking::Client, String> 
     }
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(20))
+        .timeout(REQUEST_TIMEOUT)
+        // The relay token belongs only to the configured endpoint. In
+        // particular, ASK confirmation probes must not follow redirects.
+        .redirect(reqwest::redirect::Policy::none())
         .danger_accept_invalid_certs(tls_insecure)
         .build()
         .map_err(|error| format!("SOTER client setup failed: {error}"))?;
@@ -311,13 +460,123 @@ fn http_client(tls_insecure: bool) -> Result<reqwest::blocking::Client, String> 
 }
 
 pub fn forward(config: &Config, tx: u32, request: &Request) -> Result<Outcome, String> {
-    let body = request_body(config, tx, request)?;
+    let body = request_body(config, tx, request, package_for_uid)?;
+    forward_body(config, tx, &body)
+}
+
+/// The caller must be the privileged app-entry bridge carrying the Binder
+/// driver's sender UID, never a UID parsed from a Soter method argument.
+pub fn forward_app(
+    config: &Config,
+    caller_uid: u32,
+    tx: u32,
+    request: &Request,
+) -> Result<Outcome, String> {
+    let mut body = request_body(config, tx, request, package_for_uid)?;
+    if let Some(package) = package_for_uid(caller_uid) {
+        body["caller_uid"] = json!(caller_uid);
+        body["caller_pkg"] = json!(package);
+        body["caller_pkg_src"] = json!("binder");
+    } else {
+        return Err("Soter Binder caller no longer resolves to an application".into());
+    }
+    forward_body(config, tx, &body)
+}
+
+fn forward_body(config: &Config, tx: u32, body: &Value) -> Result<Outcome, String> {
+    let deadline = Instant::now() + REQUEST_TIMEOUT;
+    forward_with_ask_confirmation(tx, body, |probe_tx, probe_body| {
+        let timeout = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or("SOTER relay deadline exceeded")?;
+        send_request(config, probe_tx, probe_body, timeout)
+    })
+}
+
+// A subset of real HALs returns -5 on repeated ASK creation. Treat it as an
+// idempotent success only after two fresh, read-only confirmations from the
+// same relay slot. A failed confirmation preserves the original vendor error;
+// it never generates another key, deletes a key, or switches to local state.
+fn forward_with_ask_confirmation(
+    tx: u32,
+    body: &Value,
+    mut send: impl FnMut(u32, &Value) -> Result<Outcome, String>,
+) -> Result<Outcome, String> {
+    let outcome = send(tx, body)?;
+    if tx != dispatch::TX_GENERATE_ASK || outcome != Outcome::Code(crate::error::SOTER_ERR_NO_KEY) {
+        return Ok(outcome);
+    }
+    let Some(uid) = body
+        .get("uid")
+        .and_then(Value::as_u64)
+        .and_then(|uid| u32::try_from(uid).ok())
+    else {
+        return Ok(outcome);
+    };
+    let mut probe = body.clone();
+    probe["op"] = json!("has_ask_already");
+    if !matches!(send(dispatch::TX_HAS_ASK, &probe), Ok(Outcome::Code(0))) {
+        return Ok(outcome);
+    }
+    probe["op"] = json!("export_ask_public_key");
+    if let Ok(Outcome::Buffer {
+        code: 0,
+        data,
+        field,
+    }) = send(dispatch::TX_EXPORT_ASK, &probe)
+    {
+        if usable_ask_export(&data, field, uid) {
+            return Ok(Outcome::Code(0));
+        }
+    }
+    Ok(outcome)
+}
+
+fn usable_ask_export(data: &[u8], field: i32, uid: u32) -> bool {
+    // This checks the exported wire structure, not hardware provenance or
+    // Tencent's trust in the signing ATTK (which this client cannot establish).
+    if usize::try_from(field).ok() != Some(data.len()) || data.len() as u64 > MAX_RESPONSE_BYTES {
+        return false;
+    }
+    let Some((json, signature)) = crate::blob::parse(data) else {
+        return false;
+    };
+    if signature.len() != crate::blob::SIGNATURE_LEN {
+        return false;
+    }
+    let Ok(document) = serde_json::from_slice::<Value>(json) else {
+        return false;
+    };
+    if document.get("counter").and_then(Value::as_u64).is_none()
+        || document.get("uid").and_then(Value::as_str) != Some(uid.to_string().as_str())
+        || document
+            .get("pub_key")
+            .and_then(Value::as_str)
+            .and_then(crate::blob::public_key_from_pem)
+            .is_none()
+    {
+        return false;
+    }
+    document
+        .get("cpu_id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+fn send_request(
+    config: &Config,
+    tx: u32,
+    body: &Value,
+    timeout: Duration,
+) -> Result<Outcome, String> {
     let url = format!("{}/api/soter/", config.url.trim_end_matches('/'));
     let client = http_client(config.tls_insecure)?;
     let response = client
         .post(url)
         .header("X-Relay-Token", &config.token)
-        .json(&body)
+        .timeout(timeout)
+        .json(body)
         .send()
         .map_err(|error| format!("SOTER relay transport failed: {error}"))?;
     if !response.status().is_success() {
@@ -344,6 +603,341 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::net::TcpListener;
+
+    fn ask_document(uid: u32) -> Value {
+        // A public-only structural fixture; no private key or hardware trust
+        // is involved in checking whether an exported ASK is well formed.
+        let key = rsa::RsaPublicKey::new(
+            rsa::BigUint::from_bytes_be(&[0xff; 256]),
+            rsa::BigUint::from(65537u32),
+        )
+        .unwrap();
+        json!({
+            "pub_key": crate::blob::public_key_pem(&key).unwrap(),
+            "cpu_id": "0123456789abcdef0123456789abcdef",
+            "counter": 1,
+            "uid": uid.to_string(),
+        })
+    }
+
+    fn ask_export(document: &Value, signature_len: usize) -> Outcome {
+        let data = crate::blob::encode(
+            &serde_json::to_vec(document).unwrap(),
+            &vec![1; signature_len],
+        );
+        Outcome::Buffer {
+            code: 0,
+            field: data.len() as i32,
+            data,
+        }
+    }
+
+    #[test]
+    fn existing_ask_confirmation_is_read_only_and_keeps_the_same_slot() {
+        let config = Config {
+            device_id: "same-b".into(),
+            uid_map: "10123=10456".into(),
+            ..Config::default()
+        };
+        let body = request_body(
+            &config,
+            dispatch::TX_GENERATE_ASK,
+            &Request::Uid(10123),
+            |_| Some("com.example.wallet".into()),
+        )
+        .unwrap();
+        let mut calls = Vec::new();
+        let result =
+            forward_with_ask_confirmation(dispatch::TX_GENERATE_ASK, &body, |tx, probe| {
+                calls.push(tx);
+                assert_eq!(probe["device_id"], "same-b");
+                assert_eq!(probe["uid"], 10456);
+                assert_eq!(probe["caller_pkg"], "com.example.wallet");
+                assert_eq!(probe["caller_pkg_src"], "arg");
+                match tx {
+                    dispatch::TX_GENERATE_ASK => {
+                        assert_eq!(probe["op"], "generate_ask_key_pair");
+                        Ok(Outcome::Code(-5))
+                    }
+                    dispatch::TX_HAS_ASK => {
+                        assert_eq!(probe["op"], "has_ask_already");
+                        Ok(Outcome::Code(0))
+                    }
+                    dispatch::TX_EXPORT_ASK => {
+                        assert_eq!(probe["op"], "export_ask_public_key");
+                        Ok(ask_export(&ask_document(10456), crate::blob::SIGNATURE_LEN))
+                    }
+                    _ => panic!("confirmation must not mutate keys or sign"),
+                }
+            })
+            .unwrap();
+        assert_eq!(result, Outcome::Code(0));
+        assert_eq!(
+            calls,
+            [
+                dispatch::TX_GENERATE_ASK,
+                dispatch::TX_HAS_ASK,
+                dispatch::TX_EXPORT_ASK
+            ]
+        );
+    }
+
+    #[test]
+    fn ask_confirmation_does_not_hide_vendor_or_transport_failures() {
+        let body = json!({"op": "generate_ask_key_pair", "uid": 10123});
+        for (tx, answer) in [
+            (dispatch::TX_GENERATE_ASK, Ok(Outcome::Code(0))),
+            (dispatch::TX_GENERATE_ASK, Ok(Outcome::Code(-20))),
+            (dispatch::TX_GENERATE_ASK, Err("offline".to_string())),
+            (dispatch::TX_GENERATE_AUTH, Ok(Outcome::Code(-5))),
+            (dispatch::TX_HAS_ASK, Ok(Outcome::Code(-5))),
+        ] {
+            let mut count = 0;
+            let result = forward_with_ask_confirmation(tx, &body, |_, _| {
+                count += 1;
+                answer.clone()
+            });
+            assert_eq!(result, answer);
+            assert_eq!(count, 1);
+        }
+        for has_reply in [
+            Ok(Outcome::Code(-5)),
+            Ok(Outcome::Code(1)),
+            Err("timeout".into()),
+        ] {
+            let mut calls = Vec::new();
+            let result =
+                forward_with_ask_confirmation(dispatch::TX_GENERATE_ASK, &body, |tx, _| {
+                    calls.push(tx);
+                    match tx {
+                        dispatch::TX_GENERATE_ASK => Ok(Outcome::Code(-5)),
+                        dispatch::TX_HAS_ASK => has_reply.clone(),
+                        _ => panic!("absent ASK must not be exported"),
+                    }
+                })
+                .unwrap();
+            assert_eq!(result, Outcome::Code(-5));
+            assert_eq!(calls, [dispatch::TX_GENERATE_ASK, dispatch::TX_HAS_ASK]);
+        }
+        for export_reply in [
+            Err("offline".into()),
+            Ok(Outcome::Buffer {
+                code: -20,
+                data: Vec::new(),
+                field: 0,
+            }),
+            Ok(Outcome::Buffer {
+                code: 0,
+                data: vec![1, 2, 3],
+                field: 3,
+            }),
+        ] {
+            let result =
+                forward_with_ask_confirmation(dispatch::TX_GENERATE_ASK, &body, |tx, _| match tx {
+                    dispatch::TX_GENERATE_ASK => Ok(Outcome::Code(-5)),
+                    dispatch::TX_HAS_ASK => Ok(Outcome::Code(0)),
+                    dispatch::TX_EXPORT_ASK => export_reply.clone(),
+                    _ => panic!("unexpected transaction"),
+                })
+                .unwrap();
+            assert_eq!(result, Outcome::Code(-5));
+        }
+    }
+
+    #[test]
+    fn existing_ask_export_requires_a_complete_matching_key_document() {
+        let valid = ask_document(10123);
+        let validate = |document: &Value, tail: usize, length_delta: i32, uid: u32| {
+            let Outcome::Buffer { data, field, .. } = ask_export(document, tail) else {
+                unreachable!()
+            };
+            usable_ask_export(&data, field + length_delta, uid)
+        };
+        assert!(validate(&valid, 256, 0, 10123));
+        assert!(!validate(&valid, 0, 0, 10123));
+        assert!(!validate(&valid, 1, 0, 10123));
+        assert!(!validate(&valid, 256, -1, 10123));
+        assert!(!validate(&valid, 256, 0, 10456));
+        assert!(!usable_ask_export(&[], 0, 10123));
+        assert!(!usable_ask_export(&[0xff; 4], 4, 10123));
+        let malformed_json = crate::blob::encode(b"not json", &[1; crate::blob::SIGNATURE_LEN]);
+        assert!(!usable_ask_export(
+            &malformed_json,
+            malformed_json.len() as i32,
+            10123
+        ));
+        for (field, value) in [
+            ("pub_key", json!("not a public key")),
+            ("cpu_id", json!("wrong-device-id")),
+            ("counter", json!(-1)),
+            ("uid", json!(10123)),
+        ] {
+            let mut malformed = valid.clone();
+            malformed[field] = value;
+            assert!(!validate(&malformed, 256, 0, 10123), "invalid {field}");
+        }
+        let oversized = ask_export(&valid, MAX_RESPONSE_BYTES as usize);
+        let Outcome::Buffer { data, field, .. } = oversized else {
+            unreachable!()
+        };
+        assert!(!usable_ask_export(&data, field, 10123));
+    }
+
+    #[test]
+    fn relay_redirects_do_not_forward_the_token_to_another_endpoint() {
+        let origin = TcpListener::bind("127.0.0.1:0").unwrap();
+        let destination = TcpListener::bind("127.0.0.1:0").unwrap();
+        destination.set_nonblocking(true).unwrap();
+        let port = origin.local_addr().unwrap().port();
+        let destination_port = destination.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = origin.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = [0u8; 4096];
+            assert!(socket.read(&mut request).unwrap() > 0);
+            socket.write_all(format!(
+                "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{destination_port}/other\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            ).as_bytes()).unwrap();
+        });
+        let config = Config {
+            enabled: true,
+            url: format!("http://127.0.0.1:{port}"),
+            token: "fixture-only-token".into(),
+            device_id: "fixture-b".into(),
+            ..Config::default()
+        };
+        let error = forward(&config, dispatch::TX_HAS_ASK, &Request::Uid(10123)).unwrap_err();
+        assert!(error.contains("HTTP 302"), "{error}");
+        server.join().unwrap();
+        assert_eq!(
+            destination.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
+    #[test]
+    fn package_hint_handles_profiles_missing_packages_and_shared_uids() {
+        let table = "com.example.wallet 10123 0 /data/user/0/com.example.wallet default\n\
+                     com.example.other 10456 0 /data/user/0/com.example.other default\n";
+        assert_eq!(package_in_table(table, 10123), Some("com.example.wallet"));
+        assert_eq!(package_in_table(table, 1010123), Some("com.example.wallet"));
+        assert_eq!(package_in_table(table, 10999), None);
+        assert_eq!(package_in_table("android 1000 0", 1000), None);
+        assert_eq!(
+            package_in_table("com.example.isolated 99001 0", 99001),
+            None
+        );
+        assert_eq!(
+            package_in_table("malformed\ncom.example.no_uid bad 0", 10123),
+            None
+        );
+        assert_eq!(package_in_table("com.example/invalid 10123 0", 10123), None);
+        let shared = format!("{table}com.example.shared 10123 0\n");
+        assert_eq!(package_in_table(&shared, 10123), None);
+        // A fresh table must not retain a previous package after UID reuse.
+        assert_eq!(
+            package_in_table("com.example.new 10123 0", 10123),
+            Some("com.example.new")
+        );
+    }
+
+    #[test]
+    fn app_selection_is_empty_by_default_and_profile_specific() {
+        let table = "com.example.wallet 10123 0\ncom.example.other 10124 0\n";
+        assert!(app_uids_in_table(&Config::default(), table).is_empty());
+        let config = Config {
+            app_targets: vec!["com.example.wallet@10".into()],
+            ..Config::default()
+        };
+        assert_eq!(app_uids_in_table(&config, table), [1010123]);
+        assert!(app_uids_in_table(&config, "com.example.replacement 10123 0\n").is_empty());
+        let shared = format!("{table}com.example.shared 10123 0\n");
+        assert!(app_uids_in_table(&config, &shared).is_empty());
+        let parsed =
+            Config::parse("app_enabled=true\napp_targets=[\"com.example.wallet@10\"]").unwrap();
+        assert!(parsed.app_enabled);
+        assert!(!parsed.enabled);
+        assert_eq!(parsed.app_targets, config.app_targets);
+        assert!(Config::parse("app_targets=[\"com.example.wallet\"]").is_err());
+    }
+
+    #[test]
+    fn package_hint_uses_unmapped_argument_uid_and_is_never_trusted() {
+        let config = Config {
+            uid_map: "10123=10456".into(),
+            ..Config::default()
+        };
+        for (tx, request) in [
+            (dispatch::TX_HAS_ASK, Request::Uid(10123)),
+            (
+                dispatch::TX_HAS_AUTH,
+                Request::UidKey {
+                    uid: 10123,
+                    kname: "auth".into(),
+                },
+            ),
+            (
+                dispatch::TX_INIT_SIGN,
+                Request::InitSign {
+                    uid: 10123,
+                    kname: "auth".into(),
+                    challenge: "nonce".into(),
+                },
+            ),
+        ] {
+            let body = request_body(&config, tx, &request, |uid| {
+                assert_eq!(uid, 10123);
+                Some("com.example.wallet".into())
+            })
+            .unwrap();
+            assert_eq!(body["uid"], 10456);
+            assert_eq!(body["caller_pkg"], "com.example.wallet");
+            assert_eq!(body["caller_pkg_src"], "arg");
+            assert!(body.get("caller_uid").is_none());
+        }
+        let unknown = request_body(&config, dispatch::TX_HAS_ASK, &Request::Uid(10123), |_| {
+            None
+        })
+        .unwrap();
+        assert!(unknown.get("caller_pkg").is_none());
+        assert!(unknown.get("caller_pkg_src").is_none());
+        for (tx, request) in [
+            (dispatch::TX_GET_DEVICE_ID, Request::None),
+            (dispatch::TX_FINISH_SIGN, Request::Session(42)),
+        ] {
+            let body = request_body(&config, tx, &request, |_| {
+                panic!("no application UID in this transaction")
+            })
+            .unwrap();
+            assert!(body.get("caller_pkg").is_none());
+        }
+    }
+
+    #[test]
+    fn local_only_replies_never_become_remote_success() {
+        for tx in [
+            dispatch::TX_HAS_ASK,
+            dispatch::TX_GENERATE_AUTH,
+            dispatch::TX_INIT_SIGN,
+            dispatch::TX_FINISH_SIGN,
+        ] {
+            assert!(decode_reply(
+                tx,
+                &json!({"local_only": true, "error_code": 0, "session": 42, "data": ""})
+            )
+            .is_err());
+        }
+        assert_eq!(
+            decode_reply(
+                dispatch::TX_HAS_ASK,
+                &json!({"local_only": false, "error_code": -5})
+            )
+            .unwrap(),
+            Outcome::Code(-5)
+        );
+    }
 
     #[test]
     fn config_fixture_is_thread_local_and_restores_the_previous_path() {
@@ -416,6 +1010,7 @@ mod tests {
                 kname: "AuthKey".into(),
                 challenge: "nonce".into(),
             },
+            |_| None,
         )
         .unwrap();
         assert_eq!(body["uid"], 10002);
@@ -458,12 +1053,20 @@ mod tests {
         assert!(decode_reply(dispatch::TX_INIT_SIGN, &json!({"error_code": 0})).is_err());
         // The ATTK trio is answered from the local ledger (ffi never forwards
         // it), so the relay mapping must not invent a remote ATTK operation.
-        assert!(
-            request_body(&Config::default(), dispatch::TX_EXPORT_ATTK, &Request::None).is_err()
-        );
-        assert!(
-            request_body(&Config::default(), dispatch::TX_VERIFY_ATTK, &Request::None).is_err()
-        );
+        assert!(request_body(
+            &Config::default(),
+            dispatch::TX_EXPORT_ATTK,
+            &Request::None,
+            |_| None
+        )
+        .is_err());
+        assert!(request_body(
+            &Config::default(),
+            dispatch::TX_VERIFY_ATTK,
+            &Request::None,
+            |_| None
+        )
+        .is_err());
         let signed = decode_reply(
             dispatch::TX_INIT_SIGN,
             &json!({"error_code": 0, "session": -2}),

@@ -35,6 +35,22 @@ struct Hooks {
     bio_mark: Option<Probe>,
 }
 
+impl Hooks {
+    fn current(self) -> Option<Platform> {
+        let snapshot = Platform {
+            boot_ms: ask(self.boot_ms),
+            bio_mark: ask(self.bio_mark),
+        };
+        // An installed biometric probe means the gate is enabled. Failure to
+        // obtain its evidence must not look like an intentionally absent gate.
+        if self.bio_mark.is_some() && (snapshot.boot_ms.is_none() || snapshot.bio_mark.is_none()) {
+            None
+        } else {
+            Some(snapshot)
+        }
+    }
+}
+
 static HOOKS: Mutex<Hooks> = Mutex::new(Hooks {
     boot_ms: None,
     bio_mark: None,
@@ -46,13 +62,11 @@ pub fn install(boot_ms: Option<Probe>, bio_mark: Option<Probe>) {
     *hooks = Hooks { boot_ms, bio_mark };
 }
 
-/// Ask the hooks for the current values.
-pub fn current() -> Platform {
+/// Ask the hooks for the current values. `None` refuses a local sign operation
+/// when the enabled biometric gate cannot obtain all required evidence.
+pub fn current() -> Option<Platform> {
     let hooks = *HOOKS.lock().unwrap_or_else(|error| error.into_inner());
-    Platform {
-        boot_ms: ask(hooks.boot_ms),
-        bio_mark: ask(hooks.bio_mark),
-    }
+    hooks.current()
 }
 
 fn ask(hook: Option<Probe>) -> Option<u64> {
@@ -68,4 +82,48 @@ fn ask(hook: Option<Probe>) -> Option<u64> {
 /// Whether two marks were taken inside the same boot.
 pub fn same_boot(left: u64, right: u64) -> bool {
     left >> BOOT_TAG_SHIFT == right >> BOOT_TAG_SHIFT
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "C" fn available() -> i64 {
+        1
+    }
+    unsafe extern "C" fn unavailable() -> i64 {
+        -1
+    }
+
+    #[test]
+    fn enabled_gate_refuses_missing_evidence_but_explicit_off_is_preserved() {
+        assert!(Hooks {
+            boot_ms: None,
+            bio_mark: None
+        }
+        .current()
+        .is_some());
+        assert!(Hooks {
+            boot_ms: Some(available),
+            bio_mark: Some(available)
+        }
+        .current()
+        .is_some());
+        for hooks in [
+            Hooks {
+                boot_ms: Some(available),
+                bio_mark: Some(unavailable),
+            },
+            Hooks {
+                boot_ms: Some(unavailable),
+                bio_mark: Some(available),
+            },
+            Hooks {
+                boot_ms: None,
+                bio_mark: Some(available),
+            },
+        ] {
+            assert!(hooks.current().is_none());
+        }
+    }
 }

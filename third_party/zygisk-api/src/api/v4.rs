@@ -17,6 +17,12 @@ pub struct V4;
 impl Sealed for V4 {}
 
 impl super::ZygiskApi<'_, V4> {
+    /// Keep an owned descriptor open across app specialization.
+    #[inline(always)]
+    pub fn exempt_fd(&self, fd: RawFd) -> bool {
+        (unsafe { self.dispatch() }.exempt_fd_fn)(fd)
+    }
+
     #[inline(always)]
     pub fn with_companion<R>(
         &mut self,

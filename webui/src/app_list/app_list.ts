@@ -32,7 +32,7 @@ const ROOT_TOOL_PACKAGES = new Set([
   'bin.mt.plus',
 ])
 
-function afterPaint(): Promise<void> {
+export function afterPaint(): Promise<void> {
   return new Promise(resolve => {
     window.requestAnimationFrame(() => window.setTimeout(resolve, 0))
   })
@@ -481,9 +481,10 @@ export class AppList {
   }
 
   #compareEntries(left: SelectableAppEntry, right: SelectableAppEntry): number {
-    if (left.selected !== right.selected) return left.selected ? -1 : 1
     if (left.currentUser !== right.currentUser) return left.currentUser ? -1 : 1
-    return left.appName.localeCompare(right.appName) || left.userId - right.userId
+    if (left.userId !== right.userId) return left.userId - right.userId
+    if (left.selected !== right.selected) return left.selected ? -1 : 1
+    return left.appName.localeCompare(right.appName) || left.packageName.localeCompare(right.packageName)
   }
 
   #emitChange(): void {

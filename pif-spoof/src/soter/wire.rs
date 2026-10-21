@@ -149,7 +149,7 @@ pub(super) fn valid_request(code: u32, bytes: &[u8]) -> bool {
     (1..=13).contains(&code) && arguments(bytes).is_some()
 }
 
-enum Request {
+pub(super) enum Request {
     Uid(u32),
     Key(u32, Option<String>),
     Init(u32, Option<String>, Option<String>),
@@ -157,12 +157,20 @@ enum Request {
     None,
 }
 
-fn parse_request(code: u32, bytes: &[u8]) -> Result<Request, i32> {
+pub(super) fn parse_request(code: u32, bytes: &[u8]) -> Result<Request, i32> {
+    parse_request_inner(code, bytes, false)
+}
+
+pub(super) fn parse_remote_request(code: u32, bytes: &[u8]) -> Result<Request, i32> {
+    parse_request_inner(code, bytes, true)
+}
+
+fn parse_request_inner(code: u32, bytes: &[u8], exact: bool) -> Result<Request, i32> {
     if !(1..=13).contains(&code) {
         return Err(UNKNOWN_TRANSACTION);
     }
     let mut reader = arguments(bytes).ok_or(BAD_VALUE)?;
-    Ok(match code {
+    let request = match code {
         1..=3 | 7 => Request::Uid(reader.uid().ok_or(BAD_VALUE)?),
         4..=6 | 8 => Request::Key(
             reader.uid().ok_or(BAD_VALUE)?,
@@ -179,7 +187,11 @@ fn parse_request(code: u32, bytes: &[u8]) -> Result<Request, i32> {
             Request::None
         }
         _ => Request::None,
-    })
+    };
+    if exact && reader.position != bytes.len() {
+        return Err(BAD_VALUE);
+    }
+    Ok(request)
 }
 
 #[derive(Default)]
@@ -208,7 +220,7 @@ pub(super) trait Writer {
     fn bytes(&mut self, value: &[u8]) -> Result<(), i32>;
 }
 
-fn buffer_reply(output: &mut impl Writer, code: i32, data: &[u8]) -> Result<(), i32> {
+pub(super) fn buffer_reply(output: &mut impl Writer, code: i32, data: &[u8]) -> Result<(), i32> {
     output.int32(1)?;
     output.int32(code)?;
     output.bytes(data)?;

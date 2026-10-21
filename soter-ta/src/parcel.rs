@@ -59,11 +59,9 @@ impl<'a> Args<'a> {
         Some(i64::from_le_bytes(bytes.try_into().ok()?))
     }
 
-    /// One byte, the magic `generateAttkKeyPair` passes.
+    /// AIDL `byte` occupies a signed 32-bit parcel word.
     pub fn read_byte(&mut self) -> Option<i8> {
-        let byte = *self.buf.get(self.pos)?;
-        self.pos += 1;
-        Some(byte as i8)
+        self.read_i32()?.try_into().ok()
     }
 
     /// `byte[]`: length, data, padding. A negative length means a null array.
@@ -73,6 +71,7 @@ impl<'a> Args<'a> {
             return Some(Vec::new());
         }
         let len = len as usize;
+        self.buf.get(self.pos..self.pos.checked_add(align4(len))?)?;
         let bytes = self.buf.get(self.pos..self.pos.checked_add(len)?)?.to_vec();
         self.pos += align4(len);
         Some(bytes)
@@ -85,7 +84,13 @@ impl<'a> Args<'a> {
             return None;
         }
         let len = len as usize;
-        let end = self.pos.checked_add(len.checked_mul(2)?)?;
+        let byte_len = len.checked_mul(2)?;
+        let padded_len = align4(byte_len.checked_add(2)?);
+        self.buf.get(self.pos..self.pos.checked_add(padded_len)?)?;
+        let end = self.pos.checked_add(byte_len)?;
+        if self.buf.get(end..end.checked_add(2)?)? != [0, 0] {
+            return None;
+        }
         let raw = self.buf.get(self.pos..end)?;
         // An explicit index loop instead of `chunks_exact(2)`: that helper is a
         // clippy lint target (`chunks_exact_to_as_chunks`) on the pinned nightly,
@@ -95,7 +100,7 @@ impl<'a> Args<'a> {
             let pair = raw.get(index * 2..index * 2 + 2)?;
             units.push(u16::from_le_bytes([pair[0], pair[1]]));
         }
-        self.pos += align4(len * 2 + 2);
+        self.pos += padded_len;
         String::from_utf16(&units).ok()
     }
 
@@ -191,5 +196,31 @@ impl Reply {
 
     pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_array_requires_its_padding_and_string_requires_nul() {
+        let truncated_array = [1, 0, 0, 0, 0xa5];
+        assert!(Args::new(&truncated_array).read_byte_array().is_none());
+        let valid_array = [1, 0, 0, 0, 0xa5, 0, 0, 0];
+        assert_eq!(Args::new(&valid_array).read_byte_array(), Some(vec![0xa5]));
+
+        for malformed in [
+            &[0, 0, 0, 0][..],
+            &[0, 0, 0, 0, 0, 0][..],
+            &[0, 0, 0, 0, 1, 0, 0, 0][..],
+            &[1, 0, 0, 0, b'a', 0][..],
+        ] {
+            assert!(Args::new(malformed).read_string16().is_none());
+        }
+        assert_eq!(
+            Args::new(&[0, 0, 0, 0, 0, 0, 0, 0]).read_string16(),
+            Some(String::new())
+        );
     }
 }

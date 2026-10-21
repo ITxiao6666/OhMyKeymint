@@ -465,10 +465,10 @@ impl TaState {
     /// Evidence has to be *verifiable* to count: both hooks installed, both
     /// marks taken in this boot, the session still inside [`BIO_WINDOW_MS`], the
     /// mark moved past the one the session opened with, and no earlier
-    /// signature having spent it. Missing hooks answer `true` — the software TA
-    /// must not stop signing because a platform dump changed shape, and the
-    /// daemon logs the hook it could not use — while evidence that is merely
-    /// absent answers `false`, the `-26` a stock TA gives without a match.
+    /// signature having spent it. Missing evidence here represents an explicit
+    /// disabled gate. The shared runtime refuses unreadable evidence from an
+    /// enabled gate before dispatch; a counter without a fresh match answers
+    /// `false`, the `-26` a stock TA gives without a match.
     fn biometric_ok(&mut self, entry: &Session, platform: Platform) -> bool {
         let (Some(opened), Some(before), Some(now), Some(after)) = (
             entry.opened_ms,

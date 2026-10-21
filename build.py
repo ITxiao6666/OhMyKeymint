@@ -213,12 +213,7 @@ def copy_binary(binary: Path, output_name: str, abi: str, stage_dir: Path) -> No
 
 
 def build_soterta_service(*, abi: str, release: bool) -> Path:
-    """Build the C Binder shim linked with the Rust software Soter TA.
-
-    The shim is intentionally built by its dedicated script: it needs the NDK
-    Binder C API in addition to Cargo's staticlib, while the normal package
-    binaries are pure Rust.
-    """
+    """Build and stage the Rust Soter Binder daemon for the module archive."""
     profile = "release" if release else "debug"
     command = [
         os.fspath(Path(__file__).resolve().parent / "scripts" / "build_soterta_svc.py"),

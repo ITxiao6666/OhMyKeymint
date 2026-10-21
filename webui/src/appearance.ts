@@ -203,7 +203,7 @@ export class AppearanceController {
   #lastColorRefresh = 0
   #paletteKey = ''
   #palette: Record<string, string> = {}
-  #appliedTokens: string[] = []
+  #appliedTokens: Record<string, string> = {}
 
   constructor() {
     const url = new URL(window.location.href)
@@ -249,7 +249,9 @@ export class AppearanceController {
         if (result.errno !== 0) return
         const colors = parseSystemColors(result.stdout)
         if (!colors.light && !colors.dark) return
-        this.#systemColors = { ...this.#systemColors, ...colors }
+        const nextColors = { ...this.#systemColors, ...colors }
+        if (nextColors.light === this.#systemColors.light && nextColors.dark === this.#systemColors.dark) return
+        this.#systemColors = nextColors
         this.#apply()
         this.#emit()
       } catch (error) {
@@ -465,32 +467,40 @@ export class AppearanceController {
     root.style.setProperty('--omk-ui-scale', String(this.#interfaceScale / 100))
     root.style.colorScheme = resolved
 
-    for (const property of this.#appliedTokens) root.style.removeProperty(property)
-    this.#appliedTokens = []
     const seed = this.#accent === DEFAULT_ACCENT
       ? this.#systemColors[resolved] : ACCENT_SEEDS[this.#accent]
     root.dataset.monetSource = !this.#options.monet ? 'disabled'
       : this.#accent !== DEFAULT_ACCENT ? 'custom' : seed ? 'system' : 'unavailable'
-    delete root.dataset.monetSeed
     // A failed/unsupported system query keeps the static MIUIX palette rather
     // than presenting a hardcoded color as wallpaper-derived Monet.
-    if (!this.#options.monet || !seed) return
-    root.dataset.monetSeed = seed
-    const key = [seed, resolved, this.#paletteStyle, this.#colorSpec].join(':')
-    if (key !== this.#paletteKey) {
-      this.#palette = monetTokens(seed, resolved === 'dark', this.#paletteStyle, this.#colorSpec)
-      this.#paletteKey = key
+    let tokens: Record<string, string> = {}
+    if (this.#options.monet && seed) {
+      root.dataset.monetSeed = seed
+      const key = [seed, resolved, this.#paletteStyle, this.#colorSpec].join(':')
+      if (key !== this.#paletteKey) {
+        this.#palette = monetTokens(seed, resolved === 'dark', this.#paletteStyle, this.#colorSpec)
+        this.#paletteKey = key
+      }
+      tokens = { ...this.#palette }
+      if (this.#mode === 'amoled') {
+        Object.assign(tokens, {
+          '--m-color-background': '#000000', '--m-color-surface': '#000000',
+          '--m-color-surface-variant': '#101010', '--m-color-surface-container': '#101010',
+          '--m-color-surface-container-high': '#171717', '--m-color-surface-container-highest': '#202020',
+        })
+      }
+    } else {
+      delete root.dataset.monetSeed
     }
-    const tokens = { ...this.#palette }
-    if (this.#mode === 'amoled') {
-      Object.assign(tokens, {
-        '--m-color-background': '#000000', '--m-color-surface': '#000000',
-        '--m-color-surface-variant': '#101010', '--m-color-surface-container': '#101010',
-        '--m-color-surface-container-high': '#171717', '--m-color-surface-container-highest': '#202020',
-      })
+    // Unchanged preferences must not remove and recreate the entire palette.
+    // Also remove overrides when Monet is disabled or its seed is unavailable.
+    for (const property of Object.keys(this.#appliedTokens)) {
+      if (!(property in tokens)) root.style.removeProperty(property)
     }
-    for (const [property, value] of Object.entries(tokens)) root.style.setProperty(property, value)
-    this.#appliedTokens = Object.keys(tokens)
+    for (const [property, value] of Object.entries(tokens)) {
+      if (this.#appliedTokens[property] !== value) root.style.setProperty(property, value)
+    }
+    this.#appliedTokens = tokens
   }
 
   #emit(): void {

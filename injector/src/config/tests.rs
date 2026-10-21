@@ -418,6 +418,128 @@ fn caller_targets_round_trip_and_normalize_without_losing_bare_scope() {
 }
 
 #[test]
+fn scoop_delta_preserves_background_additions_and_other_settings() {
+    let path = temp_config_path("scoop-delta-background");
+    let original = r#"version = 1
+scoop = ["com.old", "uid:1001"]
+[main]
+enabled = false
+[filter]
+deny_packages = ["com.denied"]
+[intercept]
+get_key_entry = false
+[scoop.com.old]
+mode = "strict"
+"#;
+    fs::write(&*path, original).unwrap();
+    update_scoop_at_path(
+        &path,
+        ScoopDelta {
+            added: vec!["com.installed@0".into()],
+            removed: Vec::new(),
+        },
+    )
+    .unwrap();
+    // The UI was opened before com.installed appeared and removes only its
+    // own original selection. It must not replace the whole current list.
+    let targets = update_scoop_at_path(
+        &path,
+        ScoopDelta {
+            added: vec!["com.manual@10".into()],
+            removed: vec!["com.old".into()],
+        },
+    )
+    .unwrap();
+    assert_eq!(targets, ["uid:1001", "com.installed@0", "com.manual@10"]);
+    let written = fs::read_to_string(&*path).unwrap();
+    let config = parse_config(&written).unwrap();
+    assert_eq!(config.scoop, targets);
+    assert!(!config.main.enabled);
+    assert_eq!(config.filter.deny_packages, ["com.denied"]);
+    assert!(!config.intercept.get_key_entry);
+    assert_eq!(
+        config.scoop_details["com.old"]["mode"].as_str(),
+        Some("strict")
+    );
+}
+
+#[test]
+fn scoop_delta_preserves_global_scope_and_canonicalizes_targets() {
+    let path = temp_config_path("scoop-delta-scopes");
+    fs::write(
+        &*path,
+        "version = 1\nscoop = [\"com.global\", \"com.user@10\", \"uid:1001\"]\n",
+    )
+    .unwrap();
+    let targets = update_scoop_at_path(
+        &path,
+        ScoopDelta {
+            added: vec![
+                "com.global@10".into(),
+                "com.new@010".into(),
+                "com.new@10".into(),
+            ],
+            removed: vec!["com.user@010".into()],
+        },
+    )
+    .unwrap();
+    assert_eq!(targets, ["com.global", "uid:1001", "com.new@10"]);
+    assert_eq!(read_scoop_from_path(&path).unwrap(), targets);
+}
+
+#[test]
+fn invalid_scoop_delta_does_not_modify_configuration() {
+    let path = temp_config_path("scoop-delta-invalid");
+    let original = "version = 1\nscoop = [\"com.existing\"]\n";
+    fs::write(&*path, original).unwrap();
+    for delta in [
+        ScoopDelta {
+            added: vec!["bad package".into()],
+            removed: vec!["com.existing".into()],
+        },
+        ScoopDelta {
+            added: vec!["com.new".into()],
+            removed: vec!["*".into()],
+        },
+    ] {
+        assert!(update_scoop_at_path(&path, delta).is_err());
+        assert_eq!(fs::read_to_string(&*path).unwrap(), original);
+    }
+    let invalid = "version = 1\n[invalid";
+    fs::write(&*path, invalid).unwrap();
+    assert!(update_scoop_at_path(
+        &path,
+        ScoopDelta {
+            added: vec!["com.new".into()],
+            removed: Vec::new(),
+        }
+    )
+    .is_err());
+    assert_eq!(fs::read_to_string(&*path).unwrap(), invalid);
+}
+
+#[test]
+fn unchanged_scoop_delta_does_not_rewrite_configuration() {
+    let path = temp_config_path("scoop-delta-noop");
+    let original =
+        "# Preserve custom formatting when nothing changes.\nversion = 1\nscoop = [\"com.global\"]\n";
+    fs::write(&*path, original).unwrap();
+    for delta in [
+        ScoopDelta {
+            added: Vec::new(),
+            removed: Vec::new(),
+        },
+        ScoopDelta {
+            added: vec!["com.global@0".into()],
+            removed: vec!["com.missing".into()],
+        },
+    ] {
+        assert_eq!(update_scoop_at_path(&path, delta).unwrap(), ["com.global"]);
+        assert_eq!(fs::read_to_string(&*path).unwrap(), original);
+    }
+}
+
+#[test]
 fn malformed_caller_targets_reject_configuration() {
     for target in [
         "com.example@",

@@ -755,6 +755,36 @@ fn ffi_serves_the_daemon_path_end_to_end() {
     assert_eq!(reply.code, SOTER_OK);
     unsafe { ffi::soterta_free(&mut reply) };
 
+    // Runtime probe failure must never be mistaken for --bio-gate=off.
+    unsafe extern "C" fn unavailable_probe() -> i64 {
+        -1
+    }
+    crate::platform::install(Some(unavailable_probe), Some(unavailable_probe));
+    assert_eq!(
+        ffi::answer(
+            dispatch::TX_INIT_SIGN,
+            dispatch::Request::InitSign {
+                uid: UID,
+                kname: KNAME.into(),
+                challenge: "not-signed".into(),
+            }
+        )
+        .unwrap(),
+        Some(dispatch::Outcome::Init {
+            code: SOTER_ERR_NO_FINGERPRINT,
+            session: 0
+        }),
+    );
+    assert_eq!(
+        ffi::answer(dispatch::TX_FINISH_SIGN, dispatch::Request::Session(1)).unwrap(),
+        Some(dispatch::Outcome::Buffer {
+            code: SOTER_ERR_NO_FINGERPRINT,
+            data: Vec::new(),
+            field: 0
+        }),
+    );
+    crate::platform::install(None, None);
+
     let mut reply = empty_reply();
     assert_eq!(
         unsafe {

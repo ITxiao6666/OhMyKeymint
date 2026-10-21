@@ -710,6 +710,7 @@ fn helper_error_response(error: &anyhow::Error) -> String {
 }
 
 fn helper_loop(stream: UnixStream, command: Option<ResetpropCommand>) -> Result<()> {
+    start_auto_targets_monitor();
     let reader_stream = stream
         .try_clone()
         .context("failed to clone resetprop helper socket")?;
@@ -765,6 +766,45 @@ fn helper_loop(stream: UnixStream, command: Option<ResetpropCommand>) -> Result<
         writer
             .flush()
             .context("failed to flush resetprop helper response")?;
+    }
+}
+
+// The root helper owns package discovery so neither the KeyMint request path
+// nor the keystore2 injection thread has to run PackageManager commands.
+// The child binds its lifetime to this helper and is retried after an exit.
+fn start_auto_targets_monitor() {
+    let sibling = std::env::current_exe()
+        .ok()
+        .map(|path| path.with_file_name("inject"));
+    let abi = if cfg!(target_arch = "aarch64") {
+        "arm64-v8a"
+    } else {
+        "x86_64"
+    };
+    let module_binary =
+        std::path::PathBuf::from(format!("/data/adb/modules/oh_my_keymint/libs/{abi}/inject"));
+    if let Err(error) = std::thread::Builder::new()
+        .name("omk-app-monitor".into())
+        .spawn(move || loop {
+            let binary = sibling
+                .as_ref()
+                .filter(|path| path.is_file())
+                .unwrap_or(&module_binary);
+            match Command::new(binary)
+                .arg("--auto-targets-watch")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    let _ = child.wait();
+                }
+                Err(error) => log::warn!("cannot start automatic app selection watcher: {error}"),
+            }
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        })
+    {
+        log::warn!("cannot start automatic app selection monitor: {error}");
     }
 }
 

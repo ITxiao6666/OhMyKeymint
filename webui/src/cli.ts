@@ -65,6 +65,8 @@ export interface SoterHalState {
   device_id: string
   tls_insecure: boolean
   uid_map: string
+  app_enabled: boolean
+  app_targets: string[]
 }
 export type PlayIntegrityStatus = 'not_checked'
 export type KeyboxRevocationStatus =
@@ -196,6 +198,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
   const keys = Object.keys(value)
   return keys.length === allowed.length && keys.every((key, index) => key === allowed[index])
+}
+
+function parseSoterHalState(output: string): SoterHalState {
+  const parsed = parseCanonicalJson(output, 'Soter HAL state')
+  if (!isRecord(parsed)
+      || !hasOnlyKeys(parsed, ['enabled', 'remote_enabled', 'url', 'token', 'device_id', 'tls_insecure', 'uid_map', 'app_enabled', 'app_targets'])
+      || typeof parsed.enabled !== 'boolean'
+      || typeof parsed.remote_enabled !== 'boolean'
+      || typeof parsed.url !== 'string'
+      || typeof parsed.token !== 'string'
+      || typeof parsed.device_id !== 'string'
+      || typeof parsed.tls_insecure !== 'boolean'
+      || typeof parsed.uid_map !== 'string'
+      || typeof parsed.app_enabled !== 'boolean'
+      || !Array.isArray(parsed.app_targets)
+      || !parsed.app_targets.every(value => {
+        const target = parseScoopTarget(value)
+        return target?.kind === 'package-user' && target.target === value
+      })
+      || new Set(parsed.app_targets).size !== parsed.app_targets.length
+      || (parsed.enabled && parsed.app_enabled)) {
+    throw new Error('OMK returned invalid Soter HAL state')
+  }
+  return parsed as unknown as SoterHalState
 }
 
 function isSafeText(value: unknown, maxLength: number): value is string {
@@ -455,6 +481,24 @@ function parseSupportedAbi(output: string): SupportedAbi | null {
 export class Cli {
   #helperPaths: Promise<HelperPaths> | null = null
 
+  async clearGmsCache(): Promise<void> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-clear-gms-cache'], 65536)
+    const report: unknown = JSON.parse(output)
+    if (!isRecord(report) || !Array.isArray(report.errors)
+        || !report.errors.every((error: unknown) => typeof error === 'string')
+        || !Array.isArray(report.processes) || typeof report.cleared_cache_dirs !== 'number') {
+      throw new Error('OMK returned an unexpected cache cleanup result')
+    }
+    if (report.errors.length) throw new Error(report.errors.join('; '))
+  }
+
+  async repairRkp(): Promise<void> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-repair-rkp', '--confirm-persistent-write'], 256)
+    if (output !== 'rkp_tool_completed') throw new Error('OMK returned an unexpected RKP tool result')
+  }
+
   async getAppPatchLevels(): Promise<AppPatchProfiles> {
     const { keymint } = await this.#getHelperPaths()
     const output = await this.#run(keymint, ['--webui-get-app-patch-levels'], MAX_APP_PATCH_LEVELS_JSON_BYTES)
@@ -499,6 +543,31 @@ export class Cli {
     const normalized = normalizeScoopTargets(packages)
     const payload = encodeBase64Utf8(JSON.stringify(normalized))
     await this.#runInject(['--webui-set-scoop', payload])
+  }
+
+  async updateScoop(added: string[], removed: string[]): Promise<string[]> {
+    const payload = encodeBase64Utf8(JSON.stringify({
+      added: normalizeScoopTargets(added), removed: normalizeScoopTargets(removed),
+    }))
+    const output = await this.#runInject(['--webui-update-scoop', payload])
+    return normalizeScoopTargets(parseCanonicalJson(output, 'package list'))
+  }
+
+  async getAutoTargets(): Promise<boolean> {
+    const output = await this.#runInject(['--webui-get-auto-targets'])
+    const state = parseCanonicalJson(output, 'automatic package selection')
+    if (!isRecord(state) || !hasOnlyKeys(state, ['enabled']) || typeof state.enabled !== 'boolean') {
+      throw new Error('OMK returned an invalid automatic package selection state')
+    }
+    return state.enabled
+  }
+
+  async setAutoTargets(enabled: boolean): Promise<void> {
+    const output = await this.#runInject(['--webui-set-auto-targets', enabled ? '1' : '0'])
+    const state = parseCanonicalJson(output, 'automatic package selection')
+    if (!isRecord(state) || state.enabled !== enabled) {
+      throw new Error('Automatic package selection was not saved')
+    }
   }
 
   async installKeybox(contents: Uint8Array): Promise<void> {
@@ -569,22 +638,10 @@ export class Cli {
   async getSoterHal(): Promise<SoterHalState> {
     const { keymint } = await this.#getHelperPaths()
     const output = await this.#run(keymint, ['--webui-get-soter-hal'], MAX_SOTER_HAL_JSON_BYTES + 1)
-    const parsed = parseCanonicalJson(output, 'Soter HAL state')
-    if (!isRecord(parsed)
-        || !hasOnlyKeys(parsed, ['enabled', 'remote_enabled', 'url', 'token', 'device_id', 'tls_insecure', 'uid_map'])
-        || typeof parsed.enabled !== 'boolean'
-        || typeof parsed.remote_enabled !== 'boolean'
-        || typeof parsed.url !== 'string'
-        || typeof parsed.token !== 'string'
-        || typeof parsed.device_id !== 'string'
-        || typeof parsed.tls_insecure !== 'boolean'
-        || typeof parsed.uid_map !== 'string') {
-      throw new Error('OMK returned invalid Soter HAL state')
-    }
-    return parsed as unknown as SoterHalState
+    return parseSoterHalState(output)
   }
 
-  async setSoterHal(state: SoterHalState): Promise<void> {
+  async setSoterHal(state: SoterHalState): Promise<SoterHalState> {
     const { keymint } = await this.#getHelperPaths()
     // Native save resolves empty relay identity fields to the module defaults,
     // including when the relay is currently disabled. Normalize before the
@@ -607,9 +664,27 @@ export class Cli {
       throw new Error('OMK returned an unexpected Soter HAL result')
     }
     const persisted = await this.getSoterHal()
-    if (JSON.stringify(persisted) !== json) {
+    // App selections have their own merge-on-save command. A settings dialog
+    // must not overwrite selections changed since it was opened.
+    if (JSON.stringify({ ...persisted, app_targets: effectiveState.app_targets }) !== json) {
       throw new Error('Soter HAL configuration read-back did not match the saved values')
     }
+    return persisted
+  }
+
+  async setSoterAppTarget(target: string, enabled: boolean): Promise<SoterHalState> {
+    const parsed = parseScoopTarget(target)
+    if (parsed?.kind !== 'package-user' || parsed.target !== target) {
+      throw new Error('Invalid per-app Soter target')
+    }
+    const { keymint } = await this.#getHelperPaths()
+    const payload = encodeBase64Utf8(JSON.stringify({ target, enabled }))
+    const output = await this.#run(keymint, ['--webui-set-soter-app-target-base64', payload], MAX_SOTER_HAL_JSON_BYTES + 1)
+    const persisted = parseSoterHalState(output)
+    if (persisted.app_targets.includes(target) !== enabled) {
+      throw new Error('Soter app selection read-back did not match the saved value')
+    }
+    return persisted
   }
 
   async syncSecurityPatch(date: string): Promise<string> {

@@ -47,7 +47,13 @@ fn request(code: u32) -> Vec<u8> {
     request_for(code, 10001, "key", "challenge", 123)
 }
 
-fn request_for(code: u32, uid: i32, key: &str, challenge: &str, session: i64) -> Vec<u8> {
+pub(super) fn request_for(
+    code: u32,
+    uid: i32,
+    key: &str,
+    challenge: &str,
+    session: i64,
+) -> Vec<u8> {
     let mut output = Buffer::default();
     output.int32(0x8000_0000u32 as i32).unwrap();
     output.int32(-1).unwrap();
@@ -156,7 +162,7 @@ fn preserves_all_transaction_fields_except_selected_target() {
         let bytes = request(code);
         let before = transaction(code, &bytes);
         let mut after = before;
-        assert!(retarget(&mut after, &bytes, destination));
+        assert!(retarget(&mut after, &bytes, destination, false, |_| false));
         assert_eq!(
             after,
             Transaction {
@@ -166,6 +172,51 @@ fn preserves_all_transaction_fields_except_selected_target() {
             }
         );
     }
+}
+
+#[test]
+fn per_app_routing_leaves_unselected_and_capability_requests_stock() {
+    let destination = Target {
+        ptr: 0x8000,
+        cookie: 0x9000,
+    };
+    for code in 1..=13 {
+        // Deliberately make the argument UID differ from the kernel sender.
+        let bytes = request_for(code, 10199, "key", "challenge", 123);
+        for uid in [10001, 10002, 1010001] {
+            let before = Transaction {
+                sender_euid: uid,
+                ..transaction(code, &bytes)
+            };
+            let mut after = before;
+            let changed = retarget(&mut after, &bytes, destination, true, |sender| {
+                sender == 10001
+            });
+            assert_eq!(changed, uid == 10001 && code <= 11);
+            assert_eq!(
+                after,
+                if changed {
+                    Transaction {
+                        target: destination.ptr,
+                        cookie: destination.cookie,
+                        ..before
+                    }
+                } else {
+                    before
+                }
+            );
+        }
+    }
+    let mut malformed = request(3);
+    malformed[16] ^= 1;
+    let mut original = transaction(3, &malformed);
+    assert!(!retarget(
+        &mut original,
+        &malformed,
+        destination,
+        true,
+        |_| panic!("unrelated Binder interface queried Soter authorization")
+    ));
 }
 
 #[test]
@@ -180,7 +231,13 @@ fn preserves_oem_flags_and_argument_objects_when_redirecting() {
             ..transaction(3, &bytes)
         };
         let mut after = before;
-        assert!(retarget(&mut after, &bytes, Target { ptr: 1, cookie: 2 }));
+        assert!(retarget(
+            &mut after,
+            &bytes,
+            Target { ptr: 1, cookie: 2 },
+            false,
+            |_| false
+        ));
         assert_eq!(
             after,
             Transaction {
@@ -214,7 +271,13 @@ fn leaves_unrelated_unsupported_or_malformed_transactions_unchanged() {
         },
     ] {
         let mut after = before;
-        assert!(!retarget(&mut after, &bytes, Target { ptr: 1, cookie: 2 }));
+        assert!(!retarget(
+            &mut after,
+            &bytes,
+            Target { ptr: 1, cookie: 2 },
+            false,
+            |_| false
+        ));
         assert_eq!(after, before);
     }
     let mut malformed = bytes.clone();
@@ -223,7 +286,9 @@ fn leaves_unrelated_unsupported_or_malformed_transactions_unchanged() {
     assert!(!retarget(
         &mut after,
         &malformed,
-        Target { ptr: 1, cookie: 2 }
+        Target { ptr: 1, cookie: 2 },
+        false,
+        |_| false
     ));
     assert_eq!(after, base);
 }
