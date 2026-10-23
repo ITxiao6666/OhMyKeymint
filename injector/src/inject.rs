@@ -95,7 +95,22 @@ fn wait_for_rpc_socket() -> Result<()> {
 
 pub fn inject_library(pid: Pid) -> Result<()> {
     wait_for_rpc_socket()?;
+    inject_role(pid, None)
+}
 
+pub fn inject_soter(pid: Pid, channels: [i32; 2]) -> Result<()> {
+    inject_role(pid, Some(channels))
+}
+
+fn inject_role(pid: Pid, channels: Option<[i32; 2]>) -> Result<()> {
+    let soter_identity = if channels.is_some() {
+        Some(
+            crate::soter_watch::identity(pid.as_raw())
+                .context("SOTER host is not the exact requested process")?,
+        )
+    } else {
+        None
+    };
     let self_path = utils::current_exe_path()?;
 
     nix::sys::ptrace::attach(pid).with_context(|| format!("Failed to attach to process {pid}"))?;
@@ -128,7 +143,13 @@ pub fn inject_library(pid: Pid) -> Result<()> {
     };
 
     // Run actual injection; regardless of success/failure we MUST restore regs and detach
-    let result = do_inject(pid, &self_path);
+    let result = if soter_identity.as_ref().is_some_and(|expected| {
+        crate::soter_watch::identity(pid.as_raw()).as_ref() != Some(expected)
+    }) {
+        Err(anyhow!("SOTER process identity changed before attachment"))
+    } else {
+        do_inject(pid, &self_path, channels)
+    };
 
     // === CLEANUP: Always restore registers and detach ===
     debug!("restoring registers and detaching");
@@ -145,9 +166,14 @@ pub fn inject_library(pid: Pid) -> Result<()> {
     finish_injection_result(result, cleanup_errors)
 }
 
-fn do_inject(pid: Pid, self_path: &std::path::Path) -> Result<()> {
-    let payload_identifier =
-        generate_remote_payload_identifier().context("failed to generate payload identifier")?;
+fn do_inject(pid: Pid, self_path: &std::path::Path, channels: Option<[i32; 2]>) -> Result<()> {
+    // A stable in-memory loader name permits a restarted root broker to
+    // reconnect to the same payload instead of installing nested PLT hooks.
+    let payload_identifier = if channels.is_some() {
+        "libomk_soter_hal.so".to_string()
+    } else {
+        generate_remote_payload_identifier().context("failed to generate payload identifier")?
+    };
     log_loader_abi();
     info!(
         "starting injection build_id={} pid={} payload={} self_path={}",
@@ -396,7 +422,11 @@ fn do_inject(pid: Pid, self_path: &std::path::Path) -> Result<()> {
     if let Some(err_fn) = dlerror_addr {
         let _ = sys::remote_call(pid, err_fn, libc_return_addr, &[]);
     }
-    let entry_symbol = std::ffi::CString::new("entry")?;
+    let entry_symbol = std::ffi::CString::new(if channels.is_some() {
+        "soter_entry"
+    } else {
+        "entry"
+    })?;
     let remote_entry_symbol_ptr = push_to_remote_stack(entry_symbol.as_bytes_with_nul())?;
     let injector_entry = sys::remote_call(
         pid,
@@ -415,12 +445,39 @@ fn do_inject(pid: Pid, self_path: &std::path::Path) -> Result<()> {
         injector_entry
     );
 
-    let entry_result = sys::remote_call(pid, injector_entry, libc_return_addr, &[handle])?;
+    let mut entry_args = vec![handle];
+    if let Some(channels) = channels {
+        for fd in channels {
+            match send_fd_to_remote(
+                pid,
+                fd,
+                "SOTER private channel",
+                fd_handoff_addrs,
+                &mut push_to_remote_stack,
+                &get_remote_errno,
+                &close_remote,
+            ) {
+                Ok(remote) => entry_args.push(remote as usize),
+                Err(error) => {
+                    for &remote in &entry_args[1..] {
+                        let _ = close_remote(remote as i32);
+                    }
+                    return Err(error);
+                }
+            }
+        }
+    }
+    // Entry owns both descriptors once invoked, including on a reported failure.
+    let entry_result = sys::remote_call(pid, injector_entry, libc_return_addr, &entry_args)?;
     if entry_result == 0 {
         bail!("Remote entry returned false");
     }
 
-    if let Err(error) = persist_remote_payload_state(pid, &payload_identifier) {
+    if let Err(error) = channels
+        .is_none()
+        .then(|| persist_remote_payload_state(pid, &payload_identifier))
+        .transpose()
+    {
         warn!(
             "failed to persist payload identifier state for pid {}: {:#}",
             pid, error

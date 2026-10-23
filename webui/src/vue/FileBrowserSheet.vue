@@ -2,13 +2,13 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   MiuixBasicComponent,
-  MiuixBottomSheet,
   MiuixButton,
   MiuixCard,
   MiuixIcon,
   MiuixIconButton,
   MiuixProgressIndicator,
 } from 'miuix-vue'
+import MiuixBottomSheet from './StableBottomSheet.vue'
 import { Back, File, Folder, Import } from 'miuix-vue/icons'
 import type { FileSelector } from '../file_selector/file_selector'
 import { i18n } from '../i18n'

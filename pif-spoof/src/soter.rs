@@ -17,7 +17,6 @@ use std::{
 
 use zygisk_api::api::{V4, ZygiskApi};
 
-pub(crate) mod relay;
 mod wire;
 
 pub(crate) const PACKAGE: &str = "com.tencent.soter.soterserver";
@@ -82,7 +81,6 @@ type PlatformSize = unsafe extern "C" fn(*const c_void) -> usize;
 type WriteInt32 = unsafe extern "C" fn(*mut c_void, i32) -> i32;
 type WriteInt64 = unsafe extern "C" fn(*mut c_void, i64) -> i32;
 type WriteBytes = unsafe extern "C" fn(*mut c_void, *const i8, i32) -> i32;
-type CallingUid = unsafe extern "C" fn() -> u32;
 
 // Exact Android 12/13 NDK parcel_internal.h layout, matching OMK's injector.
 // Android 14+ must provide the platform accessor instead of using this layout.
@@ -103,7 +101,6 @@ struct NativeApi {
     write_i32: WriteInt32,
     write_i64: WriteInt64,
     write_bytes: WriteBytes,
-    calling_uid: CallingUid,
 }
 
 struct NativeStub {
@@ -117,7 +114,6 @@ static NATIVE: OnceLock<Result<NativeStub, String>> = OnceLock::new();
 static INSTALL: OnceLock<Result<(usize, usize), String>> = OnceLock::new();
 static ORIGINAL_IOCTL: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
 static ACTIVE: AtomicBool = AtomicBool::new(false);
-static REMOTE_MODE: AtomicBool = AtomicBool::new(false);
 static MATCHED_CODES: AtomicU32 = AtomicU32::new(0);
 static REPLIED_CODES: AtomicU32 = AtomicU32::new(0);
 static FAILED_CODES: AtomicU32 = AtomicU32::new(0);
@@ -194,12 +190,6 @@ pub(crate) fn install(api: &mut ZygiskApi<'_, V4>) -> Result<(), String> {
         .map_err(Clone::clone)
 }
 
-pub(crate) fn prepare_relay(api: &mut ZygiskApi<'_, V4>) -> Result<(), String> {
-    relay::prepare(api)?;
-    REMOTE_MODE.store(true, Ordering::Release);
-    Ok(())
-}
-
 /// No Zygisk API is used here. Binder state is initialized only after Android
 /// has assigned the app's UID, SELinux context and file-descriptor state.
 pub(crate) fn activate() {
@@ -209,15 +199,9 @@ pub(crate) fn activate() {
     match NATIVE.get_or_init(|| load_native(*ndk, *binder)) {
         Ok(_) => {
             ACTIVE.store(true, Ordering::Release);
-            let remote = REMOTE_MODE.load(Ordering::Acquire);
-            if remote && let Err(error) = relay::activate() {
-                log(&format!("Soter authorization refresh unavailable: {error}"));
-            }
-            log(if remote {
-                "Per-app Soter relay hook active; unselected callers retain stock transactions"
-            } else {
-                "Soter Beta software test mode active; public fixture keys, no biometric authentication"
-            });
+            log(
+                "Soter Beta software test mode active; public fixture keys, no biometric authentication",
+            );
         }
         Err(error) => log(&format!("Soter native handler unavailable: {error}")),
     }
@@ -273,13 +257,7 @@ unsafe fn inspect_read(argument: *const WriteRead) {
                 transaction.data_size as usize,
             )
         };
-        if retarget(
-            transaction,
-            data,
-            native.target,
-            REMOTE_MODE.load(Ordering::Acquire),
-            relay::selected,
-        ) {
+        if retarget(transaction, data, native.target) {
             log_code_once(
                 &MATCHED_CODES,
                 transaction.code,
@@ -307,17 +285,10 @@ fn candidate(transaction: &Transaction) -> bool {
         && valid_pointer_range(transaction.buffer, transaction.data_size)
 }
 
-fn retarget(
-    transaction: &mut Transaction,
-    data: &[u8],
-    target: Target,
-    remote: bool,
-    selected: impl FnOnce(u32) -> bool,
-) -> bool {
+fn retarget(transaction: &mut Transaction, data: &[u8], target: Target) -> bool {
     if candidate(transaction)
         && transaction.data_size as usize == data.len()
         && wire::valid_request(transaction.code, data)
-        && (!remote || ((1..=11).contains(&transaction.code) && selected(transaction.sender_euid)))
     {
         transaction.target = target.ptr;
         transaction.cookie = target.cookie;
@@ -413,7 +384,6 @@ fn load_native(ndk: usize, binder: usize) -> Result<NativeStub, String> {
         write_i32: symbol(ndk, c"AParcel_writeInt32")?,
         write_i64: symbol(ndk, c"AParcel_writeInt64")?,
         write_bytes: symbol(ndk, c"AParcel_writeByteArray")?,
-        calling_uid: symbol(ndk, c"AIBinder_getCallingUid")?,
     };
     let define: ClassDefine = symbol(ndk, c"AIBinder_Class_define")?;
     let new: BinderNew = symbol(ndk, c"AIBinder_new")?;
@@ -538,9 +508,7 @@ unsafe extern "C" fn on_transact(
         if binder as usize != native.binder || !(1..=13).contains(&code) {
             return UNKNOWN_TRANSACTION;
         }
-        let remote = REMOTE_MODE.load(Ordering::Acquire);
-        let Ok(bytes) = (unsafe { native.api.bytes(input, binder, false, remote.then_some(0)) })
-        else {
+        let Ok(bytes) = (unsafe { native.api.bytes(input, binder, false, None) }) else {
             return BAD_VALUE;
         };
         if !wire::valid_request(code, bytes) {
@@ -556,18 +524,6 @@ unsafe extern "C" fn on_transact(
         };
         if !reply.is_empty() {
             return BAD_VALUE;
-        }
-        if remote {
-            return relay::write_reply(
-                unsafe { (native.api.calling_uid)() },
-                code,
-                bytes,
-                &mut NativeWriter {
-                    api: &native.api,
-                    output,
-                },
-            )
-            .map_or_else(|status| status, |()| 0);
         }
         native
             .state
@@ -585,15 +541,7 @@ unsafe extern "C" fn on_transact(
     }))
     .unwrap_or(-libc::EFAULT);
     if result == 0 {
-        log_code_once(
-            &REPLIED_CODES,
-            code,
-            if REMOTE_MODE.load(Ordering::Acquire) {
-                "Soter remote relay reply delivered"
-            } else {
-                "Soter software test reply delivered"
-            },
-        );
+        log_code_once(&REPLIED_CODES, code, "Soter software test reply delivered");
     } else {
         log_code_once(
             &FAILED_CODES,

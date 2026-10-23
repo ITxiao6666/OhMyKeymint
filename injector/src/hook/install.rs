@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{anyhow, bail, Result};
 use log::{debug, info};
@@ -11,6 +12,27 @@ use super::{
     OLD_IOCTL,
 };
 use crate::{config, ipc};
+
+static SOTER_LIBRARIES: Mutex<Vec<(lsplt_rs::DeviceId, lsplt_rs::Inode)>> = Mutex::new(Vec::new());
+static SOTER_REFRESH: OnceLock<Result<(), String>> = OnceLock::new();
+
+pub(super) fn init_soter_hooks() -> Result<()> {
+    install_hooks()?;
+    let result = SOTER_REFRESH.get_or_init(|| {
+        std::thread::Builder::new()
+            .name("omk-soter-libs".into())
+            .spawn(|| loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                if let Err(error) = install_hooks() {
+                    log::warn!("SOTER late-loaded Binder hook unavailable: {error:#}");
+                    return;
+                }
+            })
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    });
+    result.clone().map_err(anyhow::Error::msg)
+}
 
 pub(super) fn init_hook() -> Result<()> {
     let result = HOOK_INIT.get_or_init(|| install_hooks().map_err(|error| format!("{error:#}")));
@@ -55,12 +77,22 @@ fn install_hooks() -> Result<()> {
         }
     }
 
-    let _ = config::get();
-    info!("initializing binder ioctl hook");
-    ipc::ensure_process_state();
+    let soter = super::soter::enabled();
+    let mut installed = soter.then(|| SOTER_LIBRARIES.lock().unwrap_or_else(|e| e.into_inner()));
+    if !soter {
+        let _ = config::get();
+    }
+    if !soter {
+        info!("initializing binder ioctl hook");
+    }
+    if !soter {
+        ipc::ensure_process_state();
+    }
     // Native ServiceManager calls need a fresh IPCThreadState: the injected
     // thread may be suspended inside libbinder, and hooks run inside its ioctl.
-    super::binder::start_registered_service_target_worker()?;
+    if !soter {
+        super::binder::start_registered_service_target_worker()?;
+    }
 
     let mut libraries = Vec::new();
     let mut seen = HashSet::new();
@@ -68,8 +100,13 @@ fn install_hooks() -> Result<()> {
     for map in lsplt_rs::MapInfo::scan("self") {
         if let Some(path) = &map.pathname {
             let name = path.rsplit('/').next().unwrap_or(path);
-            if (name.starts_with("libbinder") || name == "libhwbinder.so")
+            if (name.starts_with("libbinder")
+                || name == "libhwbinder.so"
+                || (soter && name == "libhidlbase.so"))
                 && seen.insert((map.dev, map.inode))
+                && !installed
+                    .as_ref()
+                    .is_some_and(|list| list.contains(&(map.dev, map.inode)))
             {
                 debug!(
                     "Found binder library for ioctl hook: {} (dev={}, inode={})",
@@ -81,6 +118,9 @@ fn install_hooks() -> Result<()> {
     }
 
     if libraries.is_empty() {
+        if installed.as_ref().is_some_and(|list| !list.is_empty()) {
+            return Ok(());
+        }
         bail!("Could not find binder libraries in process maps");
     }
 
@@ -141,14 +181,20 @@ fn install_hooks() -> Result<()> {
     store_original(&dup2_backups, &OLD_DUP2);
     store_original(&dup3_backups, &OLD_DUP3);
     store_original(&fcntl_backups, &OLD_FCNTL);
-    if ioctl_committed == 0 {
+    if let Some(installed) = &mut installed {
+        // Never re-hook an already patched image, even after partial failure.
+        installed.extend(libraries.iter().map(|(_, dev, inode)| (*dev, *inode)));
+    }
+    if ioctl_committed == 0 && (!soter || OLD_IOCTL.load(Ordering::Acquire).is_null()) {
         bail!("Failed to commit any binder ioctl hooks");
     }
-    if close_committed == 0 {
+    if close_committed == 0 && (!soter || OLD_CLOSE.load(Ordering::Acquire).is_null()) {
         bail!("Failed to commit any binder close hooks");
     }
-    intercept::start_operation_publication_worker().map_err(|error| anyhow!(error))?;
-    rewrite::start_mirror_recovery_worker().map_err(|error| anyhow!(error))?;
+    if !soter {
+        intercept::start_operation_publication_worker().map_err(|error| anyhow!(error))?;
+        rewrite::start_mirror_recovery_worker().map_err(|error| anyhow!(error))?;
+    }
     info!(
         "committed {} binder ioctl hook(s) and {} close hook(s)",
         ioctl_committed, close_committed

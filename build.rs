@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, process::Command, vec};
+use std::{env, fs, path::PathBuf, process::Command, vec};
 
 fn main() {
     println!("cargo:rustc-link-lib=static=c++_static");
@@ -6,6 +6,16 @@ fn main() {
     println!("cargo:rerun-if-changed=aidl");
     println!("cargo:rerun-if-changed=src/proto");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=runtime/rkp/RkpV1Bridge.java");
+    for name in [
+        "ANDROID_HOME",
+        "ANDROID_SDK_ROOT",
+        "ANDROID_BUILD_TOOLS_VERSION",
+        "JAVA_HOME",
+        "LOCALAPPDATA",
+    ] {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
 
     let out_dir = "src/proto";
 
@@ -76,4 +86,100 @@ fn main() {
     println!("Generated AIDL content:\n{}", generated_path.display());
 
     fs::write(&generated_path, &patched_content).unwrap();
+
+    build_rkp_v1_bridge();
+}
+
+fn build_rkp_v1_bridge() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("android")
+        || env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("aarch64")
+    {
+        return;
+    }
+
+    let sdk = env::var_os("ANDROID_HOME")
+        .filter(|root| !root.is_empty())
+        .or_else(|| env::var_os("ANDROID_SDK_ROOT").filter(|root| !root.is_empty()))
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("LOCALAPPDATA")
+                .filter(|root| !root.is_empty())
+                .map(|root| PathBuf::from(root).join("Android/Sdk"))
+        })
+        .expect("Android arm64 RKP bridge build requires an Android SDK");
+
+    let build_tools = env::var("ANDROID_BUILD_TOOLS_VERSION")
+        .ok()
+        .filter(|version| !version.is_empty())
+        .map(|version| sdk.join("build-tools").join(version).join("lib/d8.jar"))
+        .or_else(|| latest_d8(&sdk))
+        .expect("install Android SDK Build Tools with lib/d8.jar");
+    assert!(
+        build_tools.is_file(),
+        "Android D8 was not found at {}",
+        build_tools.display()
+    );
+
+    let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
+    let classes = out.join("rkp-v1-classes");
+    fs::create_dir_all(&classes).expect("create RKP V1 bridge classes directory");
+
+    let java_tool = |name: &str| {
+        let name = if cfg!(windows) {
+            format!("{name}.exe")
+        } else {
+            name.to_owned()
+        };
+        env::var_os("JAVA_HOME")
+            .filter(|root| !root.is_empty())
+            .map(|root| PathBuf::from(root).join("bin").join(&name))
+            .unwrap_or_else(|| PathBuf::from(name))
+    };
+
+    run_build_command(
+        Command::new(java_tool("javac"))
+            .args(["--release", "8", "-encoding", "UTF-8", "-d"])
+            .arg(&classes)
+            .arg("runtime/rkp/RkpV1Bridge.java"),
+    );
+    let jar = out.join("rkp-v1.jar");
+    run_build_command(
+        Command::new(java_tool("java"))
+            .arg("-cp")
+            .arg(&build_tools)
+            .args([
+                "com.android.tools.r8.D8",
+                "--release",
+                "--no-desugaring",
+                "--min-api",
+                "26",
+                "--output",
+            ])
+            .arg(&jar)
+            .arg(classes.join("duck/rkp/RkpV1Bridge.class")),
+    );
+    println!("cargo:rustc-env=OMK_RKP_V1_BRIDGE_JAR={}", jar.display());
+}
+
+fn latest_d8(sdk: &std::path::Path) -> Option<PathBuf> {
+    let mut candidates = fs::read_dir(sdk.join("build-tools"))
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("lib/d8.jar"))
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.pop()
+}
+
+fn run_build_command(command: &mut Command) {
+    let output = command
+        .output()
+        .unwrap_or_else(|error| panic!("cannot run {command:?}: {error}"));
+    assert!(
+        output.status.success(),
+        "{command:?} failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

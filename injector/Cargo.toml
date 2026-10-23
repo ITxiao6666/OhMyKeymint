@@ -14,6 +14,7 @@ libc = "0.2.189"
 log = "0.4.33"
 log4rs = { version = "1.4.0", default-features = false, features = ["console_appender"] }
 kmr-common = { path = "../common" }
+soter-ta = { path = "../soter-ta" }
 nix = { version = "0.31.3", features = ["ptrace", "signal"] }
 lsplt-rs = "2.1.6"
 anyhow = "1.0.104"

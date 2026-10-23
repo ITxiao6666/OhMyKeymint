@@ -257,8 +257,9 @@ stop_daemon() {
   rm -f "$PIDFILE"
 }
 
-# SoterServer caches its HAL proxy. Refresh it after each successful replacement
-# instance, not on every watchdog poll. A host started later has no old proxy.
+# SoterServer caches its HAL proxy. Refresh it after each successful HAL
+# replacement or restoration, not on every watchdog poll. A host started later
+# has no old proxy.
 # No force-stop or app-data deletion: Android can rebind the service normally.
 restart_soter_host() {
   local host_pid host_name
@@ -267,7 +268,7 @@ restart_soter_host() {
     host_name=$(tr '\0' '\n' < "/proc/$host_pid/cmdline" 2>/dev/null | head -n 1)
     [ "$host_name" = com.tencent.soter.soterserver ] || continue
     if kill -TERM "$host_pid" 2>/dev/null; then
-      log "restarting SoterServer pid=$host_pid to reconnect to the software TA"
+      log "restarting SoterServer pid=$host_pid to reconnect to the current Soter HAL"
     else
       log "could not restart SoterServer pid=$host_pid; reopen the Soter client"
     fi
@@ -357,7 +358,13 @@ restore_hal() {
     sleep 0.3
     i=$((i + 1))
   done
-  rm -f "$MARKER"
+  if [ "$(hal_state)" = running ] && [ "$(service_owner)" = hal ]; then
+    restart_soter_host
+    rm -f "$MARKER"
+    return 0
+  fi
+  log "stock HAL restoration is not confirmed; retaining takeover marker for retry"
+  return 1
 }
 
 # Read-only snapshot; also safe to run while another converge holds the lock.
@@ -436,8 +443,14 @@ converge() {
       fi
     fi
   elif [ "$g_owner" = us ] || [ -f "$MARKER" ] || [ -n "$(stray_daemon_pids)" ]; then
-    restore_hal
-    g_note="已停用，原厂 HAL 已恢复 / disabled, stock HAL restored"
+    if restore_hal; then
+      g_failures=0
+      g_note="已停用，原厂 HAL 已恢复 / disabled, stock HAL restored"
+    else
+      case "$g_failures" in ''|*[!0-9]*) g_failures=0 ;; esac
+      g_failures=$((g_failures + 1))
+      g_note="原厂 HAL 恢复尚未确认，将继续重试 / stock HAL restoration is not confirmed; retrying"
+    fi
     log "$g_note"
   fi
 
@@ -519,6 +532,18 @@ case "$1" in
     write_status >/dev/null
     print_status
     ;;
+  reconcile)
+    # Detached one-shot convergence. It never changes the desired-state flag;
+    # if a newer enable arrives, converge follows that current flag instead.
+    converge || { sleep 1; converge; }
+    write_status >/dev/null
+    snapshot_state
+    if [ "$g_enabled" = 0 ] && [ "$g_running" = 0 ] \
+        && [ "$g_owner" = hal ] && [ "$g_hal" = running ]; then
+      exit 0
+    fi
+    exit 1
+    ;;
   status)
     converge
     print_status
@@ -544,7 +569,7 @@ case "$1" in
     supervise
     ;;
   *)
-    echo "usage: $0 [enable|disable|status|json|id|supervise]" >&2
+    echo "usage: $0 [enable|disable|reconcile|status|json|id|supervise]" >&2
     exit 2
     ;;
 esac

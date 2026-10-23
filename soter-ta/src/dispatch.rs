@@ -87,7 +87,7 @@ pub fn consults_platform(tx: u32) -> bool {
 }
 
 /// Arguments of one request, as the client wrote them on the wire.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Request {
     /// No arguments, `getDeviceId`.
     None,
@@ -108,7 +108,7 @@ pub enum Request {
 }
 
 /// What one handled transaction answers.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Outcome {
     /// A bare `SoterErrorCode`.
     Code(i32),
@@ -229,6 +229,17 @@ pub fn resolve_request(wire_tx: u32, bytes: &[u8]) -> Option<(u32, Request)> {
         (Some(result), None) | (None, Some(result)) => Some(result),
         _ => None,
     }
+}
+
+/// Decode an explicitly identified standard HAL contract, without guessing a
+/// compact transaction number from its argument shape.
+pub fn decode_request(tx: u32, bytes: &[u8]) -> Option<Request> {
+    if bytes.len() > MAX_REQUEST_BYTES {
+        return None;
+    }
+    let mut args = Args::new(bytes);
+    let request = parse_request(tx, &mut args)?;
+    (args.remaining() == 0).then_some(request)
 }
 
 /// Answer one transaction from arguments that are already parsed.

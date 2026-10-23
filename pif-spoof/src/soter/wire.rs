@@ -158,14 +158,6 @@ pub(super) enum Request {
 }
 
 pub(super) fn parse_request(code: u32, bytes: &[u8]) -> Result<Request, i32> {
-    parse_request_inner(code, bytes, false)
-}
-
-pub(super) fn parse_remote_request(code: u32, bytes: &[u8]) -> Result<Request, i32> {
-    parse_request_inner(code, bytes, true)
-}
-
-fn parse_request_inner(code: u32, bytes: &[u8], exact: bool) -> Result<Request, i32> {
     if !(1..=13).contains(&code) {
         return Err(UNKNOWN_TRANSACTION);
     }
@@ -188,9 +180,6 @@ fn parse_request_inner(code: u32, bytes: &[u8], exact: bool) -> Result<Request, 
         }
         _ => Request::None,
     };
-    if exact && reader.position != bytes.len() {
-        return Err(BAD_VALUE);
-    }
     Ok(request)
 }
 

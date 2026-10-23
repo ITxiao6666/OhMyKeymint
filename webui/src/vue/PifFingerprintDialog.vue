@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import {
   MiuixBasicComponent,
-  MiuixBottomSheet,
   MiuixButton,
   MiuixCard,
   MiuixIcon,
@@ -11,6 +10,7 @@ import {
   MiuixSwitch,
   MiuixSwitchPreference,
 } from 'miuix-vue'
+import MiuixBottomSheet from './StableBottomSheet.vue'
 import { Info, Refresh, Tune } from 'miuix-vue/icons'
 import { afterPaint } from '../app_list/app_list'
 import { Cli, type PifDevice, type PifFingerprintState } from '../cli'
@@ -214,6 +214,7 @@ async function apply(): Promise<void> {
 
   busy.value = true
   try {
+    await afterPaint()
     if (preview) {
       const sample = previewDevices.find(item => item.product === device?.product)
       previewState = sample ? {

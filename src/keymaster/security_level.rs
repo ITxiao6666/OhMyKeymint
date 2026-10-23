@@ -158,13 +158,13 @@ impl<F: Fn(&[u8]) -> Result<(), Error>> Drop for KeyBlobRollback<F> {
 
 impl KeystoreSecurityLevel {
     fn keymint_for_caller(&self, ctx: Option<&CallerInfo>) -> Result<KeyMintWrapper> {
-        let snapshot = crate::config::config().read().unwrap().clone();
-        if snapshot.app_patch_levels.is_empty() {
-            return Ok(self.keymint.clone());
-        }
         let uid =
             u32::try_from(caller_uid(ctx).0).map_err(|_| Error::Km(ErrorCode::INVALID_ARGUMENT))?;
         if uid % kmr_common::consts::AID_USER_OFFSET < kmr_common::consts::AID_APP_START {
+            return Ok(self.keymint.clone());
+        }
+        let snapshot = crate::config::config().read().unwrap().clone();
+        if snapshot.app_patch_levels.is_empty() {
             return Ok(self.keymint.clone());
         }
         let packages = if kmr_common::consts::is_isolated_uid(uid) {
@@ -882,8 +882,8 @@ impl KeystoreSecurityLevel {
             .add_required_parameters(ctx, caller_uid, params, &key)
             .context(ks_err!("Trying to get aaid."))?;
 
-        let keybox_attestation_allowed = attestation_key_info.is_none();
         let keymint = self.keymint_for_caller(ctx)?;
+        let keybox_attestation_allowed = attestation_key_info.is_none();
         let creation_result = match attestation_key_info {
             Some(AttestationKeyInfo::UserGenerated {
                 key_id_guard,
@@ -1257,7 +1257,7 @@ impl KeystoreSecurityLevel {
         )
         .context(ks_err!("Check permission"))?;
 
-        let km_dev = &self.keymint;
+        let km_dev = self.keymint_for_caller(ctx)?;
         let res = {
             let _wp = self.watch(concat!(
                 "IKeystoreSecurityLevel::convert_storage_key_to_ephemeral: ",
@@ -1308,7 +1308,7 @@ impl KeystoreSecurityLevel {
         check_key_permission(KeyPerm::Delete, key, None, ctx)
             .context(ks_err!("delete_key: Checking delete permissions"))?;
 
-        let km_dev = &self.keymint;
+        let km_dev = self.keymint_for_caller(ctx)?;
         {
             let _wp =
                 self.watch("KeystoreSecuritylevel::delete_key: calling IKeyMintDevice::deleteKey");
@@ -1647,7 +1647,7 @@ impl IOhMySecurityLevel for OmkSecurityLevelWrapper {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::config::{ConfigFile, ResolvedTrust, TrustValueSource};
     use std::sync::Once;
@@ -1655,7 +1655,7 @@ mod tests {
 
     static CONFIG_INIT: Once = Once::new();
 
-    fn install_test_config() {
+    pub(crate) fn install_test_config() {
         CONFIG_INIT.call_once(|| {
             crate::config::install_runtime_config(
                 ConfigFile::default(),
@@ -1681,11 +1681,15 @@ mod tests {
         crate::keymaster::utils::init_test_logging();
         install_test_config();
         let temp_dir = TempDir::new().unwrap();
-        let security_level = KeystoreSecurityLevel::new(
-            SecurityLevel::TRUSTED_ENVIRONMENT,
-            IdRotationState::new(temp_dir.path()),
-        )
-        .unwrap();
+        let keymint = crate::keymaster::keymint_device::tests::test_wrapper();
+        let hw_info = keymint.getHardwareInfo().unwrap();
+        let security_level = KeystoreSecurityLevel {
+            security_level: SecurityLevel::TRUSTED_ENVIRONMENT,
+            keymint,
+            hw_info,
+            operation_db: OperationDb::new(),
+            id_rotation_state: IdRotationState::new(temp_dir.path()),
+        };
         (temp_dir, security_level)
     }
 

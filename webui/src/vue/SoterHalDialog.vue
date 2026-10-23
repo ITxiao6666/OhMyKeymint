@@ -70,9 +70,10 @@ const canApply = computed(() => {
     } catch { return false }
   }
   if ((state.enabled || state.app_enabled) && soterBetaEnabled.value) return false
-  if (state.enabled && state.app_enabled) return false
   return JSON.stringify(state) !== JSON.stringify(saved.value)
 })
+
+const softwareTakeoverEnabled = computed(() => enabled.value || appEnabled.value)
 
 async function load(): Promise<void> {
   if (!props.modelValue || busy.value) return
@@ -131,24 +132,26 @@ function requestClose(): boolean {
 
 defineExpose({ requestClose, busy })
 
-function setAppEnabled(value: boolean): void {
-  appEnabled.value = value
-  if (value) enabled.value = false
-}
-
-function setGlobalEnabled(value: boolean): void {
+function setSoftwareTakeoverEnabled(value: boolean): void {
+  // Keep both persisted bits in lockstep: this is one user-facing mode and
+  // one watchdog transition, not two independently toggled operations.
   enabled.value = value
-  if (value) appEnabled.value = false
+  appEnabled.value = value
 }
 
 async function apply(): Promise<void> {
   const state = current.value
   if (!canApply.value || !state) return
+  const restoresStockInBackground = saved.value?.enabled === true
+    && !state.enabled && !state.app_enabled
   busy.value = true
   errorMessage.value = ''
   try {
+    await afterPaint()
     saved.value = await props.cli.setSoterHal(state)
-    emit('notify', tr('soter_hal_saved', 'Soter HAL configuration saved'))
+    emit('notify', restoresStockInBackground
+      ? tr('soter_hal_saved_background', 'Settings saved; stock Soter HAL restoration continues in the background.')
+      : tr('soter_hal_saved', 'Soter HAL configuration saved'))
     emit('update:modelValue', false)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error)
@@ -167,7 +170,6 @@ async function apply(): Promise<void> {
     @update:model-value="value => { if (!value) requestClose() }"
   >
     <div class="soter-hal-dialog" :aria-busy="busy || status === 'loading'">
-      <p>{{ tr('soter_hal_desc', 'Configure the Qualcomm Soter service.') }}</p>
       <p v-if="soterBetaEnabled" class="soter-hal-dialog__error">
         {{ tr('soter_hal_exclusive', 'Disable Tencent Soter Server (Testing) before enabling the Qualcomm Soter service.') }}
       </p>
@@ -180,13 +182,13 @@ async function apply(): Promise<void> {
           {{ tr('soter_hal_warning', 'This feature may cause probabilistic bans of Douyin accounts and other unknown issues. Please consider carefully before enabling it.') }}
         </p>
         <MiuixSwitchPreference
-          :model-value="appEnabled"
-          :title="tr('soter_app_master', 'Take over SOTER for selected apps')"
+          :model-value="softwareTakeoverEnabled"
+          :title="tr('soter_hal_enabled', 'Enable remote Soter service')"
           :disabled="busy"
-          @update:model-value="setAppEnabled"
+          @update:model-value="setSoftwareTakeoverEnabled"
         />
         <p class="soter-hal-dialog__hint">
-          {{ tr('soter_app_master_desc', 'Opt in each app using its settings in Add package names. Unselected apps keep the original SOTER service; ordinary OMK selection does not enable remote SOTER.') }}
+          {{ tr('soter_hal_enabled_desc', 'The software TA takes over the stock Soter HAL. Remote forwarding remains limited to apps individually enabled in Add package names; other apps use the software TA locally. Turning this off restores the stock Soter HAL.') }}
         </p>
         <MiuixSwitchPreference
           v-model="remoteEnabled"
@@ -196,7 +198,7 @@ async function apply(): Promise<void> {
         <p class="soter-hal-dialog__hint">
           {{ tr('soter_hal_remote_desc', 'Allows SOTER requests to use the saved relay. In per-app mode, both this switch and the app-specific switch must be on.') }}
         </p>
-        <p v-if="appEnabled" class="soter-hal-dialog__hint">
+        <p v-if="saved?.app_targets.length" class="soter-hal-dialog__hint">
           {{ tr('soter_app_count', 'Apps with remote SOTER enabled') }}: {{ saved?.app_targets.length ?? 0 }}
         </p>
         <MiuixInput
@@ -224,23 +226,6 @@ async function apply(): Promise<void> {
           :title="tr('soter_hal_tls_insecure', 'Accept self-signed TLS certificates')"
           :disabled="busy"
         />
-        <details class="soter-hal-dialog__section">
-          <summary>{{ tr('soter_hal_global_section', 'Qualcomm global HAL compatibility mode') }}</summary>
-          <div class="soter-hal-dialog__section-body">
-            <MiuixSwitchPreference
-              :model-value="enabled"
-              :title="tr('soter_hal_enabled', 'Enable global software TA')"
-              :disabled="busy"
-              @update:model-value="setGlobalEnabled"
-            />
-            <p class="soter-hal-dialog__warning">
-              {{ tr('soter_hal_global_exclusive', 'Global HAL takeover affects all apps using this HAL and cannot be combined with per-app takeover. Enabling either mode disables the other when saved.') }}
-            </p>
-            <p class="soter-hal-dialog__hint">
-              {{ tr('soter_hal_enabled_desc', 'The software TA takes over the stock Soter HAL. With the relay off, it uses its local ledger. Turning the software TA off restores the stock HAL.') }}
-            </p>
-          </div>
-        </details>
       </template>
       <p v-if="errorMessage" class="soter-hal-dialog__error" role="alert">{{ errorMessage }}</p>
       <p v-if="preview" class="soter-hal-dialog__preview" role="status">
@@ -271,9 +256,6 @@ async function apply(): Promise<void> {
 .soter-hal-dialog__hint { font-size: 13px !important; }
 .soter-hal-dialog__actions { display: flex; gap: 12px; }
 .soter-hal-dialog__actions > * { flex: 1; min-width: 0; }
-.soter-hal-dialog__section { color: var(--m-color-on-surface); }
-.soter-hal-dialog__section summary { padding: 10px 0; font-size: 16px; cursor: pointer; }
-.soter-hal-dialog__section-body { display: flex; flex-direction: column; gap: 12px; padding-block: 6px; }
 .soter-hal-dialog :deep(.m-basic-component) { padding: 8px 0; }
 .soter-hal-dialog :deep(.m-basic-component--clickable::after) { content: none; }
 .soter-hal-dialog :deep(.m-basic-component--clickable:focus-visible .m-switch) { box-shadow: 0 0 0 2px var(--m-color-primary); }

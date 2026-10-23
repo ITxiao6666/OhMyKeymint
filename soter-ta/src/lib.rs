@@ -16,9 +16,11 @@
 //! SOTER relay forwards through the same native HAL service to a remote B-side
 //! TEE. Remote failures do not switch an active slot to this local ledger.
 pub mod blob;
+pub mod bridge;
 pub mod dispatch;
 pub mod error;
 pub mod ffi;
+pub mod hal;
 pub mod parcel;
 pub mod platform;
 pub mod remote;

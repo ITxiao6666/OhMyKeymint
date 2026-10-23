@@ -2,10 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance, ComputedRef } from 'vue'
 import {
-  MiuixBottomSheet,
   MiuixButton,
   MiuixCard,
-  MiuixCheckboxPreference,
   MiuixFloatingActionButton,
   MiuixIcon,
   MiuixIconButton,
@@ -15,6 +13,7 @@ import {
   MiuixTopAppBar,
   showSnackbar,
 } from 'miuix-vue'
+import MiuixBottomSheet from './StableBottomSheet.vue'
 import {
   AddCircle,
   All,
@@ -35,6 +34,7 @@ import {
 import { type Cli, type SoterHalState } from '../cli'
 import { i18n } from '../i18n'
 import { isDev } from '../utils/dev'
+import TargetAppRow from './TargetAppRow.vue'
 
 interface Props {
   appList: AppList
@@ -47,8 +47,6 @@ interface Props {
 interface SearchBarInstance extends ComponentPublicInstance {
   $el: HTMLElement
 }
-
-type IconState = 'loading' | 'loaded' | 'error'
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
@@ -70,6 +68,7 @@ function translate(key: string, fallback: string): string {
 }
 
 const revision = ref(props.appList.revision)
+const pageScroller = document.getElementById('app')!
 const searchQuery = ref('')
 const searchExpanded = ref(false)
 const menuOpen = ref(false)
@@ -77,7 +76,6 @@ const selectingRecommended = ref(false)
 const systemSheetOpen = ref(false)
 const systemSearchQuery = ref('')
 const systemSelection = ref(new Set<string>())
-const iconStates = ref<Record<string, IconState>>({})
 const searchBar = ref<SearchBarInstance | null>(null)
 const pullBody = ref<HTMLElement | null>(null)
 const pullIndicator = ref<HTMLElement | null>(null)
@@ -101,8 +99,7 @@ let disposed = false
 const appSoterSelected = computed(() => !!appSettingsEntry.value
   && soterSelection.value?.app_targets.includes(appSettingsEntry.value.targetKey) === true)
 const appSoterReady = computed(() => soterSelection.value?.app_enabled === true
-  && soterSelection.value.remote_enabled && !soterSelection.value.enabled)
-
+  && soterSelection.value.remote_enabled)
 function retainSoterSelection(state: SoterHalState): void {
   soterSelection.value = {
     enabled: state.enabled,
@@ -159,13 +156,16 @@ async function setAppSoter(enabled: boolean): Promise<void> {
   appSettingsBusy.value = true
   appSettingsError.value = ''
   try {
+    await afterPaint()
+    if (disposed) return
     const state = await props.cli.setSoterAppTarget(entry.targetKey, enabled)
     if (disposed) return
     retainSoterSelection(state)
     void showSnackbar({ message: translate('soter_app_saved', 'App SOTER selection saved') })
-  } catch {
+  } catch (error) {
     if (!disposed) {
       appSettingsError.value = translate('soter_app_save_error', 'Unable to save this app SOTER selection. Retry to read the current setting.')
+      if (error instanceof Error && error.message) appSettingsError.value += ` ${error.message}`
       // A failed read-back can follow a successful write. Do not leave a
       // stale switch actionable until the actual device state is reloaded.
       appSettingsStatus.value = 'error'
@@ -179,6 +179,8 @@ async function loadAutoTargets(): Promise<void> {
   autoStatus.value = 'loading'
   autoError.value = ''
   try {
+    await afterPaint()
+    if (disposed) return
     const enabled = isDev() ? autoEnabled.value : await props.cli.getAutoTargets()
     if (disposed) return
     autoEnabled.value = enabled
@@ -195,6 +197,8 @@ async function setAutoTargets(enabled: boolean): Promise<void> {
   autoBusy.value = true
   autoError.value = ''
   try {
+    await afterPaint()
+    if (disposed) return
     if (!isDev()) await props.cli.setAutoTargets(enabled)
     autoEnabled.value = enabled
     void showSnackbar({ message: translate('app_targets_auto_saved', 'Automatic selection setting saved') })
@@ -246,7 +250,7 @@ function resetPull(): void {
 
 function startPull(event: TouchEvent): void {
   if (props.loading || selectingRecommended.value || menuOpen.value || systemSheetOpen.value || appSheetOpen.value
-      || event.touches.length !== 1 || (document.scrollingElement?.scrollTop ?? window.scrollY) > 0
+      || event.touches.length !== 1 || pageScroller.scrollTop > 0
       || (event.target instanceof Element && event.target.closest('input, button, [role="switch"]'))) {
     if (pullStart) resetPull()
     return
@@ -279,7 +283,7 @@ function movePull(event: TouchEvent): void {
   }
   if (!pullCaptured) {
     if (dy <= 8) return
-    if (!event.cancelable || (document.scrollingElement?.scrollTop ?? window.scrollY) > 0) {
+    if (!event.cancelable || pageScroller.scrollTop > 0) {
       resetPull()
       return
     }
@@ -383,15 +387,6 @@ const renderedSystemEntries = batchedEntries(
   systemEntries,
   computed(() => systemSheetOpen.value),
 )
-
-function iconState(packageName: string): IconState {
-  return iconStates.value[packageName] ?? 'loading'
-}
-
-function setIconState(packageName: string, state: IconState): void {
-  if (iconStates.value[packageName] === state) return
-  iconStates.value[packageName] = state
-}
 
 function setSelected(entry: SelectableAppEntry, selected: boolean): void {
   if (props.loading || menuOpen.value || selectingRecommended.value) return
@@ -633,47 +628,15 @@ defineExpose({
         <h3 v-if="showUserGroups && (index === 0 || renderedTargetEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
           {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
         </h3>
-        <div class="target-app-row">
-        <MiuixCheckboxPreference
-          :model-value="entry.selected"
+        <TargetAppRow
+          :selected="entry.selected"
           :disabled="loading || selectingRecommended"
-          :title="entry.appName"
-          :summary="entry.packageName"
-          location="end"
-          @update:model-value="setSelected(entry, $event)"
-        >
-          <template #start>
-            <span class="app-icon-frame" :class="`app-icon-frame--${iconState(entry.packageName)}`">
-              <img
-                class="app-icon"
-                :src="`ksu://icon/${entry.packageName}`"
-                :alt="entry.appName"
-                loading="lazy"
-                decoding="async"
-                draggable="false"
-                @load="setIconState(entry.packageName, 'loaded')"
-                @error="setIconState(entry.packageName, 'error')"
-              >
-              <MiuixIcon
-                v-if="iconState(entry.packageName) !== 'loaded'"
-                class="app-icon-fallback"
-                :icon="All"
-                :size="24"
-              />
-            </span>
-          </template>
-        </MiuixCheckboxPreference>
-        <button
-          type="button"
-          class="target-app-settings"
-          :aria-label="`${translate('soter_app_settings', 'App settings')}: ${entry.appName}`"
-          :title="translate('soter_app_settings', 'App settings')"
-          :disabled="loading || selectingRecommended"
-          @click="openAppSettings(entry)"
-        >
-          <MiuixIcon :icon="More" :size="22" />
-        </button>
-        </div>
+          :app-name="entry.appName"
+          :package-name="entry.packageName"
+          :settings-title="translate('soter_app_settings', 'App settings')"
+          @select="setSelected(entry, $event)"
+          @settings="openAppSettings(entry)"
+        />
         </template>
         <div v-if="renderedTargetEntries.length < targetEntries.length" class="app-list-batch-loading" role="status">
           <MiuixProgressIndicator type="circular" :size="24" />
@@ -739,47 +702,15 @@ defineExpose({
           <h3 v-if="showUserGroups && (index === 0 || renderedSystemEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
             {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
           </h3>
-          <div class="target-app-row">
-          <MiuixCheckboxPreference
-            :model-value="systemSelection.has(entry.targetKey) || systemSelection.has(entry.packageName)"
+          <TargetAppRow
+            :selected="systemSelection.has(entry.targetKey) || systemSelection.has(entry.packageName)"
             :disabled="loading"
-            :title="entry.appName"
-            :summary="entry.packageName"
-            location="end"
-            @update:model-value="setSystemSelected(entry.targetKey, $event)"
-          >
-            <template #start>
-              <span class="app-icon-frame" :class="`app-icon-frame--${iconState(entry.packageName)}`">
-                <img
-                  class="app-icon"
-                  :src="`ksu://icon/${entry.packageName}`"
-                  :alt="entry.appName"
-                  loading="lazy"
-                  decoding="async"
-                  draggable="false"
-                  @load="setIconState(entry.packageName, 'loaded')"
-                  @error="setIconState(entry.packageName, 'error')"
-                >
-                <MiuixIcon
-                  v-if="iconState(entry.packageName) !== 'loaded'"
-                  class="app-icon-fallback"
-                  :icon="All"
-                  :size="24"
-                />
-              </span>
-            </template>
-          </MiuixCheckboxPreference>
-          <button
-            type="button"
-            class="target-app-settings"
-            :aria-label="`${translate('soter_app_settings', 'App settings')}: ${entry.appName}`"
-            :title="translate('soter_app_settings', 'App settings')"
-            :disabled="loading"
-            @click="openAppSettings(entry)"
-          >
-            <MiuixIcon :icon="More" :size="22" />
-          </button>
-          </div>
+            :app-name="entry.appName"
+            :package-name="entry.packageName"
+            :settings-title="translate('soter_app_settings', 'App settings')"
+            @select="setSystemSelected(entry.targetKey, $event)"
+            @settings="openAppSettings(entry)"
+          />
           </template>
           <div v-if="renderedSystemEntries.length < systemEntries.length" class="app-list-batch-loading" role="status">
             <MiuixProgressIndicator type="circular" :size="24" />
@@ -817,17 +748,17 @@ defineExpose({
         </div>
         <template v-else-if="appSettingsStatus === 'ready'">
           <MiuixSwitchPreference
-            :model-value="appSoterSelected"
+            :model-value="appSoterSelected && appSoterReady"
             :title="translate('soter_app_enabled', 'Take over remote SOTER')"
-            :summary="translate('soter_app_enabled_desc', 'Only this app in this Android user is opted in. Independent of normal OMK selection; saved immediately.')"
+            :summary="translate('soter_app_enabled_desc', 'Opt in this app and automatically enable per-app remote forwarding. Independent of normal OMK selection; saved immediately.')"
             :disabled="appSettingsBusy || isDev()"
             @update:model-value="setAppSoter"
           />
-          <p class="target-app-note">
-            {{ translate('soter_app_original', 'In per-app mode, apps not opted in continue using the original SOTER service.') }}
+          <p v-if="soterSelection?.enabled" class="target-app-note">
+            {{ translate('soter_app_global_effect', 'Global takeover replaces the stock HAL for all apps using it. If the relay is enabled, unselected apps may also use the remote relay.') }}
           </p>
-          <p v-if="!appSoterReady" class="target-app-note target-app-note--warning" role="status">
-            {{ translate('soter_app_inactive', 'Remote SOTER is not active: enable per-app takeover and the remote relay in SOTER settings.') }}
+          <p v-if="appSoterSelected && !appSoterReady" class="target-app-note target-app-note--warning" role="status">
+            {{ translate('soter_app_inactive', 'This app is saved, but remote SOTER is inactive. Turn on this switch to activate per-app forwarding.') }}
           </p>
           <div v-if="appSettingsBusy" class="target-app-pending" role="status">
             <MiuixProgressIndicator type="circular" :size="22" />
@@ -858,10 +789,12 @@ defineExpose({
   top: 0;
   box-sizing: border-box;
   padding-top: calc(var(--omk-top-inset) / var(--omk-ui-scale));
-  /* Keep a solid fallback for older Android WebViews that do not implement
-     CSS color-mix; the translucent value is then layered on when supported. */
   background: var(--m-color-surface);
+}
+
+:root[data-bar-blur='true'][data-backdrop-blur-supported='true'] .targets-top-bar {
   background: color-mix(in srgb, var(--m-color-surface) 92%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
   backdrop-filter: blur(18px) saturate(1.25);
 }
 
@@ -905,11 +838,15 @@ defineExpose({
   border: 1px solid color-mix(in srgb, var(--m-color-on-surface) 7%, transparent);
   border-radius: 20px;
   background: var(--m-color-surface-container);
-  background: color-mix(in srgb, var(--m-color-surface-container) 96%, transparent);
   box-shadow: 0 14px 36px rgb(0 0 0 / 18%), 0 3px 10px rgb(0 0 0 / 9%);
-  backdrop-filter: blur(22px) saturate(1.15);
   scrollbar-width: none;
   -ms-overflow-style: none;
+}
+
+:root[data-bar-blur='true'][data-backdrop-blur-supported='true'] .targets-menu-popup {
+  background: color-mix(in srgb, var(--m-color-surface-container) 96%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.15);
+  backdrop-filter: blur(22px) saturate(1.15);
 }
 
 .targets-menu-popup::-webkit-scrollbar {
@@ -1091,49 +1028,6 @@ defineExpose({
   gap: 12px;
 }
 
-.targets-list :deep(.m-basic-component),
-.system-app-list :deep(.m-basic-component) {
-  min-height: 74px;
-  padding: 12px 14px;
-  border-radius: 22px;
-  overflow: hidden;
-  background: var(--m-color-surface-container);
-}
-
-.target-app-row {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
-  border-radius: 22px;
-  overflow: hidden;
-  background: var(--m-color-surface-container);
-}
-
-.target-app-row :deep(.m-basic-component) {
-  flex: 1;
-  min-width: 0;
-  padding-inline-end: 4px;
-  border-radius: 0;
-  background: transparent;
-}
-
-.target-app-settings {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 44px;
-  min-height: 48px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--m-color-on-surface-variant-summary);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.target-app-settings:active { background: color-mix(in srgb, var(--m-color-primary) 10%, transparent); }
-.target-app-settings:focus-visible { outline: 2px solid var(--m-color-primary); outline-offset: -4px; }
-.target-app-settings:disabled { opacity: .45; cursor: default; }
 .target-app-sheet { padding: 0 4px 22px; }
 .target-app-identity { margin: 0; overflow-wrap: anywhere; color: var(--m-color-on-surface-variant-summary); font-size: 14px; }
 .target-app-profile { margin: 6px 0 16px; color: var(--m-color-on-surface-variant-summary); font-size: 13px; }
@@ -1160,40 +1054,6 @@ defineExpose({
   white-space: nowrap;
 }
 
-
-.app-icon-frame {
-  position: relative;
-  box-sizing: border-box;
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  overflow: hidden;
-  border-radius: 50%;
-  color: var(--m-color-on-tertiary-container);
-  background: var(--m-color-tertiary-container);
-}
-
-.app-icon {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0;
-}
-
-.app-icon-frame--loaded { background: transparent; }
-
-.app-icon-frame--loaded .app-icon {
-  opacity: 1;
-}
-
-.app-icon-fallback {
-  opacity: .8;
-}
 
 .app-list-batch-loading {
   display: flex;

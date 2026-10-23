@@ -1898,6 +1898,18 @@ pub(crate) mod tests {
         }
     }
 
+    pub(crate) fn test_wrapper() -> KeyMintWrapper {
+        // Test fixtures must not initialize the production shared TA or its
+        // on-device secure-deletion storage.
+        KeyMintWrapper {
+            security_level: SecurityLevel::TRUSTED_ENVIRONMENT,
+            inner: Arc::new(KeyMintWrapperInner {
+                keymint: Mutex::new(test_ta()),
+            }),
+            request_patchlevels: None,
+        }
+    }
+
     pub(crate) fn test_ta() -> KeyMintTa {
         test_ta_with_profile(
             KeyMintDevice::KEY_MINT_V5,

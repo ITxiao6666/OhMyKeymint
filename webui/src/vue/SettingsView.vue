@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   MiuixArrowPreference,
   MiuixCard,
-  MiuixBottomSheet,
   MiuixDivider,
   MiuixDropdownPreference,
   MiuixIcon,
@@ -16,6 +15,7 @@ import {
   MiuixTopAppBar,
   type MiuixDropdownItem,
 } from 'miuix-vue'
+import MiuixBottomSheet from './StableBottomSheet.vue'
 import { Background, Close, Layers, Photos, Sidebar, Tasks, Theme, Translate, Tune } from 'miuix-vue/icons'
 import {
   ACCENT_COLORS,
@@ -99,6 +99,9 @@ const colorSpecIndex = ref(Math.max(0, COLOR_SPECS.indexOf(appearance.colorSpec)
 const options = ref<Record<AppearanceOption, boolean>>(readOptions())
 const interfaceScale = ref(appearance.interfaceScale)
 const showScaleSlider = ref(false)
+let appliedScale = appearance.interfaceScale
+let scaleEditing = false
+let scalePointerCancelled = false
 const languageSheetOpen = ref(false)
 const visibleLanguageCount = ref(8)
 let languageRenderGeneration = 0
@@ -139,7 +142,13 @@ function syncAppearanceState(): void {
   if (Object.keys(nextOptions).some(key => (
     nextOptions[key as AppearanceOption] !== options.value[key as AppearanceOption]
   ))) options.value = nextOptions
-  interfaceScale.value = appearance.interfaceScale
+  const nextScale = appearance.interfaceScale
+  // Theme/color refreshes must not replace an in-progress slider draft.
+  if (!scaleEditing || nextScale !== appliedScale) {
+    scaleEditing = false
+    interfaceScale.value = nextScale
+  }
+  appliedScale = nextScale
 }
 
 function selectMode(index: number): void {
@@ -177,13 +186,53 @@ function setOption(option: AppearanceOption, enabled: boolean): void {
 }
 
 function setInterfaceScale(value: number): void {
-  interfaceScale.value = Math.round(value)
-  appearance.setInterfaceScale(value)
+  if (scalePointerCancelled) return
+  scaleEditing = true
+  interfaceScale.value = Math.max(80, Math.min(110, Math.round(value)))
 }
+
+function commitInterfaceScale(): void {
+  if (!scaleEditing) return
+  scaleEditing = false
+  // Resizing the entire page while the pointer is down changes the slider's
+  // own geometry. Apply zoom and persist only after the gesture has ended.
+  appearance.setInterfaceScale(interfaceScale.value)
+}
+
+function cancelInterfaceScale(): void {
+  scaleEditing = false
+  interfaceScale.value = appearance.interfaceScale
+}
+
+function cancelScalePointer(): void {
+  // MIUIX emits update/change-end from its pointercancel handler as well.
+  // Ignore those emissions while still allowing its capture cleanup to run.
+  scalePointerCancelled = true
+  cancelInterfaceScale()
+}
+
+function onScaleKeydown(event: KeyboardEvent): void {
+  if (event.altKey || event.ctrlKey || event.metaKey) return
+  scalePointerCancelled = false
+  let value = interfaceScale.value
+  switch (event.key) {
+    case 'ArrowLeft': case 'ArrowDown': value -= 5; break
+    case 'ArrowRight': case 'ArrowUp': value += 5; break
+    case 'Home': value = 80; break
+    case 'End': value = 110; break
+    case 'Escape': cancelInterfaceScale(); event.preventDefault(); return
+    default: return
+  }
+  event.preventDefault()
+  setInterfaceScale(value)
+}
+
+watch(showScaleSlider, open => { if (!open) cancelInterfaceScale() })
 
 const unsubscribeAppearance = appearance.onChange(syncAppearanceState)
 onBeforeUnmount(() => {
   languageRenderGeneration++
+  cancelInterfaceScale()
   unsubscribeAppearance()
 })
 </script>
@@ -373,6 +422,12 @@ onBeforeUnmount(() => {
                 :key-points="[80, 90, 100, 110]"
                 :aria-label="translate('settings_interface_scale', 'Interface scale')"
                 @update:model-value="setInterfaceScale"
+                @change-end="commitInterfaceScale"
+                @pointerdown.capture="scalePointerCancelled = false"
+                @pointercancel.capture="cancelScalePointer"
+                @keydown="onScaleKeydown"
+                @keyup="commitInterfaceScale"
+                @blur="commitInterfaceScale"
               />
             </template>
           </MiuixArrowPreference>

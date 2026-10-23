@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   MiuixDialog,
+  MiuixRadioButtonPreference,
   MiuixIcon,
   MiuixButton,
   MiuixNavigationBar,
@@ -16,6 +17,8 @@ import {
   type DiagnosticsState,
   type KeyboxInspector,
   type KeyboxRevocationStatus,
+  type RkpIssuedArtifact,
+  type RkpProtocol,
 } from '../cli'
 import { ConfigOhMyKeyMint } from '../config_ohmykeymint'
 import { FileSelector } from '../file_selector/file_selector'
@@ -38,6 +41,7 @@ const config = new ConfigOhMyKeyMint(cli)
 const appList = new AppList(config)
 const fileSelector = new FileSelector()
 const history = new History()
+const pageScroller = document.getElementById('app')!
 
 const pageIndex = ref(0)
 const pageDirection = ref(1)
@@ -45,7 +49,7 @@ const pageScrollPositions = [0, 0, 0]
 const targetsOpen = ref(false)
 const targetsLoading = ref(false)
 const targetsRefreshing = ref(false)
-const snapshot = ref<AppListSnapshot>(appList.getSnapshot())
+const snapshot = shallowRef<AppListSnapshot>(appList.getSnapshot())
 const moduleStatus = ref<ModuleStatus>('loading')
 const keyboxStatus = ref<KeyboxStatus>('loading')
 const keyboxSource = ref<'google_hardware' | 'google_remote' | 'unknown'>('unknown')
@@ -61,6 +65,17 @@ const securityPatchBusy = ref<'sync' | 'restore' | null>(null)
 const maintenanceBusy = ref<'gms' | 'rkp' | null>(null)
 const rkpOpen = ref(false)
 const rkpError = ref('')
+const rkpIssueOpen = ref(false)
+const rkpIssueConfirmOpen = ref(false)
+const rkpImportConfirmOpen = ref(false)
+const rkpIssueBusy = ref(false)
+const rkpProtocol = ref<RkpProtocol>('auto')
+const rkpProtocols: RkpProtocol[] = ['auto', 'v2', 'v1', 'v1-native']
+const rkpListBusy = ref(false)
+const rkpIssuanceBusy = computed(() => rkpIssueBusy.value || rkpListBusy.value)
+const rkpIssueError = ref('')
+const rkpIssuedArtifacts = ref<RkpIssuedArtifact[]>([])
+const pendingRkpImport = ref<RkpIssuedArtifact | null>(null)
 const soterOpen = ref(false)
 const soterHalOpen = ref(false)
 const pifOpen = ref(false)
@@ -299,6 +314,7 @@ function onTargetsOverlayClose(): void {
 function handleEscape(): void {
   if (soterOpen.value && soterDialog.value?.busy) return
   if (soterHalOpen.value && soterHalDialog.value?.busy) return
+  if (rkpIssueOpen.value && rkpIssueBusy.value) return
   if (targetsOpen.value && targetsView.value?.dismissOverlay()) return
   if (history.size > 0) history.back()
 }
@@ -328,6 +344,7 @@ async function saveTargets(): Promise<void> {
   if (targetsLoading.value) return
   targetsLoading.value = true
   try {
+    await afterPaint()
     await appList.save()
     snapshot.value = appList.getSnapshot()
     notify(i18n.t('prompt_saved_target'))
@@ -455,6 +472,7 @@ async function installKeybox(): Promise<void> {
   if (!selected || keyboxBusy.value) return
   keyboxBusy.value = true
   try {
+    await afterPaint()
     if (!isDev()) await cli.installKeybox(selected.contents)
     notify(i18n.t('prompt_keybox_replaced'))
     keyboxOpen.value = false
@@ -471,6 +489,7 @@ async function syncPatch(restore: boolean): Promise<void> {
   if (securityPatchBusy.value !== null) return
   securityPatchBusy.value = restore ? 'restore' : 'sync'
   try {
+    await afterPaint()
     if (restore) {
       if (!isDev()) await cli.restoreDefaultSecurityPatch()
       await refreshIdentity(true)
@@ -492,6 +511,7 @@ async function clearGmsCache(): Promise<void> {
   if (maintenanceBusy.value !== null) return
   maintenanceBusy.value = 'gms'
   try {
+    await afterPaint()
     if (isDev()) {
       notify(i18n.t('maintenance_preview_only'))
       return
@@ -510,6 +530,7 @@ async function repairRkp(): Promise<void> {
   maintenanceBusy.value = 'rkp'
   rkpError.value = ''
   try {
+    await afterPaint()
     if (isDev()) {
       notify(i18n.t('maintenance_preview_only'))
       return
@@ -525,6 +546,92 @@ async function repairRkp(): Promise<void> {
   }
 }
 
+async function refreshRkpIssuedArtifacts(): Promise<void> {
+  if (rkpListBusy.value) return
+  if (isDev()) {
+    rkpIssuedArtifacts.value = []
+    return
+  }
+  rkpListBusy.value = true
+  try {
+    rkpIssuedArtifacts.value = await cli.listIssuedRkpKeyboxes()
+    rkpIssueError.value = ''
+  } catch (error) {
+    rkpIssueError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    rkpListBusy.value = false
+  }
+}
+
+async function openRkpIssue(): Promise<void> {
+  if (rkpIssuanceBusy.value) return
+  rkpIssueOpen.value = true
+  rkpIssueError.value = ''
+  await afterPaint()
+  await refreshRkpIssuedArtifacts()
+}
+
+async function issueRkpKeybox(): Promise<void> {
+  if (rkpIssuanceBusy.value || !rkpIssueConfirmOpen.value) return
+  rkpIssueBusy.value = true
+  rkpIssueError.value = ''
+  try {
+    await afterPaint()
+    if (isDev()) {
+      notify(i18n.t('maintenance_preview_only'))
+      rkpIssueConfirmOpen.value = false
+      return
+    }
+    const artifact = await cli.issueRkpKeybox(rkpProtocol.value)
+    rkpIssuedArtifacts.value = [artifact, ...rkpIssuedArtifacts.value.filter(item => item.id !== artifact.id)]
+    notify(i18n.t('rkp_issue_completed'))
+    rkpIssueConfirmOpen.value = false
+  } catch (error) {
+    rkpIssueError.value = error instanceof Error ? error.message : String(error)
+    notify(rkpIssueError.value, true)
+  } finally {
+    rkpIssueBusy.value = false
+  }
+}
+
+function requestRkpImport(artifact: RkpIssuedArtifact): void {
+  if (rkpIssuanceBusy.value) return
+  rkpIssueError.value = ''
+  pendingRkpImport.value = artifact
+  rkpImportConfirmOpen.value = true
+}
+
+async function importRkpKeybox(): Promise<void> {
+  const artifact = pendingRkpImport.value
+  if (!artifact || rkpIssuanceBusy.value || !rkpImportConfirmOpen.value) return
+  rkpIssueBusy.value = true
+  rkpIssueError.value = ''
+  try {
+    await afterPaint()
+    if (isDev()) {
+      notify(i18n.t('maintenance_preview_only'))
+      rkpImportConfirmOpen.value = false
+      pendingRkpImport.value = null
+      return
+    }
+    await cli.importIssuedRkpKeybox(artifact.id)
+    notify(i18n.t('rkp_import_completed'))
+    rkpImportConfirmOpen.value = false
+    pendingRkpImport.value = null
+    await refreshRkpIssuedArtifacts()
+    await refreshIdentity(true)
+  } catch (error) {
+    rkpIssueError.value = error instanceof Error ? error.message : String(error)
+    notify(rkpIssueError.value, true)
+  } finally {
+    rkpIssueBusy.value = false
+  }
+}
+
+function formatRkpCreatedAt(timestamp: number): string {
+  return new Date(timestamp * 1000).toLocaleString(i18n.lang)
+}
+
 function onTool(event: ToolEvent): void {
   switch (event) {
     case 'openAppTargets': openTargets(); break
@@ -536,6 +643,7 @@ function onTool(event: ToolEvent): void {
     case 'spoofPif': pifOpen.value = true; break
     case 'clearGmsCache': void clearGmsCache(); break
     case 'repairRkp': rkpError.value = ''; rkpOpen.value = true; break
+    case 'issueRkp': void openRkpIssue(); break
   }
 }
 
@@ -593,11 +701,11 @@ onBeforeUnmount(() => {
 })
 
 watch(pageIndex, (index, previousIndex) => {
-  pageScrollPositions[previousIndex] = window.scrollY
+  pageScrollPositions[previousIndex] = pageScroller.scrollTop
   pageDirection.value = index > previousIndex ? 1 : -1
   void nextTick(() => {
     if (pageIndex.value === index && !targetsOpen.value) {
-      window.scrollTo(0, pageScrollPositions[index] ?? 0)
+      pageScroller.scrollTo(0, pageScrollPositions[index] ?? 0)
     }
   })
   if (navigationPointerId === null) {
@@ -606,10 +714,10 @@ watch(pageIndex, (index, previousIndex) => {
 })
 
 watch(targetsOpen, open => {
-  if (open) pageScrollPositions[pageIndex.value] = window.scrollY
+  if (open) pageScrollPositions[pageIndex.value] = pageScroller.scrollTop
   void nextTick(() => {
     if (targetsOpen.value === open) {
-      window.scrollTo(0, open ? 0 : pageScrollPositions[pageIndex.value] ?? 0)
+      pageScroller.scrollTo(0, open ? 0 : pageScrollPositions[pageIndex.value] ?? 0)
     }
   })
 })
@@ -672,6 +780,29 @@ watch(rkpOpen, open => {
   if (open) trackRkpOverlay()
   else if (overlayHistory.delete('rkp')) history.consume('rkp')
 })
+function trackRkpIssuanceOverlay(key: 'rkp-issuance' | 'rkp-issue-confirm' | 'rkp-import-confirm', open: boolean): void {
+  if (!open || overlayHistory.has(key)) return
+  overlayHistory.add(key)
+  history.push(key, () => {
+    overlayHistory.delete(key)
+    if (rkpIssueBusy.value) void nextTick(() => trackRkpIssuanceOverlay(key, true))
+    else if (key === 'rkp-issuance') rkpIssueOpen.value = false
+    else if (key === 'rkp-issue-confirm') rkpIssueConfirmOpen.value = false
+    else rkpImportConfirmOpen.value = false
+  })
+}
+watch(rkpIssueOpen, open => {
+  if (open) trackRkpIssuanceOverlay('rkp-issuance', true)
+  else if (overlayHistory.delete('rkp-issuance')) history.consume('rkp-issuance')
+})
+watch(rkpIssueConfirmOpen, open => {
+  if (open) trackRkpIssuanceOverlay('rkp-issue-confirm', true)
+  else if (overlayHistory.delete('rkp-issue-confirm')) history.consume('rkp-issue-confirm')
+})
+watch(rkpImportConfirmOpen, open => {
+  if (open) trackRkpIssuanceOverlay('rkp-import-confirm', true)
+  else if (overlayHistory.delete('rkp-import-confirm')) history.consume('rkp-import-confirm')
+})
 </script>
 
 <template>
@@ -698,6 +829,7 @@ watch(rkpOpen, open => {
           v-show="pageIndex === 1"
           :security-patch-busy="securityPatchBusy"
           :maintenance-busy="maintenanceBusy"
+          :rkp-issuance-busy="rkpIssuanceBusy"
           @open-app-targets="onTool('openAppTargets')"
           @install-keybox="onTool('installKeybox')"
           @sync-security-patch="onTool('syncSecurityPatch')"
@@ -707,6 +839,7 @@ watch(rkpOpen, open => {
           @spoof-pif="onTool('spoofPif')"
           @clear-gms-cache="onTool('clearGmsCache')"
           @repair-rkp="onTool('repairRkp')"
+          @issue-rkp="onTool('issueRkp')"
         />
       </Transition>
       <Transition name="page-switch">
@@ -798,6 +931,96 @@ watch(rkpOpen, open => {
           <MiuixButton type="primary" :disabled="maintenanceBusy !== null" @click="repairRkp">
             <MiuixProgressIndicator v-if="maintenanceBusy === 'rkp'" type="circular" :size="18" />
             {{ i18n.t('rkp_repair_confirm') }}
+          </MiuixButton>
+        </div>
+      </div>
+    </MiuixDialog>
+    <MiuixDialog
+      :model-value="rkpIssueOpen"
+      :title="i18n.t('tools_issue_rkp')"
+      :close-on-click-modal="!rkpIssueBusy"
+      @update:model-value="value => { if (!rkpIssueBusy && !rkpIssueConfirmOpen && !rkpImportConfirmOpen) rkpIssueOpen = value }"
+    >
+      <div class="confirm-sheet" :aria-busy="rkpIssuanceBusy">
+        <p>{{ i18n.t('rkp_issue_description') }}</p>
+        <div class="rkp-protocol-options" role="radiogroup" :aria-label="i18n.t('rkp_protocol')">
+          <MiuixRadioButtonPreference
+            v-for="protocol in rkpProtocols"
+            :key="protocol"
+            :model-value="rkpProtocol === protocol"
+            :title="i18n.t(`rkp_protocol_${protocol}`)"
+            :disabled="rkpIssuanceBusy"
+            @select="rkpProtocol = protocol"
+          />
+        </div>
+        <p v-if="rkpIssueError" role="alert">{{ rkpIssueError }}</p>
+        <p v-if="rkpListBusy" class="rkp-loading" role="status">
+          <MiuixProgressIndicator type="circular" :size="18" />
+          {{ i18n.t('rkp_list_loading') }}
+        </p>
+        <div v-if="rkpIssuedArtifacts.length" class="rkp-issued-list">
+          <article v-for="artifact in rkpIssuedArtifacts" :key="artifact.id" class="rkp-issued-item">
+            <div class="rkp-issued-item__metadata">
+              <strong>{{ formatRkpCreatedAt(artifact.created_at) }}</strong>
+              <span v-for="(subject, index) in artifact.chain_subjects" :key="`${artifact.id}-${index}`">{{ subject }}</span>
+            </div>
+            <MiuixButton :disabled="rkpIssuanceBusy" @click="requestRkpImport(artifact)">
+              {{ i18n.t('rkp_import_button') }}
+            </MiuixButton>
+          </article>
+        </div>
+        <p v-else-if="!rkpListBusy && !rkpIssueError">{{ i18n.t('rkp_issued_empty') }}</p>
+        <div class="confirm-actions">
+          <MiuixButton :disabled="rkpIssuanceBusy" @click="refreshRkpIssuedArtifacts">
+            {{ i18n.t('rkp_refresh_list') }}
+          </MiuixButton>
+          <MiuixButton type="primary" :disabled="rkpIssuanceBusy" @click="rkpIssueConfirmOpen = true">
+            <MiuixProgressIndicator v-if="rkpIssueBusy" type="circular" :size="18" />
+            {{ i18n.t('rkp_issue_button') }}
+          </MiuixButton>
+        </div>
+      </div>
+    </MiuixDialog>
+    <MiuixDialog
+      :model-value="rkpIssueConfirmOpen"
+      :title="i18n.t('rkp_issue_confirm_title')"
+      :close-on-click-modal="!rkpIssueBusy"
+      @update:model-value="value => { if (!rkpIssueBusy) rkpIssueConfirmOpen = value }"
+    >
+      <div class="confirm-sheet" :aria-busy="rkpIssueBusy">
+        <p>{{ i18n.t('rkp_issue_warning') }}</p>
+        <p>{{ i18n.t('rkp_protocol') }}: {{ i18n.t(`rkp_protocol_${rkpProtocol}`) }}</p>
+        <p v-if="rkpIssueError" role="alert">{{ rkpIssueError }}</p>
+        <p v-if="rkpIssueBusy" role="status">{{ i18n.t('rkp_issue_running') }}</p>
+        <div class="confirm-actions">
+          <MiuixButton :disabled="rkpIssueBusy" @click="rkpIssueConfirmOpen = false">
+            {{ i18n.t('functional_button_cancel') }}
+          </MiuixButton>
+          <MiuixButton type="primary" :disabled="rkpIssueBusy" @click="issueRkpKeybox">
+            <MiuixProgressIndicator v-if="rkpIssueBusy" type="circular" :size="18" />
+            {{ i18n.t('rkp_issue_confirm') }}
+          </MiuixButton>
+        </div>
+      </div>
+    </MiuixDialog>
+    <MiuixDialog
+      :model-value="rkpImportConfirmOpen"
+      :title="i18n.t('rkp_import_confirm_title')"
+      :close-on-click-modal="!rkpIssueBusy"
+      @update:model-value="value => { if (!rkpIssueBusy) rkpImportConfirmOpen = value }"
+    >
+      <div class="confirm-sheet" :aria-busy="rkpIssueBusy">
+        <p>{{ i18n.t('rkp_import_warning') }}</p>
+        <p v-if="pendingRkpImport">{{ formatRkpCreatedAt(pendingRkpImport.created_at) }}<br>{{ pendingRkpImport.chain_subjects.join(' · ') }}</p>
+        <p v-if="rkpIssueError" role="alert">{{ rkpIssueError }}</p>
+        <p v-if="rkpIssueBusy" role="status">{{ i18n.t('rkp_import_running') }}</p>
+        <div class="confirm-actions">
+          <MiuixButton :disabled="rkpIssueBusy" @click="rkpImportConfirmOpen = false">
+            {{ i18n.t('functional_button_cancel') }}
+          </MiuixButton>
+          <MiuixButton type="primary" :disabled="rkpIssueBusy" @click="importRkpKeybox">
+            <MiuixProgressIndicator v-if="rkpIssueBusy" type="circular" :size="18" />
+            {{ i18n.t('rkp_import_confirm') }}
           </MiuixButton>
         </div>
       </div>

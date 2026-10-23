@@ -31,12 +31,15 @@ pub mod gms_cache;
 pub mod keybox;
 pub mod keymaster;
 pub mod keymint;
+pub mod local_rkp;
+pub mod local_rkp_artifacts;
 pub mod logging;
 pub mod macros;
 pub mod pif_spoof;
 pub mod plat;
 pub mod proto;
 pub mod rkp_repair;
+pub mod rkp_v1_bridge;
 pub mod security_patch;
 pub mod selinux;
 pub mod soter_beta;
@@ -630,6 +633,9 @@ fn handle_webui_diagnostics_command() -> Option<Result<String, String>> {
                     "--webui-get-diagnostics does not accept arguments".to_string()
                 ));
             }
+            // This short-lived command needs Binder but never forks the
+            // privileged helper. The daemon initializes Binder after its fork.
+            let _ = rsbinder::ProcessState::init_default();
             Some(Ok(webui_diagnostics()))
         }
         "--webui-get-keybox-inspector" => {
@@ -1024,14 +1030,53 @@ fn handle_webui_maintenance_command(
     }
 }
 
+fn handle_local_rkp_command(
+    mut args: impl Iterator<Item = String>,
+) -> Option<Result<String, String>> {
+    let result = match args.next()?.as_str() {
+        "--webui-rkp-issue" => {
+            if args.next().as_deref() != Some("--confirm-issuance") {
+                return Some(Err("RKP issuance requires --confirm-issuance".into()));
+            }
+            let protocol = args.next().unwrap_or_else(|| "auto".into());
+            if args.next().is_some() {
+                return Some(Err("RKP issuance accepts only one optional protocol".into()));
+            }
+            local_rkp::Protocol::parse(&protocol).and_then(local_rkp::issue)
+        }
+        "--webui-rkp-list" => {
+            if args.next().is_some() {
+                return Some(Err("RKP list does not accept arguments".into()));
+            }
+            local_rkp_artifacts::list_json()
+        }
+        "--webui-rkp-import" => {
+            let Some(id) = args.next() else {
+                return Some(Err("RKP import requires an artifact ID".into()));
+            };
+            if args.next().as_deref() != Some("--confirm-replace") || args.next().is_some() {
+                return Some(Err("RKP import requires --confirm-replace".into()));
+            }
+            local_rkp_artifacts::import(&id).map(|()| "rkp_imported".into())
+        }
+        "--rkp-native-worker" => {
+            let Some(directory) = args.next() else {
+                return Some(Err("RKP worker requires its exchange directory".into()));
+            };
+            if args.next().is_some() {
+                return Some(Err("RKP worker accepts one directory".into()));
+            }
+            local_rkp::worker(&directory).map(|()| String::new())
+        }
+        _ => return None,
+    };
+    Some(result.map_err(|error| format!("{error:#}")))
+}
+
 fn main() {
-    // WebUI diagnostics query the registered Binder services before entering
-    // the long-running KeyMint server path. Initialize the Binder process
-    // state first so standalone WebUI bridge invocations can safely perform
-    // those read-only queries.
-    let _ = rsbinder::ProcessState::init_default();
     if let Some(result) = handle_webui_diagnostics_command()
         .or_else(|| handle_webui_app_patch_command(std::env::args().skip(1)))
+        .or_else(|| handle_local_rkp_command(std::env::args().skip(1)))
         .or_else(|| handle_webui_maintenance_command(std::env::args().skip(1)))
     {
         match result {
@@ -1299,6 +1344,29 @@ mod tests {
             );
         }
         assert!(handle_webui_maintenance_command(["unknown".to_string()].into_iter()).is_none());
+    }
+
+    #[test]
+    fn local_rkp_requires_confirmation_and_exact_arguments() {
+        for args in [
+            vec!["--webui-rkp-issue"],
+            vec!["--webui-rkp-issue", "auto"],
+            vec!["--webui-rkp-issue", "--confirm-issuance", "invalid"],
+            vec!["--webui-rkp-issue", "--confirm-issuance", "auto", "extra"],
+            vec!["--webui-rkp-list", "extra"],
+            vec!["--webui-rkp-import"],
+            vec!["--webui-rkp-import", "a"],
+            vec!["--webui-rkp-import", "a", "--confirm-replace", "extra"],
+            vec!["--rkp-native-worker"],
+            vec!["--rkp-native-worker", "/tmp", "extra"],
+        ] {
+            assert!(
+                handle_local_rkp_command(args.into_iter().map(str::to_owned))
+                    .unwrap()
+                    .is_err()
+            );
+        }
+        assert!(handle_local_rkp_command(["unknown".into()].into_iter()).is_none());
     }
 
     #[test]

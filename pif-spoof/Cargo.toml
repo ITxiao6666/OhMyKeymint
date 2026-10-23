@@ -13,6 +13,4 @@ libc = { version = "0.2", default-features = false }
 pif-common = { path = "../pif-common", features = ["soter-crypto"] }
 rsa = "0.9"
 serde_json = "1.0.151"
-serde = { version = "1.0", features = ["derive"] }
-soter-ta = { path = "../soter-ta" }
 zygisk-api = { path = "../third_party/zygisk-api" }

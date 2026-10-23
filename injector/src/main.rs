@@ -19,6 +19,7 @@ pub mod ipc;
 pub mod legacy;
 pub mod logging;
 pub mod parcel;
+mod soter_watch;
 pub mod sys;
 pub mod tracker;
 pub mod utils;
@@ -192,6 +193,18 @@ fn handle_webui_config_command() -> Option<Result<String, String>> {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--soter-watch") {
+        if std::env::args().count() != 2 {
+            std::process::exit(2);
+        }
+        logging::init_logger_fallback(LevelFilter::Info);
+        if let Err(error) = soter_watch::run() {
+            log::error!(target: "omk_soter_remote", "event=soter path=native_remote stage=watch state=failed error={error:#}");
+            eprintln!("native SOTER watcher failed: {error:#}");
+            std::process::exit(2);
+        }
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--auto-targets-watch") {
         if std::env::args().count() != 2 {
             eprintln!("--auto-targets-watch does not accept arguments");
@@ -319,6 +332,24 @@ pub extern "C" fn entry(handle: *const c_void) -> bool {
         return false;
     }
     true
+}
+
+/// # Safety
+/// Called only by the root native injector with two newly transferred, owned
+/// socketpair descriptors. They must be distinct and valid in this process.
+#[no_mangle]
+pub unsafe extern "C" fn soter_entry(_handle: *const c_void, auth: i32, calls: i32) -> bool {
+    use std::os::{fd::FromRawFd, unix::net::UnixStream};
+    logging::init_logger_fallback(LevelFilter::Info);
+    let auth = UnixStream::from_raw_fd(auth);
+    let calls = UnixStream::from_raw_fd(calls);
+    match hook::soter::initialize(auth, calls) {
+        Ok(()) => true,
+        Err(error) => {
+            error!("native SOTER entry failed: {error:#}");
+            false
+        }
+    }
 }
 
 #[cfg(test)]

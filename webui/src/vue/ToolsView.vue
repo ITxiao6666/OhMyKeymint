@@ -20,12 +20,14 @@ export type ToolEvent =
   | 'spoofPif'
   | 'clearGmsCache'
   | 'repairRkp'
+  | 'issueRkp'
 
 type BusyPatch = 'sync' | 'restore' | null
 
 const props = defineProps<{
   securityPatchBusy: BusyPatch
   maintenanceBusy: 'gms' | 'rkp' | null
+  rkpIssuanceBusy: boolean
 }>()
 
 const emit = defineEmits<{
@@ -38,6 +40,7 @@ const emit = defineEmits<{
   spoofPif: []
   clearGmsCache: []
   repairRkp: []
+  issueRkp: []
 }>()
 
 function runTool(event: ToolEvent): void {
@@ -51,6 +54,7 @@ function runTool(event: ToolEvent): void {
     case 'spoofPif': emit('spoofPif'); break
     case 'clearGmsCache': emit('clearGmsCache'); break
     case 'repairRkp': emit('repairRkp'); break
+    case 'issueRkp': emit('issueRkp'); break
   }
 }
 
@@ -96,6 +100,12 @@ const groups = [
         title: tr('tools_repair_rkp', 'Fix RKP'),
         summary: tr('tools_repair_rkp_desc', 'Run the vendor provisioning tool after confirming the persistent-write risk.'),
       },
+      {
+        event: 'issueRkp' as const,
+        icon: BankCards,
+        title: tr('tools_issue_rkp', 'Issue local RKP Keybox'),
+        summary: tr('tools_issue_rkp_desc', 'Use this device\'s RKP service to request a certificate for a locally generated key.'),
+      },
     ],
   },
   {
@@ -133,6 +143,7 @@ const groups = [
 
 function isBusy(event: ToolEvent): boolean {
   if (event === 'clearGmsCache' || event === 'repairRkp') return props.maintenanceBusy !== null
+  if (event === 'issueRkp') return props.rkpIssuanceBusy
   if (event === 'syncSecurityPatch') return props.securityPatchBusy !== null
   if (event === 'restoreSecurityPatch') return props.securityPatchBusy !== null
   return false
@@ -143,6 +154,7 @@ function isActiveBusy(event: ToolEvent): boolean {
     || (event === 'restoreSecurityPatch' && props.securityPatchBusy === 'restore')
     || (event === 'clearGmsCache' && props.maintenanceBusy === 'gms')
     || (event === 'repairRkp' && props.maintenanceBusy === 'rkp')
+    || (event === 'issueRkp' && props.rkpIssuanceBusy)
 }
 </script>
 

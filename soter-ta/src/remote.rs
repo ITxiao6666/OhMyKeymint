@@ -460,7 +460,10 @@ fn http_client(tls_insecure: bool) -> Result<reqwest::blocking::Client, String> 
 }
 
 pub fn forward(config: &Config, tx: u32, request: &Request) -> Result<Outcome, String> {
-    let body = request_body(config, tx, request, package_for_uid)?;
+    let body = request_body(config, tx, request, package_for_uid).inspect_err(|_| {
+        log::warn!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=request tx={tx} reason=unsupported_request");
+    })?;
     forward_body(config, tx, &body)
 }
 
@@ -472,12 +475,17 @@ pub fn forward_app(
     tx: u32,
     request: &Request,
 ) -> Result<Outcome, String> {
-    let mut body = request_body(config, tx, request, package_for_uid)?;
+    let mut body = request_body(config, tx, request, package_for_uid).inspect_err(|_| {
+        log::warn!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=request uid={caller_uid} tx={tx} reason=unsupported_request");
+    })?;
     if let Some(package) = package_for_uid(caller_uid) {
         body["caller_uid"] = json!(caller_uid);
         body["caller_pkg"] = json!(package);
         body["caller_pkg_src"] = json!("binder");
     } else {
+        log::warn!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=request uid={caller_uid} tx={tx} reason=caller_package_unresolved");
         return Err("Soter Binder caller no longer resolves to an application".into());
     }
     forward_body(config, tx, &body)
@@ -489,7 +497,11 @@ fn forward_body(config: &Config, tx: u32, body: &Value) -> Result<Outcome, Strin
         let timeout = deadline
             .checked_duration_since(Instant::now())
             .filter(|remaining| !remaining.is_zero())
-            .ok_or("SOTER relay deadline exceeded")?;
+            .ok_or("SOTER relay deadline exceeded")
+            .inspect_err(|_| {
+                log::warn!(target: "omk_soter_remote",
+                    "event=soter path=remote_transport stage=request tx={probe_tx} reason=deadline_exceeded");
+            })?;
         send_request(config, probe_tx, probe_body, timeout)
     })
 }
@@ -515,8 +527,12 @@ fn forward_with_ask_confirmation(
         return Ok(outcome);
     };
     let mut probe = body.clone();
+    log::info!(target: "omk_soter_remote",
+        "event=soter path=remote_transport stage=ask_confirmation state=start tx={tx}");
     probe["op"] = json!("has_ask_already");
     if !matches!(send(dispatch::TX_HAS_ASK, &probe), Ok(Outcome::Code(0))) {
+        log::info!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=ask_confirmation state=unconfirmed reason=has_ask_failed tx={tx}");
         return Ok(outcome);
     }
     probe["op"] = json!("export_ask_public_key");
@@ -527,9 +543,13 @@ fn forward_with_ask_confirmation(
     }) = send(dispatch::TX_EXPORT_ASK, &probe)
     {
         if usable_ask_export(&data, field, uid) {
+            log::info!(target: "omk_soter_remote",
+                "event=soter path=remote_transport stage=ask_confirmation state=confirmed tx={tx}");
             return Ok(Outcome::Code(0));
         }
     }
+    log::info!(target: "omk_soter_remote",
+        "event=soter path=remote_transport stage=ask_confirmation state=unconfirmed reason=export_not_usable tx={tx}");
     Ok(outcome)
 }
 
@@ -564,38 +584,110 @@ fn usable_ask_export(data: &[u8], field: i32, uid: u32) -> bool {
         .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
+// reqwest error Display/Debug can contain the endpoint and query parameters.
+// Only this closed set of category labels may be included in diagnostic logs.
+fn transport_error_kind(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else if error.is_builder() {
+        "request_build"
+    } else if error.is_redirect() {
+        "redirect"
+    } else if error.is_body() {
+        "body"
+    } else if error.is_decode() {
+        "decode"
+    } else if error.is_request() {
+        "request"
+    } else {
+        "transport"
+    }
+}
+
 fn send_request(
     config: &Config,
     tx: u32,
     body: &Value,
     timeout: Duration,
 ) -> Result<Outcome, String> {
+    let started = Instant::now();
+    log::info!(target: "omk_soter_remote",
+        "event=soter path=remote_transport stage=http_start tx={tx}");
     let url = format!("{}/api/soter/", config.url.trim_end_matches('/'));
-    let client = http_client(config.tls_insecure)?;
+    let client = http_client(config.tls_insecure).inspect_err(|_| {
+        log::warn!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=http_error tx={tx} reason=client_setup elapsed_ms={}",
+            started.elapsed().as_millis());
+    })?;
     let response = client
         .post(url)
         .header("X-Relay-Token", &config.token)
         .timeout(timeout)
         .json(body)
         .send()
-        .map_err(|error| format!("SOTER relay transport failed: {error}"))?;
+        .map_err(|error| {
+            log::warn!(target: "omk_soter_remote",
+                "event=soter path=remote_transport stage=http_error tx={tx} reason={} elapsed_ms={}",
+                transport_error_kind(&error), started.elapsed().as_millis());
+            format!("SOTER relay transport failed: {error}")
+        })?;
+    let status = response.status().as_u16();
     if !response.status().is_success() {
+        log::warn!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=http_error tx={tx} reason=http_status http_status={status} elapsed_ms={}",
+            started.elapsed().as_millis());
         return Err(format!("SOTER relay returned HTTP {}", response.status()));
     }
     let mut bytes = Vec::new();
     response
         .take(MAX_RESPONSE_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| format!("SOTER relay read failed: {error}"))?;
+        .map_err(|error| {
+            log::warn!(target: "omk_soter_remote",
+                "event=soter path=remote_transport stage=http_error tx={tx} reason=response_read error_kind={:?} http_status={status} elapsed_ms={}",
+                error.kind(), started.elapsed().as_millis());
+            format!("SOTER relay read failed: {error}")
+        })?;
     if bytes.len() as u64 > MAX_RESPONSE_BYTES {
+        log::warn!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=http_error tx={tx} reason=response_too_large http_status={status} elapsed_ms={}",
+            started.elapsed().as_millis());
         return Err("SOTER relay reply is too large".to_string());
     }
-    let reply: Value =
-        serde_json::from_slice(&bytes).map_err(|_| "SOTER relay reply is not JSON".to_string())?;
+    let reply: Value = serde_json::from_slice(&bytes).map_err(|_| {
+        log::warn!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=http_error tx={tx} reason=invalid_json http_status={status} elapsed_ms={}",
+            started.elapsed().as_millis());
+        "SOTER relay reply is not JSON".to_string()
+    })?;
     if reply.get("error").is_some() {
+        log::warn!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=http_error tx={tx} reason=relay_rejected http_status={status} elapsed_ms={}",
+            started.elapsed().as_millis());
         return Err("SOTER relay could not serve this operation".to_string());
     }
-    decode_reply(tx, &reply)
+    let outcome = decode_reply(tx, &reply).inspect_err(|_| {
+        let reason = if reply.get("local_only").and_then(Value::as_bool) == Some(true) {
+            "local_only_rejected"
+        } else {
+            "invalid_reply_contract"
+        };
+        log::warn!(target: "omk_soter_remote",
+            "event=soter path=remote_transport stage=http_error tx={tx} reason={reason} http_status={status} elapsed_ms={}",
+            started.elapsed().as_millis());
+    })?;
+    let code = match &outcome {
+        Outcome::Code(code)
+        | Outcome::Buffer { code, .. }
+        | Outcome::Init { code, .. }
+        | Outcome::Exception { code, .. } => *code,
+    };
+    log::info!(target: "omk_soter_remote",
+        "event=soter path=remote_transport stage=http_reply tx={tx} http_status={status} result={code} bytes={} elapsed_ms={}",
+        bytes.len(), started.elapsed().as_millis());
+    Ok(outcome)
 }
 
 #[cfg(test)]
@@ -604,6 +696,18 @@ mod tests {
     use std::io::Write;
     use std::net::TcpListener;
 
+    #[test]
+    fn transport_diagnostic_category_does_not_expose_error_url() {
+        let error = reqwest::blocking::Client::new()
+            .get("http://[")
+            .build()
+            .unwrap_err()
+            .with_url(
+                reqwest::Url::parse("https://secret-endpoint.invalid/?token=secret-token").unwrap(),
+            );
+        assert_eq!(error.url().unwrap().query(), Some("token=secret-token"));
+        assert_eq!(transport_error_kind(&error), "request_build");
+    }
     fn ask_document(uid: u32) -> Value {
         // A public-only structural fixture; no private key or hardware trust
         // is involved in checking whether an exported ASK is well formed.

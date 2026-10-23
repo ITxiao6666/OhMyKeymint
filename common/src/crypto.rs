@@ -258,6 +258,9 @@ impl AsCborValue for KeyMaterial {
         };
 
         match algo {
+            // Algorithm 1000 was used only by the removed remote KeyMint path.
+            // Reject old remote blobs instead of ever routing them locally.
+            1000 => Err(CborError::NonEnumValue),
             x if x == Algorithm::Aes as i32 => {
                 let raw_key = <Vec<u8>>::from_cbor_value(raw_key_value)?;
                 if opaque {
@@ -621,5 +624,20 @@ impl<T: AesCmac> Ckdf for T {
             ));
         }
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod legacy_key_material_tests {
+    use super::*;
+
+    #[test]
+    fn removed_remote_key_material_is_rejected() {
+        let encoded = cbor::value::Value::Array(vec![
+            cbor::value::Value::Integer(1000.into()),
+            cbor::value::Value::Bool(false),
+            cbor::value::Value::Null,
+        ]);
+        assert!(KeyMaterial::from_cbor_value(encoded).is_err());
     }
 }

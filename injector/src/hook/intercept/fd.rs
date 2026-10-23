@@ -369,13 +369,13 @@ where
     result
 }
 
-pub(super) struct BinderIoctlGuard {
+pub(in crate::hook) struct BinderIoctlGuard {
     pub(super) lifecycle: Arc<BinderFdLifecycle>,
     pinned_fd: c_int,
 }
 
 impl BinderIoctlGuard {
-    pub(super) fn begin(token: BinderFdToken) -> Result<Self, c_int> {
+    pub(in crate::hook) fn begin(token: BinderFdToken) -> Result<Self, c_int> {
         let registry = binder_fd_registry();
         let lifecycle = registry.by_fd.get(&token.fd).ok_or(libc::EBADF)?.clone();
         if lifecycle.connection != token.connection {
@@ -421,7 +421,7 @@ impl BinderIoctlGuard {
         })
     }
 
-    pub(super) fn fd(&self) -> c_int {
+    pub(in crate::hook) fn fd(&self) -> c_int {
         self.pinned_fd
     }
 }
@@ -443,6 +443,9 @@ impl Drop for BinderIoctlGuard {
         drop(state);
         drop(registry);
         if let Some(connection) = retired {
+            if crate::hook::soter::enabled() {
+                crate::hook::soter::retire_connection(connection);
+            }
             retire_binder_connection_publications(connection);
         }
         unsafe {

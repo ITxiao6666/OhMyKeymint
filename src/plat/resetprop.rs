@@ -122,6 +122,11 @@ pub fn bootstrap_privileged_helper() -> Result<()> {
     if HELPER.get().is_some() {
         return Ok(());
     }
+    // Binder's driver connection and receive mapping belong to one process.
+    // A child must initialize its own ProcessState, not inherit the singleton.
+    if rsbinder::ProcessState::is_initialized() {
+        bail!("privileged helper must be forked before Binder initialization");
+    }
 
     let command = match find_resetprop_command() {
         Ok(command) => Some(command),
@@ -773,6 +778,11 @@ fn helper_loop(stream: UnixStream, command: Option<ResetpropCommand>) -> Result<
 // nor the keystore2 injection thread has to run PackageManager commands.
 // The child binds its lifetime to this helper and is retried after an exit.
 fn start_auto_targets_monitor() {
+    start_injector_monitor("--auto-targets-watch", "omk-app-monitor");
+    start_injector_monitor("--soter-watch", "omk-soter-monitor");
+}
+
+fn start_injector_monitor(command: &'static str, name: &'static str) {
     let sibling = std::env::current_exe()
         .ok()
         .map(|path| path.with_file_name("inject"));
@@ -784,14 +794,14 @@ fn start_auto_targets_monitor() {
     let module_binary =
         std::path::PathBuf::from(format!("/data/adb/modules/oh_my_keymint/libs/{abi}/inject"));
     if let Err(error) = std::thread::Builder::new()
-        .name("omk-app-monitor".into())
+        .name(name.into())
         .spawn(move || loop {
             let binary = sibling
                 .as_ref()
                 .filter(|path| path.is_file())
                 .unwrap_or(&module_binary);
             match Command::new(binary)
-                .arg("--auto-targets-watch")
+                .arg(command)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .spawn()
@@ -799,12 +809,12 @@ fn start_auto_targets_monitor() {
                 Ok(mut child) => {
                     let _ = child.wait();
                 }
-                Err(error) => log::warn!("cannot start automatic app selection watcher: {error}"),
+                Err(error) => log::warn!("cannot start {name}: {error}"),
             }
             std::thread::sleep(std::time::Duration::from_secs(60));
         })
     {
-        log::warn!("cannot start automatic app selection monitor: {error}");
+        log::warn!("cannot start {name}: {error}");
     }
 }
 
@@ -825,6 +835,40 @@ fn parse_request(line: &str) -> Result<(String, String)> {
 mod tests {
     use super::*;
     use std::{cell::RefCell, collections::HashMap};
+
+    #[cfg(target_os = "android")]
+    #[test]
+    fn privileged_helper_refuses_fork_after_binder_init() {
+        const CHILD_ENV: &str = "OMK_HELPER_FORK_ORDER_TEST";
+        if std::env::var_os(CHILD_ENV).is_some() {
+            rsbinder::ProcessState::init_default().expect("Android Binder initialization");
+            let error = bootstrap_privileged_helper().unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "privileged helper must be forked before Binder initialization"
+            );
+            assert!(HELPER.get().is_none());
+            return;
+        }
+
+        // Isolate the process-global Binder singleton from parallel tests.
+        // The rejected bootstrap never creates a helper or touches OMK data.
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "plat::resetprop::tests::privileged_helper_refuses_fork_after_binder_init",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated Binder fork-order check failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     #[test]
     fn security_patch_commands_bypass_property_service_for_every_backend() {

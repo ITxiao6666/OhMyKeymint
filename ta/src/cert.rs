@@ -574,8 +574,8 @@ pub struct AttestationIds<'a> {
     model: Option<Cow<'a, [u8]>>,
 }
 
-impl AttestationIds<'_> {
-    fn new_from_key_params<'a>(keygen_params: &'a [KeyParam]) -> Result<AttestationIds<'a>, Error> {
+impl<'a> AttestationIds<'a> {
+    fn new_from_key_params<'b>(keygen_params: &'b [KeyParam]) -> Result<AttestationIds<'b>, Error> {
         let mut ids = AttestationIds::default();
         for param in keygen_params {
             match param {
@@ -775,15 +775,15 @@ impl<'a> AuthorizationList<'a> {
             match param {
                 KeyParam::RootOfTrust(encoded_rot) => rot = Some(encoded_rot),
                 KeyParam::AttestationApplicationId(app_id) => attest_app_id = Some(app_id.into()),
-                KeyParam::AttestationIdBrand(v) => ids.brand = Some(v.into()),
-                KeyParam::AttestationIdDevice(v) => ids.device = Some(v.into()),
-                KeyParam::AttestationIdProduct(v) => ids.product = Some(v.into()),
-                KeyParam::AttestationIdSerial(v) => ids.serial = Some(v.into()),
-                KeyParam::AttestationIdImei(v) => ids.imei = Some(v.into()),
-                KeyParam::AttestationIdSecondImei(v) => ids.imei2 = Some(v.into()),
-                KeyParam::AttestationIdMeid(v) => ids.meid = Some(v.into()),
-                KeyParam::AttestationIdManufacturer(v) => ids.manufacturer = Some(v.into()),
-                KeyParam::AttestationIdModel(v) => ids.model = Some(v.into()),
+                KeyParam::AttestationIdBrand(v) => set_decoded_id(&mut ids.brand, v)?,
+                KeyParam::AttestationIdDevice(v) => set_decoded_id(&mut ids.device, v)?,
+                KeyParam::AttestationIdProduct(v) => set_decoded_id(&mut ids.product, v)?,
+                KeyParam::AttestationIdSerial(v) => set_decoded_id(&mut ids.serial, v)?,
+                KeyParam::AttestationIdImei(v) => set_decoded_id(&mut ids.imei, v)?,
+                KeyParam::AttestationIdSecondImei(v) => set_decoded_id(&mut ids.imei2, v)?,
+                KeyParam::AttestationIdMeid(v) => set_decoded_id(&mut ids.meid, v)?,
+                KeyParam::AttestationIdManufacturer(v) => set_decoded_id(&mut ids.manufacturer, v)?,
+                KeyParam::AttestationIdModel(v) => set_decoded_id(&mut ids.model, v)?,
                 KeyParam::ModuleHash(hash) => module_hash = Some(hash.into()),
                 _ => auths.try_push(param).map_err(der_alloc_err)?,
             }
@@ -797,6 +797,13 @@ impl<'a> AuthorizationList<'a> {
             module_hash,
         })
     }
+}
+
+fn set_decoded_id<'a>(slot: &mut Option<Cow<'a, [u8]>>, value: Vec<u8>) -> Result<(), der::Error> {
+    if slot.replace(value.into()).is_some() {
+        return Err(der::ErrorKind::TagNumberInvalid.into());
+    }
+    Ok(())
 }
 
 /// Convert an error into a `der::Error` indicating allocation failure.

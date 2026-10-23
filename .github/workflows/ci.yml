@@ -143,9 +143,10 @@ jobs:
 
     - name: Install Android SDK
       uses: android-actions/setup-android@v4
-    - name: Install Android NDK
+    - name: Install Android NDK and bridge build tools
       run: |
         echo "y" | sdkmanager --install "ndk;29.0.14206865" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
+        echo "y" | sdkmanager --install "build-tools;35.0.0" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
     - name: Install protoc
       run: |
         sudo apt-get update

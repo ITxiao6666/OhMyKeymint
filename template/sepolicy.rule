@@ -2,6 +2,13 @@ allow keystore system_file unix_dgram_socket { getattr read recvfrom }
 allow system_file keystore unix_dgram_socket sendto
 allow keystore system_file file { execute getattr map read receive }
 
+# Native SoterServer payload and private inherited relay channels. No public
+# socket, package data access, permissive domain, or app network grant.
+allow { platform_app system_app } system_file unix_dgram_socket { getattr read recvfrom }
+allow system_file { platform_app system_app } unix_dgram_socket sendto
+allow { platform_app system_app } system_file unix_stream_socket { getattr read write getopt setopt shutdown }
+allow { platform_app system_app } system_file file { execute getattr map read receive }
+
 allow crash_dump keystore process *
 
 allow keystore default_android_service service_manager find

@@ -8,6 +8,7 @@ use std::{
     collections::HashSet,
     fs,
     os::unix::fs::PermissionsExt,
+    os::unix::process::CommandExt,
     path::Path,
     process::{Command, Stdio},
 };
@@ -75,9 +76,6 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.enabled && self.app_enabled {
-            bail!("Per-app Soter and global HAL takeover are mutually exclusive");
-        }
         pif_common::soter::validate_app_targets(&self.app_targets).map_err(anyhow::Error::msg)?;
         validate_text("url", &self.url, MAX_URL_BYTES, true)?;
         validate_text("token", &self.token, MAX_TOKEN_BYTES, true)?;
@@ -297,7 +295,7 @@ pub fn state_json() -> Result<String> {
 }
 
 pub fn is_enabled() -> Result<bool> {
-    // Exclusivity follows HAL takeover, including local software-TA mode.
+    // Tencent Beta conflicts with either HAL takeover mode.
     // Prepared relay settings alone do not enable the Qualcomm service.
     let config = Config::load()?;
     Ok(config.enabled || config.app_enabled)
@@ -371,6 +369,31 @@ fn refresh_watchdog(config_enabled: bool, require_stock: bool) -> Result<()> {
     Ok(())
 }
 
+fn refresh_watchdog_async_disable() -> Result<bool> {
+    let candidates = [
+        "/data/adb/modules/oh_my_keymint/soterta.sh",
+        "/data/adb/modules/oh_my_keymint/soterta/soterta.sh",
+    ];
+    let Some(script) = candidates.iter().find(|path| Path::new(path).is_file()) else {
+        return Ok(false);
+    };
+    Command::new(script)
+        .arg("reconcile")
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("failed to schedule Soter HAL restoration with {script}"))?;
+    // Dropping Child does not terminate it on Unix. Null stdio prevents the
+    // helper's RPC pipes from keeping the WebUI command alive.
+    Ok(true)
+}
+
+fn should_restore_soter_async(previous: &Config, current: &Config) -> bool {
+    previous.enabled && !current.enabled && !current.app_enabled
+}
+
 fn stock_hal_restored(report: &str) -> bool {
     // The script can exit successfully after a lock conflict or a timeout.
     // Require its actual snapshot, not just its process exit status.
@@ -393,9 +416,17 @@ pub fn save(config: Config) -> Result<()> {
     // Per-app selections have a separate delta API. A dialog opened earlier
     // must not overwrite a newer app selection when saving relay preferences.
     config.app_targets.clone_from(&previous.app_targets);
-    // Restore the native service before exposing the per-app mode. The
-    // per-app hook must never run while the global software HAL still owns it.
+    save_locked(&previous, &config)
+}
+
+// Both the relay dialog and an app opt-in use the same serialized transition.
+// The caller holds CONFIG_DIR's lock through persistence and host refresh.
+fn save_locked(previous: &Config, config: &Config) -> Result<()> {
+    config.validate()?;
+    // Restore the native service before exposing app-only mode. App-scoped
+    // interception can coexist with the software HAL when global mode stays on.
     let restore_first = config.app_enabled
+        && !config.enabled
         && (previous.enabled
             || Path::new(root_path!("data/soterta/hal-taken-over")).exists()
             || crate::process_pid(&["soterta-svc", "soter-svc"], None).is_some());
@@ -408,12 +439,21 @@ pub fn save(config: Config) -> Result<()> {
         write_software_flag(false)?;
         refresh_watchdog(false, true)?;
     }
-    write_config(&config)?;
+    write_config(config)?;
     write_software_flag(config.enabled)?;
-    if previous.enabled != config.enabled && !restore_first {
+    let async_restore = should_restore_soter_async(previous, config);
+    let async_scheduled = if async_restore {
+        // The HAL stop/start loop can take tens of seconds on some devices.
+        // The desired state is already durable in the flag; let the watchdog
+        // converge to that current state after returning to the WebUI.
+        refresh_watchdog_async_disable()?
+    } else if previous.enabled != config.enabled && !restore_first {
         refresh_watchdog(config.enabled, false)?;
-    }
-    if host_mode_changed(&previous, &config) {
+        false
+    } else {
+        false
+    };
+    if host_mode_changed(previous, config) && !async_scheduled {
         crate::utils::refresh_soter_host()?;
     }
     Ok(())
@@ -471,31 +511,57 @@ impl AppTargetChange {
     }
 }
 
-fn apply_app_change(config: &mut Config, change: &AppTargetChange) -> Result<()> {
+fn apply_app_change(
+    config: &mut Config,
+    change: &AppTargetChange,
+    beta_enabled: bool,
+) -> Result<()> {
     if pif_common::soter::parse_app_target(&change.target).is_none() {
         bail!("invalid Soter application target");
     }
-    config.app_targets.retain(|target| target != &change.target);
+    crate::ensure_soter_features_are_exclusive(
+        change.enabled,
+        Ok(beta_enabled),
+        "Per-app remote Soter",
+        "Tencent Soter Beta",
+    )?;
+    // Prepare and validate the whole change before touching the caller's state.
+    // An opt-in is the complete activation action, not a dormant saved target.
+    let mut updated = config.clone();
+    updated
+        .app_targets
+        .retain(|target| target != &change.target);
     if change.enabled {
-        config.app_targets.push(change.target.clone());
+        updated = updated.with_webui_defaults();
+        updated.remote_enabled = true;
+        updated.app_enabled = true;
+        updated.app_targets.push(change.target.clone());
     }
-    config.app_targets.sort();
-    config.validate()
+    updated.app_targets.sort();
+    updated.validate()?;
+    *config = updated;
+    Ok(())
 }
 
-/// Saves only an application opt-in; never enables a master or touches services.
+/// Activates remote-only app routing on opt-in; opt-out only removes that target.
 pub fn save_app_target(change: AppTargetChange) -> Result<String> {
     if unsafe { libc::getuid() } != 0 {
         bail!("Soter app settings require root");
     }
+    let beta_enabled = change.enabled && crate::soter_beta::is_enabled()?;
     ensure_config_dir()?;
     let lock = fs::File::open(CONFIG_DIR)?;
     lock.lock()
         .context("failed to lock Soter configuration directory")?;
-    let mut config = Config::load()?.with_webui_defaults();
-    apply_app_change(&mut config, &change)?;
-    write_config(&config)?;
-    serde_json::to_string(&config).context("failed to serialize Soter app settings")
+    let previous = Config::load()?;
+    let mut config = previous.clone().with_webui_defaults();
+    apply_app_change(&mut config, &change, beta_enabled)?;
+    save_locked(&previous, &config)?;
+    let persisted = Config::load()?.with_webui_defaults();
+    if persisted != config {
+        bail!("Soter app settings read-back did not match the requested state");
+    }
+    serde_json::to_string(&persisted).context("failed to serialize Soter app settings")
 }
 
 #[cfg(test)]
@@ -532,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn app_selection_is_independent_per_user_and_never_enables_a_master() {
+    fn app_selection_activates_remote_mode_and_remains_independent_per_user() {
         let mut config = Config::default().with_webui_defaults();
         for target in ["com.example.wallet@10", "com.example.wallet@0"] {
             let change = AppTargetChange {
@@ -543,6 +609,7 @@ mod tests {
             apply_app_change(
                 &mut config,
                 &AppTargetChange::parse_base64(&encoded).unwrap(),
+                false,
             )
             .unwrap();
         }
@@ -550,27 +617,168 @@ mod tests {
             config.app_targets,
             ["com.example.wallet@0", "com.example.wallet@10"]
         );
-        assert!(!config.enabled && !config.remote_enabled && !config.app_enabled);
+        assert!(!config.enabled && config.remote_enabled && config.app_enabled);
         apply_app_change(
             &mut config,
             &AppTargetChange {
                 target: "com.example.wallet@0".into(),
                 enabled: false,
             },
+            false,
         )
         .unwrap();
         assert_eq!(config.app_targets, ["com.example.wallet@10"]);
+        assert!(!config.enabled && config.remote_enabled && config.app_enabled);
         assert_eq!(Config::parse_file(&file_contents(&config)).unwrap(), config);
     }
 
     #[test]
-    fn app_and_global_takeover_cannot_be_enabled_together() {
+    fn app_opt_in_preserves_global_takeover_and_relay_identity() {
+        let previous = Config {
+            enabled: true,
+            url: "https://relay.example".into(),
+            token: "custom-token".into(),
+            device_id: "custom-device".into(),
+            uid_map: "10123=10456".into(),
+            tls_insecure: true,
+            app_targets: vec!["com.example.other@10".into()],
+            ..Config::default()
+        };
+        let mut config = previous.clone();
+        apply_app_change(
+            &mut config,
+            &AppTargetChange {
+                target: "com.example.wallet@0".into(),
+                enabled: true,
+            },
+            false,
+        )
+        .unwrap();
+        assert!(config.enabled && config.remote_enabled && config.app_enabled);
+        assert!(host_mode_changed(&previous, &config));
+        assert_eq!(config.url, previous.url);
+        assert_eq!(config.token, previous.token);
+        assert_eq!(config.device_id, previous.device_id);
+        assert_eq!(config.uid_map, previous.uid_map);
+        assert_eq!(config.tls_insecure, previous.tls_insecure);
+        assert_eq!(
+            config.app_targets,
+            ["com.example.other@10", "com.example.wallet@0"]
+        );
+        let active = config.clone();
+        apply_app_change(
+            &mut config,
+            &AppTargetChange {
+                target: "com.example.wallet@0".into(),
+                enabled: true,
+            },
+            false,
+        )
+        .unwrap();
+        assert_eq!(config, active);
+        assert!(!host_mode_changed(&active, &config));
+    }
+
+    #[test]
+    fn app_opt_in_fills_defaults_and_rejects_invalid_or_conflicting_changes() {
+        let change = AppTargetChange {
+            target: "com.example.wallet@0".into(),
+            enabled: true,
+        };
+        let mut config = Config::default();
+        apply_app_change(&mut config, &change, false).unwrap();
+        assert_eq!(config.url, DEFAULT_RELAY_URL);
+        assert_eq!(config.token, DEFAULT_RELAY_TOKEN);
+        assert_eq!(config.device_id, DEFAULT_RELAY_DEVICE_ID);
+        for (mut rejected, beta) in [
+            (Config::default(), true),
+            (
+                Config {
+                    url: "file:///invalid".into(),
+                    ..Config::default()
+                },
+                false,
+            ),
+        ] {
+            let unchanged = rejected.clone();
+            assert!(apply_app_change(&mut rejected, &change, beta).is_err());
+            assert_eq!(rejected, unchanged);
+        }
+    }
+
+    #[test]
+    fn app_opt_out_preserves_modes_and_other_targets_even_with_beta_enabled() {
+        for (global, remote, app) in [
+            (false, false, false),
+            (false, true, true),
+            (true, false, false),
+            (true, true, true),
+        ] {
+            let previous = Config {
+                enabled: global,
+                remote_enabled: remote,
+                app_enabled: app,
+                app_targets: vec![
+                    "com.example.wallet@0".into(),
+                    "com.example.wallet@10".into(),
+                ],
+                ..Config::default().with_webui_defaults()
+            };
+            let mut config = previous.clone();
+            apply_app_change(
+                &mut config,
+                &AppTargetChange {
+                    target: "com.example.wallet@0".into(),
+                    enabled: false,
+                },
+                true,
+            )
+            .unwrap();
+            let mut expected = previous.clone();
+            expected.app_targets = vec!["com.example.wallet@10".into()];
+            assert_eq!(config, expected);
+            assert!(!host_mode_changed(&previous, &config));
+        }
+    }
+
+    #[test]
+    fn app_and_global_takeover_can_be_enabled_together() {
         let config = Config {
+            enabled: true,
+            remote_enabled: true,
+            app_enabled: true,
+            app_targets: vec!["com.example.wallet@0".into()],
+            url: DEFAULT_RELAY_URL.into(),
+            token: DEFAULT_RELAY_TOKEN.into(),
+            device_id: DEFAULT_RELAY_DEVICE_ID.into(),
+            ..Config::default()
+        };
+        config.validate().unwrap();
+        let decoded = Config::parse(&serde_json::to_string(&config).unwrap()).unwrap();
+        assert_eq!(decoded, config);
+    }
+
+    #[test]
+    fn only_full_software_ta_shutdown_is_scheduled_asynchronously() {
+        let enabled = Config {
             enabled: true,
             app_enabled: true,
             ..Config::default()
         };
-        assert!(config.validate().is_err());
+        let fully_disabled = Config::default();
+        assert!(should_restore_soter_async(&enabled, &fully_disabled));
+
+        let app_only = Config {
+            enabled: false,
+            app_enabled: true,
+            ..Config::default()
+        };
+        assert!(!should_restore_soter_async(&enabled, &app_only));
+        assert!(!should_restore_soter_async(&app_only, &fully_disabled));
+        assert!(!should_restore_soter_async(
+            &fully_disabled,
+            &fully_disabled
+        ));
     }
 
     #[test]
@@ -778,30 +986,36 @@ mod tests {
         let flag_path = directory.path().join("enabled");
         for enabled in [false, true] {
             for remote_enabled in [false, true] {
-                let config = Config {
-                    enabled,
-                    remote_enabled,
-                    url: "https://relay.example.test/base".into(),
-                    token: "custom-token".into(),
-                    device_id: "custom-device".into(),
-                    tls_insecure: true,
-                    uid_map: "10001=10002".into(),
-                    app_enabled: false,
-                    app_targets: vec![],
-                };
-                let payload = BASE64_STANDARD.encode(serde_json::to_string(&config).unwrap());
-                let transported = Config::parse_base64(&payload).unwrap();
-                assert_eq!(transported, config);
-                fs::write(&config_path, file_contents(&transported)).unwrap();
-                if transported.enabled {
-                    fs::write(&flag_path, b"1\n").unwrap();
-                } else if flag_path.exists() {
-                    fs::remove_file(&flag_path).unwrap();
+                for app_enabled in [false, true] {
+                    let config = Config {
+                        enabled,
+                        remote_enabled,
+                        url: "https://relay.example.test/base".into(),
+                        token: "custom-token".into(),
+                        device_id: "custom-device".into(),
+                        tls_insecure: true,
+                        uid_map: "10001=10002".into(),
+                        app_enabled,
+                        app_targets: if app_enabled {
+                            vec!["com.example.wallet@0".into()]
+                        } else {
+                            vec![]
+                        },
+                    };
+                    let payload = BASE64_STANDARD.encode(serde_json::to_string(&config).unwrap());
+                    let transported = Config::parse_base64(&payload).unwrap();
+                    assert_eq!(transported, config);
+                    fs::write(&config_path, file_contents(&transported)).unwrap();
+                    if transported.enabled {
+                        fs::write(&flag_path, b"1\n").unwrap();
+                    } else if flag_path.exists() {
+                        fs::remove_file(&flag_path).unwrap();
+                    }
+                    assert_eq!(
+                        Config::load_from_paths(&config_path, &flag_path).unwrap(),
+                        config
+                    );
                 }
-                assert_eq!(
-                    Config::load_from_paths(&config_path, &flag_path).unwrap(),
-                    config
-                );
             }
         }
     }

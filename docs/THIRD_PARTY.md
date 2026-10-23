@@ -152,8 +152,19 @@ The Rust Binder entry point's dual transaction layouts follow
 ASK confirmation follow `91a896a8689e8ba8226aa05ba28e00b75c09d1c0`. The staged
 public-material diagnostics reference `ba75a57fd92749d6f52ad49065956dc5378c4af3`
 (`b-side/source/src/soter/flow.rs`). OMK resolves request layouts per call and
-keeps diagnostics strictly read-only; it does not import the upstream mutation,
-automatic reset, Keybox forwarding or KeyMint forwarding flows.
+keeps these SOTER diagnostics strictly read-only; the SOTER path does not import
+the upstream mutation, automatic reset or Keybox forwarding flows.
+
+The independent per-app native SOTER forwarding path references the HAL
+contracts in `a-side/source/ommega-injector/src/hook/soter.rs` and
+`parcel/reply.rs` at Ommega revision
+`c6172dc553543aa8eea1b7e03cd50c2ff6f1efb1` (AGPL-3.0-or-later).
+OMK uses its own ptrace loader and root broker with exact Binder caller scopes,
+owned HIDL reply buffers and no local fallback or guessed caller identity.
+The Zygisk Tencent Beta handler is separate and does not provide this transport.
+Structured forwarding diagnostics also reference that revision's `log_call`
+and root event reporting. OMK uses bounded, typed metadata on its existing
+private channel; it does not copy alias, key, session or challenge logging.
 
 ## Vendor RKP repair
 
@@ -165,6 +176,27 @@ explicit persistent-write confirmation and uses only the device's existing
 Keybox material or RKP CSR-format change is included. The output is a vendor
 tool completion report, not proof of successful Google provisioning.
 
+## Local device RKP issuer
+
+The local RKP protocol, CBOR/DICE verification, native KeymasterUtils ABI and
+V1 Java bridge are adapted from
+[eltavine/Duck-ToolBox](https://github.com/eltavine/Duck-ToolBox/tree/7567a8e084d31b1a6da3541bf0e8e2692ee45e0a)
+at revision `7567a8e084d31b1a6da3541bf0e8e2692ee45e0a` (MIT).
+Relevant upstream paths are `crates/duck-rkp-device/src/` and
+`crates/duck-rkp/src/{cbor,verify}`. The V1 PureSoft MAC/AIDL construction also
+derives from `LazyBonesLZY/rkp-v1-oracle` revision `b28480c` (MIT), as credited
+by Duck. Both notices are shipped in
+`template/THIRD_PARTY_LICENSES/Duck-ToolBox.txt` and `rkp-v1-oracle.txt`.
+OMK's implementation is in `src/local_rkp/`, `src/rkp_v1_bridge.rs`,
+`src/local_rkp_artifacts.rs` and `runtime/rkp/RkpV1Bridge.java`.
+
+OMK retains the device-backed V2 native, V1 AIDL and V1 native request paths.
+It provides explicit issuance/import confirmations, private OMK-local storage,
+bounded fixed-endpoint HTTP requests and strict issued-chain validation using
+OMK's existing Google root pins. It does not copy Duck's simulated-device
+issuance, seed/identity storage, arbitrary endpoint selection or automatic
+import behavior. The Java bridge contains no network or private-key logic.
+
 ## Native HTTPS client
 
 The security-patch and PIF fingerprint WebUI actions use the Rust
@@ -175,6 +207,6 @@ under the MIT or Apache License 2.0. Its HTTPS implementation uses
 Apache-2.0/ISC/MIT and ISC terms respectively, together with
 [webpki-roots](https://github.com/rustls/webpki-roots), licensed under
 CDLA-Permissive-2.0. These dependencies are built into the existing `keymint`
-helper; no device-provided `curl` or `wget` is used. Each action has a separate
-exact host and path allowlist, and redirects are validated before another
-request is made.
+helper; no device-provided `curl` or `wget` is used. The security-patch and PIF
+actions each have a separate exact host and path allowlist, and redirects are
+validated before another request is made.

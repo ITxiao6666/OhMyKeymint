@@ -82,6 +82,7 @@ async function apply(): Promise<void> {
   busy.value = true
   errorMessage.value = ''
   try {
+    await afterPaint()
     await props.cli.setSoterBeta(enabled.value)
     savedEnabled.value = enabled.value
     emit('notify', tr('soter_beta_applied', 'Settings saved; SoterServer will reconnect using the selected mode. No device reboot is needed.'))

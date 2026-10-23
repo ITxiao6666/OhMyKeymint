@@ -1389,6 +1389,94 @@ pub fn install_keybox_xml(contents: &[u8]) -> Result<()> {
     write_keybox_xml(KEYBOX_PATH, xml)
 }
 
+/// Strict acceptance for a newly issued local RKP artifact. Ordinary Keybox import
+/// keeps its existing compatibility semantics; only the new issuer uses this gate.
+pub(crate) fn validate_issued_rkp_xml(contents: &[u8]) -> Result<()> {
+    validate_issued_rkp_xml_with_roots(
+        contents,
+        &[
+            GOOGLE_HARDWARE_ROOT_SPKI_DER.as_slice(),
+            GOOGLE_EC_ROOT_SPKI_DER.as_slice(),
+        ],
+    )
+}
+
+fn validate_issued_rkp_xml_with_roots(contents: &[u8], roots: &[&[u8]]) -> Result<()> {
+    validate_keybox_xml(contents)
+        .map_err(|_| anyhow!("issued RKP Keybox failed private-key/leaf validation"))?;
+    let text = str::from_utf8(contents).context("issued RKP Keybox is not UTF-8")?;
+    let keybox = KeyBox::from_xml_str(text).map_err(|_| anyhow!("invalid issued RKP Keybox"))?;
+    if keybox.rsa_info.is_some() {
+        bail!("issued RKP result must contain only its generated EC key");
+    }
+    let info = keybox
+        .ec_info
+        .as_ref()
+        .context("issued RKP result has no EC key")?;
+    if !(2..=8).contains(&info.chain.len()) {
+        bail!("invalid issued RKP certificate count");
+    }
+    let mut certificates = Vec::new();
+    for item in &info.chain {
+        let (rest, cert) = parse_x509_certificate(&item.encoded_certificate)
+            .map_err(|_| anyhow!("invalid issued RKP X.509 certificate"))?;
+        if !rest.is_empty() || !cert.validity().is_valid() {
+            bail!("issued RKP certificate is expired, not yet valid or malformed");
+        }
+        certificates.push(cert);
+    }
+    let root = certificates.last().context("missing RKP root")?;
+    if root.subject() != root.issuer()
+        || root.verify_signature(None).is_err()
+        || !roots.contains(&root.public_key().raw)
+    {
+        bail!("issued RKP chain has no valid pinned Google root");
+    }
+    for (index, pair) in certificates.windows(2).enumerate() {
+        let child = &pair[0];
+        let issuer = &pair[1];
+        if child.issuer() != issuer.subject()
+            || child.verify_signature(Some(issuer.public_key())).is_err()
+        {
+            bail!("issued RKP certificate signature or issuer mismatch");
+        }
+        let constraints = issuer
+            .basic_constraints()
+            .map_err(|_| anyhow!("invalid RKP CA constraints"))?
+            .context("issued RKP issuer is not a CA")?;
+        if !constraints.value.ca {
+            bail!("issued RKP issuer is not a CA");
+        }
+        if let Some(limit) = constraints.value.path_len_constraint {
+            // RFC 5280 path length excludes the target certificate, including
+            // an attestation-signing target with its CA bit set.
+            let intermediate_cas = certificates[1..=index]
+                .iter()
+                .filter(|cert| {
+                    cert.subject() != cert.issuer()
+                        && cert
+                            .basic_constraints()
+                            .ok()
+                            .flatten()
+                            .is_some_and(|bc| bc.value.ca)
+                })
+                .count();
+            if intermediate_cas > limit as usize {
+                bail!("issued RKP chain exceeds CA path length");
+            }
+        }
+        if let Some(usage) = issuer
+            .key_usage()
+            .map_err(|_| anyhow!("invalid RKP key usage"))?
+        {
+            if !usage.value.key_cert_sign() {
+                bail!("RKP issuer is not permitted to sign certificates");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn write_bundled_keybox(path: &str) -> Result<()> {
     write_keybox_xml(path, BUNDLED_KEYBOX_XML)
 }
@@ -2123,6 +2211,82 @@ w1IdYIg2Wxg7yHcQZemFQg==
             ],
             root_spki,
         )
+    }
+
+    fn issued_fixture(root_ca: bool, expired: bool, signing_usage: bool) -> (String, Vec<u8>) {
+        let mut root_params = CertificateParams::new(Vec::new()).unwrap();
+        root_params
+            .distinguished_name
+            .push(DnType::CommonName, "Issuance test root");
+        root_params.is_ca = if root_ca {
+            IsCa::Ca(BasicConstraints::Constrained(0))
+        } else {
+            IsCa::NoCa
+        };
+        root_params.key_usages = vec![if signing_usage {
+            rcgen::KeyUsagePurpose::KeyCertSign
+        } else {
+            rcgen::KeyUsagePurpose::DigitalSignature
+        }];
+        let root_key = KeyPair::generate().unwrap();
+        let root = root_params.self_signed(&root_key).unwrap();
+        let (_, parsed) = parse_x509_certificate(root.der()).unwrap();
+        let root_spki = parsed.public_key().raw.to_vec();
+        let issuer = Issuer::new(root_params, root_key);
+        let mut leaf_params = CertificateParams::new(Vec::new()).unwrap();
+        leaf_params
+            .distinguished_name
+            .push(DnType::CommonName, "Issued attestation key");
+        leaf_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+        if expired {
+            leaf_params.not_before = rcgen::date_time_ymd(2000, 1, 1);
+            leaf_params.not_after = rcgen::date_time_ymd(2001, 1, 1);
+        }
+        let leaf_key = KeyPair::generate().unwrap();
+        let leaf = leaf_params.signed_by(&leaf_key, &issuer).unwrap();
+        let xml = format!(
+            "<AndroidAttestation><NumberOfKeyboxes>1</NumberOfKeyboxes><Keybox DeviceID=\"test\"><Key algorithm=\"ecdsa\"><PrivateKey format=\"pem\">{}</PrivateKey><CertificateChain><NumberOfCertificates>2</NumberOfCertificates><Certificate format=\"pem\">{}</Certificate><Certificate format=\"pem\">{}</Certificate></CertificateChain></Key></Keybox></AndroidAttestation>",
+            leaf_key.serialize_pem(), leaf.pem(), root.pem(),
+        );
+        (xml, root_spki)
+    }
+
+    #[test]
+    fn issued_chain_accepts_matching_key_and_trusted_ca() {
+        let (xml, root) = issued_fixture(true, false, true);
+        validate_issued_rkp_xml_with_roots(xml.as_bytes(), &[&root]).unwrap();
+        // Tests never add their generated root to the production trust set.
+        assert!(validate_issued_rkp_xml(xml.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn issued_chain_rejects_expired_non_ca_and_wrong_usage() {
+        for (ca, expired, usage) in [
+            (true, true, true),
+            (false, false, true),
+            (true, false, false),
+        ] {
+            let (xml, root) = issued_fixture(ca, expired, usage);
+            assert!(validate_issued_rkp_xml_with_roots(xml.as_bytes(), &[&root]).is_err());
+        }
+    }
+
+    #[test]
+    fn issued_chain_rejects_signature_tampering_and_key_mismatch() {
+        let (xml, root) = issued_fixture(true, false, true);
+        let mut keybox = KeyBox::from_xml_str(&xml).unwrap();
+        let leaf = &mut keybox.ec_info.as_mut().unwrap().chain[0].encoded_certificate;
+        *leaf.last_mut().unwrap() ^= 1;
+        assert!(
+            validate_issued_rkp_xml_with_roots(keybox.to_xml_string().as_bytes(), &[&root])
+                .is_err()
+        );
+        let other_key = KeyPair::generate().unwrap().serialize_pem();
+        let start = xml.find("-----BEGIN PRIVATE KEY-----").unwrap();
+        let end =
+            xml.find("-----END PRIVATE KEY-----").unwrap() + "-----END PRIVATE KEY-----".len();
+        let mismatch = format!("{}{}{}", &xml[..start], other_key, &xml[end..]);
+        assert!(validate_issued_rkp_xml_with_roots(mismatch.as_bytes(), &[&root]).is_err());
     }
 
     fn generated_droid_ca2_chain() -> (Vec<keymint::Certificate>, Vec<u8>) {

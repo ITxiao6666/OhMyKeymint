@@ -142,19 +142,9 @@ impl ZygiskModule for PifSpoofModule {
                     }
                 }
                 Ok(Ok(false)) => {
-                    match soter::prepare_relay(&mut api) {
-                        Ok(()) => {
-                            // Once installation is attempted, native callbacks
-                            // can retain this library even if PLT commit fails.
-                            if let Err(error) = soter::install(&mut api) {
-                                soter::log(&format!("Per-app Soter hook unavailable: {error}"));
-                            }
-                        }
-                        Err(error) => {
-                            soter::log(&format!("Per-app Soter companion unavailable: {error}"));
-                            api.set_option(ZygiskOption::DlCloseModuleLibrary);
-                        }
-                    }
+                    // Native HAL forwarding belongs to the independent ptrace
+                    // injector. Zygisk is exclusively the opt-in Beta fixture.
+                    api.set_option(ZygiskOption::DlCloseModuleLibrary);
                 }
                 result => {
                     soter::log(&format!("Soter mode configuration unavailable: {result:?}"));
@@ -1635,9 +1625,7 @@ fn companion(stream: &mut std::os::unix::net::UnixStream) {
         .and_then(|()| stream.write_all(&frame))
     {
         log_android(&format!("PIF companion write failed: {error}"));
-        return;
     }
-    soter::relay::companion(stream);
 }
 
 fn load_profile_for_companion() -> Result<Vec<u8>, String> {

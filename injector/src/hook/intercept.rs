@@ -48,12 +48,28 @@ use crate::hook::binder::{LocalBinderTarget, NativeBinderRetirement};
 mod fd;
 mod ioctl;
 
+pub(super) use fd::BinderIoctlGuard;
 use fd::*;
 pub(super) use fd::{
     new_close, new_dup, new_dup2, new_dup3, new_fcntl, new_fdsan_close,
     start_operation_publication_worker, wake_operation_publication_worker,
 };
 pub(super) use ioctl::new_ioctl;
+
+pub(super) fn native_submission(fd: c_int, reply: bool, expects_reply: bool) {
+    ioctl::read::record_transaction_completion(fd, reply, expects_reply, None);
+}
+pub(super) fn native_read(fd: c_int, command: u32) {
+    ioctl::read::observe_native_completion(fd, command);
+}
+pub(super) fn native_pending(connection: BinderStateKey) -> bool {
+    PENDING_TRANSACTION_COMPLETIONS.with(|pending| {
+        pending
+            .borrow()
+            .get(&connection)
+            .is_some_and(|queue| !queue.is_empty())
+    })
+}
 
 struct PendingTransactionCompletion {
     is_reply: bool,
@@ -128,7 +144,7 @@ fn copy_from_process(address: usize, destination: &mut [u8]) -> bool {
     crate::sys::read_process_exact(Pid::this(), address, destination).is_ok()
 }
 
-fn copy_to_process(address: usize, source: &[u8]) -> bool {
+pub(super) fn copy_to_process(address: usize, source: &[u8]) -> bool {
     crate::sys::write_process_exact(Pid::this(), address, source).is_ok()
 }
 
@@ -139,7 +155,7 @@ fn zeroed_buffer(size: usize) -> Result<Vec<u8>, c_int> {
     Ok(buffer)
 }
 
-fn copy_process_buffer(address: usize, size: usize) -> Result<Vec<u8>, c_int> {
+pub(super) fn copy_process_buffer(address: usize, size: usize) -> Result<Vec<u8>, c_int> {
     let mut buffer = zeroed_buffer(size)?;
     copy_from_process(address, &mut buffer)
         .then_some(buffer)
@@ -167,7 +183,7 @@ fn copy_process_c_string(address: usize) -> Option<String> {
     None
 }
 
-fn copy_process_value(value: *const binder_write_read) -> Option<binder_write_read> {
+pub(super) fn copy_process_value(value: *const binder_write_read) -> Option<binder_write_read> {
     if value.is_null() {
         return None;
     }
@@ -181,7 +197,7 @@ fn copy_process_value(value: *const binder_write_read) -> Option<binder_write_re
     copy_from_process(value as usize, bytes).then_some(copy)
 }
 
-fn write_process_value<T: Copy>(destination: *mut T, value: &T) -> bool {
+pub(super) fn write_process_value<T: Copy>(destination: *mut T, value: &T) -> bool {
     let bytes =
         unsafe { std::slice::from_raw_parts((value as *const T).cast::<u8>(), size_of::<T>()) };
     copy_to_process(destination as usize, bytes)
@@ -433,6 +449,9 @@ fn binder_state_key(fd: c_int) -> BinderStateKey {
 }
 
 fn reset_current_thread_binder_state(connection: BinderStateKey) {
+    if super::soter::enabled() {
+        super::soter::reset_thread(connection);
+    }
     ioctl::abort_prepared_bc_replies_for_connection(connection);
     clear_binder_fd_thread_state(connection);
     PENDING_IOCTL_COPYBACKS.with(|pending| {
@@ -457,6 +476,9 @@ fn forget_current_thread_binder_fd(fd: c_int, retired: Option<BinderStateKey>) {
     if let Some(connection) = retired {
         reset_current_thread_binder_state(connection);
         if binder_connection_cleanup_ready(connection) {
+            if super::soter::enabled() {
+                super::soter::retire_connection(connection);
+            }
             retire_binder_connection_publications(connection);
         }
     }
@@ -496,7 +518,7 @@ fn cleanup_retired_current_thread_connections() {
     }
 }
 
-fn synchronize_binder_fd_generation(fd: c_int) -> Result<BinderFdToken, BinderFdToken> {
+pub(super) fn synchronize_binder_fd_generation(fd: c_int) -> Result<BinderFdToken, BinderFdToken> {
     let token = binder_fd_token(fd);
     let previous = OBSERVED_BINDER_FD_TOKENS.with(|observed| observed.borrow().get(&fd).copied());
     if let Some(previous) = previous.filter(|previous| *previous != token) {

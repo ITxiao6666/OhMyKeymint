@@ -152,10 +152,10 @@ function diagnosticStatusLabel(status: string, hardware = false): string {
     case 'configured': return tr('home_diag_configured', 'Configured')
     case 'disabled': return tr('home_diag_disabled', 'Disabled')
     case 'available': return hardware
-      ? tr('home_diag_device_supported', 'Device supported')
+      ? tr('home_diag_device_supported', 'Hardware supported')
       : tr('home_diag_available', 'Available')
     case 'unavailable': return hardware
-      ? tr('home_diag_device_unsupported', 'Device not supported')
+      ? tr('home_diag_device_unsupported', 'Hardware not supported')
       : tr('home_diag_unavailable', 'Not registered')
     case 'error': return tr('home_diag_error', 'Probe failed')
     default: return tr('home_diag_unknown', 'Unknown')

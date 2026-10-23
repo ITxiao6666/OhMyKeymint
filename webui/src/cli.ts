@@ -18,6 +18,7 @@ const MAX_PIF_STATE_BYTES = 2 * 1024
 const MAX_SOTER_HAL_JSON_BYTES = 16 * 1024
 const MAX_DIAGNOSTICS_JSON_BYTES = 8 * 1024
 const MAX_KEYBOX_INSPECTOR_JSON_BYTES = 32 * 1024
+const MAX_RKP_ISSUED_JSON_BYTES = 512 * 1024
 const MAX_APP_PATCH_LEVELS_JSON_BYTES = 64 * 1024
 const DEFAULT_SOTER_RELAY_URL = 'http://110.40.170.96:10886'
 const DEFAULT_SOTER_RELAY_DEVICE_ID = 'device-b-c3f204aa'
@@ -112,6 +113,14 @@ export interface KeyboxInspector {
   ec: KeyboxChainInspector | null
 }
 
+export interface RkpIssuedArtifact {
+  id: string
+  created_at: number
+  chain_subjects: string[]
+}
+
+export type RkpProtocol = 'auto' | 'v1' | 'v2' | 'v1-native'
+
 export interface AppPatchLevels {
   os_patchlevel: string | null
   vendor_patchlevel: string | null
@@ -200,6 +209,41 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
   return keys.length === allowed.length && keys.every((key, index) => key === allowed[index])
 }
 
+function parseRkpIssuedArtifact(value: unknown): RkpIssuedArtifact {
+  if (!isRecord(value)
+      || !hasOnlyKeys(value, ['id', 'created_at', 'chain_subjects'])
+      || typeof value.id !== 'string'
+      || !/^[a-f0-9]{32}$/.test(value.id)
+      || typeof value.created_at !== 'number'
+      || !Number.isSafeInteger(value.created_at)
+      || value.created_at < 0 || value.created_at > 253402300799
+      || !Array.isArray(value.chain_subjects)
+      || value.chain_subjects.length < 1 || value.chain_subjects.length > 8
+      || !value.chain_subjects.every(subject => typeof subject === 'string'
+        && subject.length > 0 && subject.length <= 512
+        && !/[\u0000-\u001f\u007f]/.test(subject))) {
+    throw new Error('OMK returned invalid issued RKP metadata')
+  }
+  return {
+    id: value.id,
+    created_at: value.created_at,
+    chain_subjects: value.chain_subjects as string[],
+  }
+}
+
+function parseRkpIssuedList(output: string): RkpIssuedArtifact[] {
+  const parsed = parseCanonicalJson(output, 'issued RKP list')
+  if (!isRecord(parsed) || !hasOnlyKeys(parsed, ['artifacts'])
+      || !Array.isArray(parsed.artifacts) || parsed.artifacts.length > 16) {
+    throw new Error('OMK returned invalid issued RKP list')
+  }
+  const artifacts = parsed.artifacts.map(parseRkpIssuedArtifact)
+  if (new Set(artifacts.map(artifact => artifact.id)).size !== artifacts.length) {
+    throw new Error('OMK returned duplicate issued RKP items')
+  }
+  return artifacts
+}
+
 function parseSoterHalState(output: string): SoterHalState {
   const parsed = parseCanonicalJson(output, 'Soter HAL state')
   if (!isRecord(parsed)
@@ -217,8 +261,7 @@ function parseSoterHalState(output: string): SoterHalState {
         const target = parseScoopTarget(value)
         return target?.kind === 'package-user' && target.target === value
       })
-      || new Set(parsed.app_targets).size !== parsed.app_targets.length
-      || (parsed.enabled && parsed.app_enabled)) {
+      || new Set(parsed.app_targets).size !== parsed.app_targets.length) {
     throw new Error('OMK returned invalid Soter HAL state')
   }
   return parsed as unknown as SoterHalState
@@ -499,6 +542,34 @@ export class Cli {
     if (output !== 'rkp_tool_completed') throw new Error('OMK returned an unexpected RKP tool result')
   }
 
+  async issueRkpKeybox(protocol: RkpProtocol = 'auto'): Promise<RkpIssuedArtifact> {
+    if (!['auto', 'v1', 'v2', 'v1-native'].includes(protocol)) throw new Error('Invalid RKP protocol')
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(
+      keymint,
+      ['--webui-rkp-issue', '--confirm-issuance', protocol],
+      MAX_RKP_ISSUED_JSON_BYTES,
+    )
+    return parseRkpIssuedArtifact(parseCanonicalJson(output, 'issued RKP metadata'))
+  }
+
+  async listIssuedRkpKeyboxes(): Promise<RkpIssuedArtifact[]> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-rkp-list'], MAX_RKP_ISSUED_JSON_BYTES)
+    return parseRkpIssuedList(output)
+  }
+
+  async importIssuedRkpKeybox(id: string): Promise<void> {
+    if (!/^[a-f0-9]{32}$/.test(id)) throw new Error('Invalid issued RKP item ID')
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(
+      keymint,
+      ['--webui-rkp-import', id, '--confirm-replace'],
+      256,
+    )
+    if (output !== 'rkp_imported') throw new Error('OMK returned an unexpected RKP import result')
+  }
+
   async getAppPatchLevels(): Promise<AppPatchProfiles> {
     const { keymint } = await this.#getHelperPaths()
     const output = await this.#run(keymint, ['--webui-get-app-patch-levels'], MAX_APP_PATCH_LEVELS_JSON_BYTES)
@@ -680,9 +751,13 @@ export class Cli {
     const { keymint } = await this.#getHelperPaths()
     const payload = encodeBase64Utf8(JSON.stringify({ target, enabled }))
     const output = await this.#run(keymint, ['--webui-set-soter-app-target-base64', payload], MAX_SOTER_HAL_JSON_BYTES + 1)
-    const persisted = parseSoterHalState(output)
-    if (persisted.app_targets.includes(target) !== enabled) {
-      throw new Error('Soter app selection read-back did not match the saved value')
+    const reported = parseSoterHalState(output)
+    const persisted = await this.getSoterHal()
+    for (const state of [reported, persisted]) {
+      if (state.app_targets.includes(target) !== enabled
+          || (enabled && (!state.app_enabled || !state.remote_enabled))) {
+        throw new Error('Soter app activation read-back did not match the requested state')
+      }
     }
     return persisted
   }

@@ -43,8 +43,8 @@ const VERBOSE_BURST: u32 = 32;
 
 /// Apply the same bounded burst policy before logs reach Android and files.
 ///
-/// Only Warn, Debug and Trace are limited. Errors always reach the underlying
-/// logger, and Info remains available for startup and state changes. Buckets
+/// Warn, Debug, Trace and high-volume SOTER diagnostic Info are limited. Errors
+/// always reach the underlying logger; other Info stays available for state changes. Buckets
 /// contain source metadata and counts, never a formatted message or payload.
 pub struct RateLimitedLogger<L> {
     inner: L,
@@ -162,17 +162,18 @@ struct LogRateLimiter {
     sites: HashMap<LogSite, LogWindow>,
 }
 
-fn log_rate_policy(level: Level) -> Option<(Duration, u32)> {
+fn log_rate_policy(level: Level, target: &str) -> Option<(Duration, u32)> {
     match level {
         Level::Warn => Some((WARNING_WINDOW, WARNING_BURST)),
         Level::Debug | Level::Trace => Some((VERBOSE_WINDOW, VERBOSE_BURST)),
+        Level::Info if target == "omk_soter_remote" => Some((VERBOSE_WINDOW, VERBOSE_BURST)),
         Level::Error | Level::Info => None,
     }
 }
 
 impl LogRateLimiter {
     fn admit(&mut self, record: &Record, now: Instant) -> LogDecision {
-        let Some((window, burst)) = log_rate_policy(record.level()) else {
+        let Some((window, burst)) = log_rate_policy(record.level(), record.target()) else {
             return LogDecision {
                 publish: true,
                 summary: None,
@@ -190,7 +191,7 @@ impl LogRateLimiter {
                 if let Some(bucket) = self.sites.remove(&oldest) {
                     if bucket.suppressed != 0 {
                         summary = Some(SuppressedLogs {
-                            window: log_rate_policy(oldest.level).unwrap().0,
+                            window: log_rate_policy(oldest.level, &oldest.target).unwrap().0,
                             site: oldest,
                             count: bucket.suppressed,
                         });
@@ -240,7 +241,7 @@ impl LogRateLimiter {
                 (count != 0).then(|| SuppressedLogs {
                     site: site.clone(),
                     count,
-                    window: log_rate_policy(site.level).unwrap().0,
+                    window: log_rate_policy(site.level, &site.target).unwrap().0,
                 })
             })
             .collect()
@@ -558,6 +559,31 @@ mod tests {
         let records = sink.records.lock().unwrap();
         assert_eq!(records.len(), (VERBOSE_BURST + WARNING_BURST + 3) as usize);
         assert!(records[37].1.contains("suppressed=8 window_ms=1000"));
+    }
+
+    #[test]
+    fn soter_info_diagnostics_are_bounded_without_limiting_other_info() {
+        let sink = CapturedLogger::default();
+        let logger = RateLimitedLogger::new(sink.clone());
+        let now = Instant::now();
+        let record = Record::builder()
+            .args(format_args!("event=soter path=native_remote stage=observe"))
+            .level(Level::Info)
+            .target("omk_soter_remote")
+            .line(Some(1))
+            .build();
+        for _ in 0..40 {
+            logger.log_at(&record, now);
+        }
+        assert_eq!(sink.records.lock().unwrap().len(), VERBOSE_BURST as usize);
+        logger.log_at(&record, now + VERBOSE_WINDOW);
+        let records = sink.records.lock().unwrap();
+        assert!(records[VERBOSE_BURST as usize]
+            .1
+            .contains("suppressed=8 window_ms=1000"));
+        assert_eq!(records.len(), VERBOSE_BURST as usize + 2);
+        assert_eq!(log_rate_policy(Level::Info, "runtime-test"), None);
+        assert_eq!(log_rate_policy(Level::Error, "omk_soter_remote"), None);
     }
 
     #[test]

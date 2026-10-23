@@ -94,10 +94,13 @@
   --m-color-surface-container-highest: #202020;
 }
 
-* { box-sizing: border-box; }
-html, body, #app { width: 100%; min-height: 100%; margin: 0; }
-html { scrollbar-width: none; }
-html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
+* { box-sizing: border-box; scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { width: 0; height: 0; display: none; }
+html, body, #app { width: 100%; height: 100%; margin: 0; }
+html, body { overflow: hidden; }
+// Scroll the app, not the WebView viewport. Android's native viewport indicator
+// can remain visible even when CSS hides the document's scrollbar.
+#app { overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: none; overflow-anchor: none; }
 // Miuix sheets/dialogs own their scrolling containers. Keep the content
 // scrollable for small screens while matching the edge-to-edge mobile UI
 // (without exposing a browser scrollbar gutter).
@@ -107,6 +110,8 @@ html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
   -ms-overflow-style: none;
 }
 .m-bottom-sheet__inner { padding-bottom: var(--omk-bottom-inset); }
+// Confirmation dialogs must sit above sheets regardless of Teleport mount order.
+.m-dialog__backdrop { z-index: 1100; }
 // These layers exist only while their overlay is mounted. Prepare separate
 // compositor surfaces for the scrim and moving panel, including drag/rebound,
 // instead of repeatedly rasterizing the rounded panel with the whole page.
@@ -626,6 +631,17 @@ button { touch-action: manipulation; }
 .confirm-sheet p { margin: 0; overflow-wrap: anywhere; color: var(--m-color-on-surface-variant-summary); line-height: 1.45; }
 .confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .confirm-actions .m-button { gap: 6px; }
+.rkp-protocol-options .m-basic-component::after { content: none; }
+.rkp-protocol-options .m-basic-component:focus-visible .m-radio-button-preference__control {
+  outline: 2px solid var(--m-color-primary);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.rkp-issued-list { display: grid; gap: 10px; max-height: min(30vh, 260px); overflow-y: auto; }
+.rkp-issued-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border-radius: 14px; background: var(--m-color-surface-container); }
+.rkp-issued-item__metadata { display: grid; min-width: 0; gap: 4px; overflow-wrap: anywhere; color: var(--m-color-on-surface-variant-summary); font-size: 12px; line-height: 1.4; }
+.rkp-issued-item__metadata strong { color: var(--m-color-on-surface); font-size: 13px; }
+.rkp-loading { display: flex; align-items: center; gap: 10px; }
 .targets-view {
   min-height: calc(100vh / var(--omk-ui-scale));
   min-height: calc(100dvh / var(--omk-ui-scale));
