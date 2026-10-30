@@ -200,9 +200,15 @@ async function setAutoTargets(enabled: boolean): Promise<void> {
     await afterPaint()
     if (disposed) return
     if (!isDev()) await props.cli.setAutoTargets(enabled)
-    autoEnabled.value = enabled
+    if (disposed) return
+    const saved = isDev() ? enabled : await props.cli.getAutoTargets()
+    if (disposed) return
+    autoEnabled.value = saved
+    if (saved !== enabled) throw new Error('Automatic selection changed. Reload the current setting.')
     void showSnackbar({ message: translate('app_targets_auto_saved', 'Automatic selection setting saved') })
   } catch (error) {
+    if (disposed) return
+    autoStatus.value = 'error'
     autoError.value = error instanceof Error ? error.message : String(error)
   } finally {
     autoBusy.value = false

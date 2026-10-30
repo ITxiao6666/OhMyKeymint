@@ -1426,10 +1426,15 @@ them. While enabled, OMK checks for new user applications in the background,
 including when the WebUI is closed, and adds user-specific `package@user_id`
 targets. System applications are excluded. App updates and unchanged installed
 apps do not re-add a manually deselected target. Disabling the option leaves
-existing selections unchanged; enabling it again records a fresh baseline.
+existing selections unchanged and cancels earlier unfinished enable requests
+and package scans. Enabling it again records a fresh baseline; applications
+installed while disabled are not added in bulk. The WebUI reads back the saved
+switch after a change; an unsuccessful or superseded save requires reloading
+the current setting before another toggle.
 The switch and per-user package snapshots are stored in
 `/data/misc/keystore/omk/data/auto_targets.json`. An unreadable user profile keeps
-its previous snapshot; a newly discovered profile is baselined on its first
+its previous snapshot; the same state file stores a switch generation to reject
+stale background work. A newly discovered profile is baselined on its first
 successful scan. The background worker checks at approximately one-minute
 intervals and on relevant package-list changes, so detection is not immediate.
 

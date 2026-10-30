@@ -25,6 +25,10 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(12);
 #[serde(deny_unknown_fields)]
 struct State {
     enabled: bool,
+    /// Switch transitions and repeated disables invalidate older pending work.
+    /// Missing on existing state files; the first request advances it from zero.
+    #[serde(default)]
+    generation: u64,
     /// Users without a successful first snapshot remain uninitialized. Their
     /// first readable snapshot is a baseline, never a batch of new installs.
     users: BTreeMap<u32, Option<BTreeSet<String>>>,
@@ -83,22 +87,50 @@ pub(crate) fn set_enabled(enabled: bool) -> Result<Status> {
     if unsafe { libc::geteuid() } != 0 {
         bail!("automatic app selection requires root");
     }
-    let path = Path::new(STATE_PATH);
+    set_enabled_at_path(Path::new(STATE_PATH), enabled, discover)
+}
+
+fn set_enabled_at_path(
+    path: &Path,
+    enabled: bool,
+    discover: impl FnOnce() -> Result<Snapshot>,
+) -> Result<Status> {
     let parent = path.parent().expect("fixed state path has a parent");
-    // PackageManager may be slow during boot or profile startup. The data
-    // directory lock is shared with other OMK settings; scan before taking it.
-    // Recheck the current switch under the lock before committing the baseline.
-    let snapshot = if enabled { Some(discover()?) } else { None };
+    let generation = {
+        let _guard =
+            DirectoryLock::acquire(parent).context("cannot lock automatic app selection state")?;
+        let mut state = read_state(path)?;
+        if enabled && state.enabled {
+            return Ok(Status { enabled: true });
+        }
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .context("automatic app selection generation exhausted")?;
+        state.enabled = false;
+        state.users.clear();
+        // Persist even an already-disabled request: it cancels an enable whose
+        // PackageManager snapshot is still running in another helper process.
+        write_state(path, &state)?;
+        if !enabled {
+            return Ok(Status { enabled: false });
+        }
+        state.generation
+    };
+
+    // Never hold the shared data-directory lock during PackageManager calls.
+    // Only the request which reserved this generation may enable the watcher.
+    let snapshot = discover()?;
     let _guard =
         DirectoryLock::acquire(parent).context("cannot lock automatic app selection state")?;
     let mut state = read_state(path)?;
-    if state.enabled == enabled {
-        return Ok(Status { enabled });
+    if state.generation != generation {
+        return Ok(Status { enabled: state.enabled });
     }
-    state.users = snapshot.map_or_else(BTreeMap::new, |snapshot| snapshot.users);
-    state.enabled = enabled;
+    state.users = snapshot.users;
+    state.enabled = true;
     write_state(path, &state)?;
-    Ok(Status { enabled })
+    Ok(Status { enabled: true })
 }
 
 /// Reconcile only successful user snapshots. An unreadable/locked profile must
@@ -120,7 +152,18 @@ fn reconcile(state: &mut State, snapshot: Snapshot) -> Vec<String> {
 }
 
 fn poll() -> Result<()> {
-    let path = Path::new(STATE_PATH);
+    poll_at_path(Path::new(STATE_PATH), discover, |added| {
+        config::update_scoop_for_webui(ScoopDelta { added, removed: Vec::new() })
+            .map(|_| ())
+            .map_err(|error| anyhow!(error))
+    })
+}
+
+fn poll_at_path(
+    path: &Path,
+    discover: impl FnOnce() -> Result<Snapshot>,
+    add_targets: impl FnOnce(Vec<String>) -> Result<()>,
+) -> Result<()> {
     let initial = read_state(path)?;
     if !initial.enabled {
         return Ok(());
@@ -136,8 +179,7 @@ fn poll() -> Result<()> {
     let previous = serde_json::to_vec(&state)?;
     let added = reconcile(&mut state, snapshot);
     if !added.is_empty() {
-        config::update_scoop_for_webui(ScoopDelta { added, removed: Vec::new() })
-            .map_err(|error| anyhow!(error))?;
+        add_targets(added)?;
     }
     if serde_json::to_vec(&state)? != previous {
         // Persist only after the config update succeeded, so failed writes can
@@ -305,14 +347,153 @@ pub(crate) fn run_watcher() -> Result<()> {
 mod tests {
     use super::*;
 
+    struct TestState(PathBuf);
+
+    impl TestState {
+        fn new() -> Self {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let directory = std::env::temp_dir()
+                .join(format!("omk-auto-targets-{}-{unique}", std::process::id()));
+            fs::create_dir(&directory).unwrap();
+            let path = directory.join("auto_targets.json");
+            // Keep the test runner's owner; production state defaults to keystore.
+            fs::write(&path, br#"{"enabled":false,"users":{}}"#).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestState {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(self.0.parent().unwrap());
+        }
+    }
+
+    fn snapshot(names: &[&str]) -> Snapshot {
+        Snapshot { users: BTreeMap::from([(0, packages(names))]) }
+    }
+
+    #[test]
+    fn delayed_enable_cannot_undo_a_completed_enable_then_disable() {
+        let state = TestState::new();
+        let result = set_enabled_at_path(&state.0, true, || {
+            assert!(set_enabled_at_path(&state.0, true, || Ok(snapshot(&["com.old"])))?.enabled);
+            assert!(
+                !set_enabled_at_path(&state.0, false, || panic!("disable must not scan"))?.enabled
+            );
+            Ok(snapshot(&["com.old", "com.late"]))
+        })
+        .unwrap();
+        assert!(!result.enabled, "a delayed enable must report the latest disabled state");
+        assert!(!read_state(&state.0).unwrap().enabled);
+    }
+
+    #[test]
+    fn disabling_an_already_disabled_state_cancels_a_pending_enable() {
+        let state = TestState::new();
+        set_enabled_at_path(&state.0, true, || {
+            set_enabled_at_path(&state.0, false, || panic!("disable must not scan"))?;
+            Ok(snapshot(&["com.late"]))
+        })
+        .unwrap();
+        assert!(!read_state(&state.0).unwrap().enabled);
+    }
+
+    #[test]
+    fn disabled_polls_never_scan_or_add_and_keep_saved_state() {
+        let state = TestState::new();
+        set_enabled_at_path(&state.0, true, || Ok(snapshot(&["com.old"]))).unwrap();
+        set_enabled_at_path(&state.0, false, || panic!("disable must not scan")).unwrap();
+        let saved = fs::read(&state.0).unwrap();
+        for _ in 0..4 {
+            poll_at_path(
+                &state.0,
+                || panic!("disabled watcher must not scan"),
+                |_| panic!("disabled watcher must not write package selection"),
+            )
+            .unwrap();
+        }
+        assert_eq!(fs::read(&state.0).unwrap(), saved);
+        assert!(read_state(&state.0).unwrap().users.is_empty());
+    }
+
+    #[test]
+    fn disable_cancels_an_inflight_package_poll() {
+        let state = TestState::new();
+        set_enabled_at_path(&state.0, true, || Ok(snapshot(&["com.old"]))).unwrap();
+        poll_at_path(
+            &state.0,
+            || {
+                set_enabled_at_path(&state.0, false, || panic!("disable must not scan"))?;
+                Ok(snapshot(&["com.old", "com.late"]))
+            },
+            |_| panic!("late poll must not add packages"),
+        )
+        .unwrap();
+        assert!(!read_state(&state.0).unwrap().enabled);
+    }
+
+    #[test]
+    fn disable_then_reenable_rejects_a_poll_from_the_previous_generation() {
+        let state = TestState::new();
+        set_enabled_at_path(&state.0, true, || Ok(snapshot(&["com.old"]))).unwrap();
+        poll_at_path(
+            &state.0,
+            || {
+                set_enabled_at_path(&state.0, false, || panic!("disable must not scan"))?;
+                set_enabled_at_path(&state.0, true, || Ok(snapshot(&["com.old"])))?;
+                Ok(snapshot(&["com.old", "com.stale"]))
+            },
+            |_| panic!("a matching baseline must not revive an old poll"),
+        )
+        .unwrap();
+        assert_eq!(read_state(&state.0).unwrap().users[&0], packages(&["com.old"]));
+    }
+
+    #[test]
+    fn reenable_baselines_apps_installed_while_disabled_and_preserves_selections() {
+        let state = TestState::new();
+        let mut selected = vec!["com.selected@0".to_owned()];
+        set_enabled_at_path(&state.0, true, || Ok(snapshot(&["com.old"]))).unwrap();
+        set_enabled_at_path(&state.0, false, || panic!("disable must not scan")).unwrap();
+        set_enabled_at_path(&state.0, true, || Ok(snapshot(&["com.old", "com.while_off"])))
+            .unwrap();
+        poll_at_path(
+            &state.0,
+            || Ok(snapshot(&["com.old", "com.while_off", "com.after"])),
+            |added| {
+                selected.extend(added);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(selected, ["com.selected@0", "com.after@0"]);
+    }
+
+    #[test]
+    fn failed_enable_scan_stays_disabled_and_a_new_request_can_retry() {
+        let state = TestState::new();
+        assert_eq!(read_state(&state.0).unwrap().generation, 0);
+        assert!(set_enabled_at_path(&state.0, true, || bail!("PackageManager busy")).is_err());
+        assert!(!read_state(&state.0).unwrap().enabled);
+        assert!(
+            set_enabled_at_path(&state.0, true, || Ok(snapshot(&["com.old"]))).unwrap().enabled
+        );
+    }
+
     fn packages(names: &[&str]) -> Option<BTreeSet<String>> {
         Some(names.iter().map(|name| (*name).to_string()).collect())
     }
 
     #[test]
     fn only_new_installs_are_selected_and_updates_do_not_readd() {
-        let mut state =
-            State { enabled: true, users: BTreeMap::from([(0, packages(&["com.old"]))]) };
+        let mut state = State {
+            enabled: true,
+            users: BTreeMap::from([(0, packages(&["com.old"]))]),
+            ..State::default()
+        };
         let scan = || Snapshot { users: BTreeMap::from([(0, packages(&["com.old", "com.new"]))]) };
         assert_eq!(reconcile(&mut state, scan()), ["com.new@0"]);
         assert!(reconcile(&mut state, scan()).is_empty());
@@ -323,6 +504,7 @@ mod tests {
         let mut state = State {
             enabled: true,
             users: BTreeMap::from([(0, packages(&["com.old"])), (10, None)]),
+            ..State::default()
         };
         let first =
             Snapshot { users: BTreeMap::from([(0, None), (10, packages(&["com.profile"]))]) };
@@ -339,8 +521,11 @@ mod tests {
 
     #[test]
     fn uninstall_then_reinstall_is_a_new_install() {
-        let mut state =
-            State { enabled: true, users: BTreeMap::from([(0, packages(&["com.app"]))]) };
+        let mut state = State {
+            enabled: true,
+            users: BTreeMap::from([(0, packages(&["com.app"]))]),
+            ..State::default()
+        };
         assert!(reconcile(&mut state, Snapshot { users: BTreeMap::from([(0, packages(&[]))]) })
             .is_empty());
         assert_eq!(
