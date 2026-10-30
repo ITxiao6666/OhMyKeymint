@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use log::debug;
-use lsplt_rs::MapInfo;
+use omhook::{MapInfo, MapPerms};
 use sha2::{Digest, Sha256};
 
 const ELF_CLASS_32: u8 = 1;
@@ -115,12 +115,9 @@ pub fn describe_elf(path: &Path) -> Result<String> {
 // Hook stuff
 pub fn resolve_base_addr(info: &[MapInfo], lib_name: &str) -> Result<usize> {
     for map in info {
-        if let Some(path) = &map.pathname {
-            if map.offset == 0 && path.as_str().ends_with(lib_name) {
-                debug!(
-                    "Found library '{}' at base address: 0x{:x}",
-                    lib_name, map.start
-                );
+        if let Some(path) = &map.path {
+            if map.offset == 0 && path.ends_with(lib_name) {
+                debug!("Found library '{}' at base address: 0x{:x}", lib_name, map.start);
                 return Ok(map.start);
             }
         }
@@ -130,15 +127,12 @@ pub fn resolve_base_addr(info: &[MapInfo], lib_name: &str) -> Result<usize> {
 
 pub fn resolve_return_addr(info: &[MapInfo], lib_name: &str) -> Result<usize> {
     for map in info {
-        if let Some(path) = &map.pathname {
-            if (map.perms & libc::PROT_EXEC as u8) == 0 && path.as_str().ends_with(lib_name) {
+        if let Some(path) = &map.path {
+            if !map.perms.contains(MapPerms::EXEC) && path.ends_with(lib_name) {
                 // Use map.start directly (not + offset). This is a non-executable
                 // region that will cause SIGSEGV when the remote function "returns"
                 // here, allowing us to catch the return value.
-                debug!(
-                    "Found return addr in library '{}' at address: 0x{:x}",
-                    lib_name, map.start
-                );
+                debug!("Found return addr in library '{}' at address: 0x{:x}", lib_name, map.start);
                 return Ok(map.start);
             }
         }
@@ -185,14 +179,10 @@ pub fn resolve_func_addr(
     let offset = (symbol as usize)
         .checked_sub(local_addr)
         .ok_or_else(|| anyhow!("Invalid symbol address"))?;
-    let remote_func_addr = remote_addr
-        .checked_add(offset)
-        .ok_or_else(|| anyhow!("Address overflow"))?;
+    let remote_func_addr =
+        remote_addr.checked_add(offset).ok_or_else(|| anyhow!("Address overflow"))?;
 
-    debug!(
-        "Resolved function '{}' address: 0x{:x}",
-        name, remote_func_addr
-    );
+    debug!("Resolved function '{}' address: 0x{:x}", name, remote_func_addr);
     Ok(remote_func_addr)
 }
 
@@ -231,17 +221,13 @@ pub fn process_name(pid: i32) -> Option<String> {
     std::fs::read(path.join("cmdline"))
         .ok()
         .and_then(|cmdline| {
-            let first = cmdline
-                .split(|byte| *byte == 0)
-                .find(|part| !part.is_empty())?;
+            let first = cmdline.split(|byte| *byte == 0).find(|part| !part.is_empty())?;
             Path::new(std::ffi::OsStr::from_bytes(first))
                 .file_name()
                 .and_then(std::ffi::OsStr::to_str)
                 .map(str::to_owned)
         })
         .or_else(|| {
-            std::fs::read_to_string(path.join("comm"))
-                .ok()
-                .map(|name| name.trim().to_owned())
+            std::fs::read_to_string(path.join("comm")).ok().map(|name| name.trim().to_owned())
         })
 }

@@ -31,12 +31,7 @@ pub fn is_enabled() -> Result<bool> {
 
 pub fn save(enabled: bool) -> Result<()> {
     require_root()?;
-    let changed = save_to(
-        Path::new(soter::STATE_PATH),
-        enabled,
-        KEYSTORE_UID,
-        KEYSTORE_GID,
-    )?;
+    let changed = save_to(Path::new(soter::STATE_PATH), enabled, KEYSTORE_UID, KEYSTORE_GID)?;
     if changed {
         crate::utils::refresh_soter_host()?;
     }
@@ -44,9 +39,7 @@ pub fn save(enabled: bool) -> Result<()> {
 }
 
 fn save_to(path: &Path, enabled: bool, uid: u32, gid: u32) -> Result<bool> {
-    let parent = path
-        .parent()
-        .context("Soter Beta state has no parent directory")?;
+    let parent = path.parent().context("Soter Beta state has no parent directory")?;
     let metadata =
         fs::symlink_metadata(parent).context("failed to inspect Soter Beta state directory")?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {

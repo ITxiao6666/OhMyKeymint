@@ -58,7 +58,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Newtype holding an integer that represents an Android user ID, corresponding to a user/human
 /// profile (i.e. *not* to a specific UNIX uid assigned to a particular app).
@@ -154,10 +154,7 @@ pub fn is_device_id_attestation_tag(tag: Tag) -> bool {
 
 /// This function checks whether a given tag corresponds to the access of any IMEI attestation.
 pub fn is_imei_attestation_tag(tag: Tag) -> bool {
-    matches!(
-        tag,
-        Tag::ATTESTATION_ID_IMEI | Tag::ATTESTATION_ID_SECOND_IMEI
-    )
+    matches!(tag, Tag::ATTESTATION_ID_IMEI | Tag::ATTESTATION_ID_SECOND_IMEI)
 }
 
 /// This function checks whether the calling app has the Android permissions needed to attest device
@@ -195,19 +192,14 @@ pub fn check_get_app_uids_affected_by_sid_permissions() -> anyhow::Result<()> {
 /// This function checks whether the calling app has the Android permission needed to dump
 /// Keystore state to logcat.
 pub fn check_dump_permission() -> anyhow::Result<()> {
-    check_android_permission(
-        "android.permission.DUMP",
-        Error::Rc(ResponseCode::PERMISSION_DENIED),
-    )
+    check_android_permission("android.permission.DUMP", Error::Rc(ResponseCode::PERMISSION_DENIED))
 }
 
 fn check_android_permission(permission: &str, err: Error) -> anyhow::Result<()> {
     let app_id = user_utils::multiuser_get_app_id(AppUid::calling().0 as u32);
     match app_id {
         AID_ROOT | RAW_AID_SYSTEM | RAW_AID_KEYSTORE => Ok(()),
-        _ => Err(err).context(ks_err!(
-            "caller does not have the '{permission}' permission"
-        )),
+        _ => Err(err).context(ks_err!("caller does not have the '{permission}' permission")),
     }
 }
 
@@ -451,10 +443,7 @@ where
 /// Converts a set of key characteristics from the internal representation into a set of
 /// Authorizations as they are used to convey key characteristics to the clients of keystore.
 pub fn key_parameters_to_authorizations(parameters: Vec<KeyParameter>) -> Vec<Authorization> {
-    parameters
-        .into_iter()
-        .map(|p| p.into_authorization())
-        .collect()
+    parameters.into_iter().map(|p| p.into_authorization()).collect()
 }
 
 macro_rules! check_bool {
@@ -523,9 +512,9 @@ impl KmKeyParameter {
         Ok(match tag {
             keymint::Tag::Invalid => None,
             keymint::Tag::Purpose => match value {
-                KeyParameterValue::KeyPurpose(v) => Some(KeyParam::Purpose(
-                    kmr_wire::keymint::KeyPurpose::try_from(v.0)?,
-                )),
+                KeyParameterValue::KeyPurpose(v) => {
+                    Some(KeyParam::Purpose(kmr_wire::keymint::KeyPurpose::try_from(v.0)?))
+                }
                 _ => return Err(ValueNotRecognized::KeyPurpose),
             },
             keymint::Tag::Algorithm => match value {
@@ -545,9 +534,9 @@ impl KmKeyParameter {
                 _ => return Err(ValueNotRecognized::Integer),
             },
             keymint::Tag::BlockMode => match value {
-                KeyParameterValue::BlockMode(v) => Some(KeyParam::BlockMode(
-                    kmr_wire::keymint::BlockMode::try_from(v.0)?,
-                )),
+                KeyParameterValue::BlockMode(v) => {
+                    Some(KeyParam::BlockMode(kmr_wire::keymint::BlockMode::try_from(v.0)?))
+                }
                 _ => return Err(ValueNotRecognized::BlockMode),
             },
             keymint::Tag::Digest => match value {
@@ -557,9 +546,9 @@ impl KmKeyParameter {
                 _ => return Err(ValueNotRecognized::Digest),
             },
             keymint::Tag::Padding => match value {
-                KeyParameterValue::PaddingMode(v) => Some(KeyParam::Padding(
-                    kmr_wire::keymint::PaddingMode::try_from(v.0)?,
-                )),
+                KeyParameterValue::PaddingMode(v) => {
+                    Some(KeyParam::Padding(kmr_wire::keymint::PaddingMode::try_from(v.0)?))
+                }
                 _ => return Err(ValueNotRecognized::PaddingMode),
             },
             keymint::Tag::CallerNonce => {
@@ -584,9 +573,9 @@ impl KmKeyParameter {
             },
             keymint::Tag::MlDsaVariant if km_dev_version < KeyMintDevice::KEY_MINT_V5 => None,
             keymint::Tag::MlDsaVariant => match value {
-                KeyParameterValue::MlDsaVariant(v) => Some(KeyParam::MlDsaVariant(
-                    kmr_wire::keymint::MlDsaVariant::try_from(v.0)?,
-                )),
+                KeyParameterValue::MlDsaVariant(v) => {
+                    Some(KeyParam::MlDsaVariant(kmr_wire::keymint::MlDsaVariant::try_from(v.0)?))
+                }
                 _ => return Err(ValueNotRecognized::MlDsaVariant),
             },
             keymint::Tag::RsaPublicExponent => match value {
@@ -600,9 +589,9 @@ impl KmKeyParameter {
                 Some(KeyParam::IncludeUniqueId)
             }
             keymint::Tag::RsaOaepMgfDigest => match value {
-                KeyParameterValue::Digest(v) => Some(KeyParam::RsaOaepMgfDigest(
-                    kmr_wire::keymint::Digest::try_from(v.0)?,
-                )),
+                KeyParameterValue::Digest(v) => {
+                    Some(KeyParam::RsaOaepMgfDigest(kmr_wire::keymint::Digest::try_from(v.0)?))
+                }
                 _ => return Err(ValueNotRecognized::Digest),
             },
             keymint::Tag::BootloaderOnly => {
@@ -620,25 +609,19 @@ impl KmKeyParameter {
             }
             keymint::Tag::ActiveDatetime => match value {
                 KeyParameterValue::DateTime(ms_since_epoch) => {
-                    Some(KeyParam::ActiveDatetime(keymint::DateTime {
-                        ms_since_epoch,
-                    }))
+                    Some(KeyParam::ActiveDatetime(keymint::DateTime { ms_since_epoch }))
                 }
                 _ => return Err(ValueNotRecognized::DateTime),
             },
             keymint::Tag::OriginationExpireDatetime => match value {
                 KeyParameterValue::DateTime(ms_since_epoch) => {
-                    Some(KeyParam::OriginationExpireDatetime(keymint::DateTime {
-                        ms_since_epoch,
-                    }))
+                    Some(KeyParam::OriginationExpireDatetime(keymint::DateTime { ms_since_epoch }))
                 }
                 _ => return Err(ValueNotRecognized::DateTime),
             },
             keymint::Tag::UsageExpireDatetime => match value {
                 KeyParameterValue::DateTime(ms_since_epoch) => {
-                    Some(KeyParam::UsageExpireDatetime(keymint::DateTime {
-                        ms_since_epoch,
-                    }))
+                    Some(KeyParam::UsageExpireDatetime(keymint::DateTime { ms_since_epoch }))
                 }
                 _ => return Err(ValueNotRecognized::DateTime),
             },
@@ -699,16 +682,14 @@ impl KmKeyParameter {
             },
             keymint::Tag::CreationDatetime => match value {
                 KeyParameterValue::DateTime(ms_since_epoch) => {
-                    Some(KeyParam::CreationDatetime(keymint::DateTime {
-                        ms_since_epoch,
-                    }))
+                    Some(KeyParam::CreationDatetime(keymint::DateTime { ms_since_epoch }))
                 }
                 _ => return Err(ValueNotRecognized::DateTime),
             },
             keymint::Tag::Origin => match value {
-                KeyParameterValue::Origin(v) => Some(KeyParam::Origin(
-                    kmr_wire::keymint::KeyOrigin::try_from(v.0)?,
-                )),
+                KeyParameterValue::Origin(v) => {
+                    Some(KeyParam::Origin(kmr_wire::keymint::KeyOrigin::try_from(v.0)?))
+                }
                 _ => return Err(ValueNotRecognized::KeyOrigin),
             },
             keymint::Tag::RootOfTrust => match value {
@@ -782,17 +763,13 @@ impl KmKeyParameter {
             keymint::Tag::CertificateSubject => blob_param(value, KeyParam::CertificateSubject)?,
             keymint::Tag::CertificateNotBefore => match value {
                 KeyParameterValue::DateTime(ms_since_epoch) => {
-                    Some(KeyParam::CertificateNotBefore(keymint::DateTime {
-                        ms_since_epoch,
-                    }))
+                    Some(KeyParam::CertificateNotBefore(keymint::DateTime { ms_since_epoch }))
                 }
                 _ => return Err(ValueNotRecognized::DateTime),
             },
             keymint::Tag::CertificateNotAfter => match value {
                 KeyParameterValue::DateTime(ms_since_epoch) => {
-                    Some(KeyParam::CertificateNotAfter(keymint::DateTime {
-                        ms_since_epoch,
-                    }))
+                    Some(KeyParam::CertificateNotAfter(keymint::DateTime { ms_since_epoch }))
                 }
                 _ => return Err(ValueNotRecognized::DateTime),
             },
@@ -810,15 +787,12 @@ pub fn key_parameters_to_km(
     parameters: &[KmKeyParameter],
     km_dev_version: i32,
 ) -> std::result::Result<Vec<KeyParam>, ValueNotRecognized> {
-    parameters
-        .iter()
-        .cloned()
-        .try_fold(Vec::new(), |mut result, param| {
-            if let Some(param) = param.to_km_optional(km_dev_version)? {
-                result.push(param);
-            }
-            Ok(result)
-        })
+    parameters.iter().cloned().try_fold(Vec::new(), |mut result, param| {
+        if let Some(param) = param.to_km_optional(km_dev_version)? {
+            result.push(param);
+        }
+        Ok(result)
+    })
 }
 
 fn blob_param(
@@ -838,9 +812,7 @@ pub fn key_creation_result_to_aidl(
     let certificates: Vec<Certificate> = result
         .certificate_chain
         .iter()
-        .map(|c| Certificate {
-            encodedCertificate: c.encoded_certificate.clone(),
-        })
+        .map(|c| Certificate { encodedCertificate: c.encoded_certificate.clone() })
         .collect();
 
     let key_characteristics: Result<Vec<KeyCharacteristics>, rsbinder::Status> = result
@@ -866,11 +838,7 @@ pub fn key_creation_result_to_aidl(
 }
 
 pub fn key_params_to_aidl(params: &[KeyParam], km_dev_version: i32) -> Result<Vec<KmKeyParameter>> {
-    params
-        .iter()
-        .cloned()
-        .map(|param| key_param_to_aidl(param, km_dev_version))
-        .collect()
+    params.iter().cloned().map(|param| key_param_to_aidl(param, km_dev_version)).collect()
 }
 
 pub fn key_param_to_aidl(kp: KeyParam, km_dev_version: i32) -> Result<KmKeyParameter> {
@@ -980,10 +948,7 @@ pub fn key_param_to_aidl(kp: KeyParam, km_dev_version: i32) -> Result<KmKeyParam
 /// by invoking the system call since Rust does not support getting monotonic time instance
 /// as an integer.
 pub fn get_current_time_in_milliseconds() -> i64 {
-    let mut current_time = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
+    let mut current_time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: The pointer is valid because it comes from a reference, and clock_gettime doesn't
     // retain it beyond the call.
     unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut current_time) };
@@ -996,40 +961,6 @@ pub const AID_USER_OFFSET: u32 = user_utils::AID_USER_OFFSET;
 /// AID of the keystore process itself, used for keys that
 /// keystore generates for its own use.
 pub const AID_KEYSTORE: AppUid = AppUid(RAW_AID_KEYSTORE as i64);
-
-/// Merges and filters two lists of key descriptors. The first input list, legacy_descriptors,
-/// is assumed to not be sorted or filtered. As such, all key descriptors in that list whose
-/// alias is less than, or equal to, start_past_alias (if provided) will be removed.
-/// This list will then be merged with the second list, db_descriptors. The db_descriptors list
-/// is assumed to be sorted and filtered so the output list will be sorted prior to returning.
-/// The returned value is a list of KeyDescriptor objects whose alias is greater than
-/// start_past_alias, sorted and de-duplicated.
-#[cfg(test)]
-fn merge_and_filter_key_entry_lists(
-    legacy_descriptors: &[KeyDescriptor],
-    db_descriptors: &[KeyDescriptor],
-    start_past_alias: Option<&str>,
-) -> Vec<KeyDescriptor> {
-    let mut result: Vec<KeyDescriptor> = match start_past_alias {
-        Some(past_alias) => legacy_descriptors
-            .iter()
-            .filter(|kd| {
-                if let Some(alias) = &kd.alias {
-                    alias.as_str() > past_alias
-                } else {
-                    false
-                }
-            })
-            .cloned()
-            .collect(),
-        None => legacy_descriptors.to_vec(),
-    };
-
-    result.extend_from_slice(db_descriptors);
-    result.sort_unstable();
-    result.dedup();
-    result
-}
 
 pub(crate) fn estimate_safe_amount_to_return(
     domain: Domain,
@@ -1144,11 +1075,8 @@ impl<T: AesGcmKey> AesGcm for T {
 pub(crate) fn get_interface_once<T: FromIBinder + ?Sized>(
     name: &str,
 ) -> Result<Strong<T>, StatusCode> {
-    let binder = hub::default()?
-        .try_get_service(name)
-        .ok()
-        .flatten()
-        .ok_or(StatusCode::NameNotFound)?;
+    let binder =
+        hub::default()?.try_get_service(name).ok().flatten().ok_or(StatusCode::NameNotFound)?;
     FromIBinder::try_from(binder)
 }
 
@@ -1218,14 +1146,12 @@ fn legacy_pm_transactions(
     layout: PackageManagerNativeLayout,
 ) -> (rsbinder::TransactionCode, rsbinder::TransactionCode) {
     match layout {
-        PackageManagerNativeLayout::Android12To14 => (
-            rsbinder::FIRST_CALL_TRANSACTION + 5,
-            rsbinder::FIRST_CALL_TRANSACTION + 4,
-        ),
-        PackageManagerNativeLayout::Android15Or16 => (
-            rsbinder::FIRST_CALL_TRANSACTION + 6,
-            rsbinder::FIRST_CALL_TRANSACTION + 5,
-        ),
+        PackageManagerNativeLayout::Android12To14 => {
+            (rsbinder::FIRST_CALL_TRANSACTION + 5, rsbinder::FIRST_CALL_TRANSACTION + 4)
+        }
+        PackageManagerNativeLayout::Android15Or16 => {
+            (rsbinder::FIRST_CALL_TRANSACTION + 6, rsbinder::FIRST_CALL_TRANSACTION + 5)
+        }
         PackageManagerNativeLayout::Android17 => unreachable!("Android 17 uses generated AIDL"),
     }
 }
@@ -1318,10 +1244,7 @@ fn app_info_for_uid_legacy_pm(
         }
     };
 
-    let binder = match hub::try_get_service(PACKAGE_MANAGER_NATIVE_SERVICE)
-        .ok()
-        .flatten()
-    {
+    let binder = match hub::try_get_service(PACKAGE_MANAGER_NATIVE_SERVICE).ok().flatten() {
         Some(binder) => binder,
         None => {
             warn!("failed to connect to PackageManager service binder");
@@ -1399,12 +1322,9 @@ fn package_manager_native_get_i32_for_package(
     package_name: &str,
     label: &str,
 ) -> Result<i32> {
-    let proxy = binder
-        .as_proxy()
-        .context("PackageManager binder was unexpectedly local")?;
-    let mut data = proxy
-        .prepare_transact(true)
-        .context("failed to prepare PackageManager transaction")?;
+    let proxy = binder.as_proxy().context("PackageManager binder was unexpectedly local")?;
+    let mut data =
+        proxy.prepare_transact(true).context("failed to prepare PackageManager transaction")?;
     data.write(package_name)
         .with_context(|| format!("failed to write PackageManager {label} package name"))?;
 
@@ -1414,17 +1334,14 @@ fn package_manager_native_get_i32_for_package(
         .with_context(|| format!("PackageManager {label} returned no reply"))?;
     reply.set_data_position(0);
 
-    let status: Status = reply
-        .read()
-        .with_context(|| format!("failed to decode PackageManager {label} status"))?;
+    let status: Status =
+        reply.read().with_context(|| format!("failed to decode PackageManager {label} status"))?;
     if !status.is_ok() {
         return Err(anyhow::Error::new(status))
             .with_context(|| format!("PackageManager {label} returned non-ok status"));
     }
 
-    reply
-        .read()
-        .with_context(|| format!("failed to decode PackageManager {label} result"))
+    reply.read().with_context(|| format!("failed to decode PackageManager {label} result"))
 }
 
 /// Clear the current thread's `errno` value.
@@ -1484,24 +1401,4 @@ pub fn self_renice(niceness: i32) {
         info!("setting niceness {niceness} from current {current}");
         setpriority(niceness)
     }
-}
-
-/// Enable logging in unit tests.
-#[cfg(test)]
-pub fn init_test_logging() {
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_tag("keystore2_test")
-            .with_max_level(log::LevelFilter::Debug),
-    );
-}
-
-/// Enable logging in unit tests at a specific level
-#[cfg(test)]
-pub fn init_test_logging_at(max_level: log::LevelFilter) {
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_tag("keystore2_test")
-            .with_max_level(max_level),
-    );
 }

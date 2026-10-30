@@ -1,8 +1,6 @@
 use std::{env, fs, path::PathBuf, process::Command, vec};
 
 fn main() {
-    println!("cargo:rustc-link-lib=static=c++_static");
-
     println!("cargo:rerun-if-changed=aidl");
     println!("cargo:rerun-if-changed=src/proto");
     println!("cargo:rerun-if-changed=build.rs");
@@ -34,9 +32,7 @@ fn main() {
         .join("\n");
 
     std::fs::write(&mod_file, mod_content).unwrap();
-    let _ = Command::new("rustfmt")
-        .args([&mod_file, &format!("{}/storage.rs", out_dir)])
-        .status();
+    let _ = Command::new("rustfmt").args([&mod_file, &format!("{}/storage.rs", out_dir)]).status();
 
     let mut aidl = rsbinder_aidl::Builder::new()
         .include_dir(PathBuf::from("aidl/android/system/keystore2"))
@@ -114,22 +110,14 @@ fn build_rkp_v1_bridge() {
         .map(|version| sdk.join("build-tools").join(version).join("lib/d8.jar"))
         .or_else(|| latest_d8(&sdk))
         .expect("install Android SDK Build Tools with lib/d8.jar");
-    assert!(
-        build_tools.is_file(),
-        "Android D8 was not found at {}",
-        build_tools.display()
-    );
+    assert!(build_tools.is_file(), "Android D8 was not found at {}", build_tools.display());
 
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
     let classes = out.join("rkp-v1-classes");
     fs::create_dir_all(&classes).expect("create RKP V1 bridge classes directory");
 
     let java_tool = |name: &str| {
-        let name = if cfg!(windows) {
-            format!("{name}.exe")
-        } else {
-            name.to_owned()
-        };
+        let name = if cfg!(windows) { format!("{name}.exe") } else { name.to_owned() };
         env::var_os("JAVA_HOME")
             .filter(|root| !root.is_empty())
             .map(|root| PathBuf::from(root).join("bin").join(&name))
@@ -173,9 +161,7 @@ fn latest_d8(sdk: &std::path::Path) -> Option<PathBuf> {
 }
 
 fn run_build_command(command: &mut Command) {
-    let output = command
-        .output()
-        .unwrap_or_else(|error| panic!("cannot run {command:?}: {error}"));
+    let output = command.output().unwrap_or_else(|error| panic!("cannot run {command:?}: {error}"));
     assert!(
         output.status.success(),
         "{command:?} failed:\n{}\n{}",

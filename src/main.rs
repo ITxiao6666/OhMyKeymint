@@ -129,10 +129,7 @@ fn prepare_android_storage() {
     }
 
     if let Err(e) = crate::keybox::ensure_keybox_file(root_path!("keybox.xml")) {
-        storage_warn(format!(
-            "Failed to seed OMK keybox {}: {e:?}",
-            root_path!("keybox.xml")
-        ));
+        storage_warn(format!("Failed to seed OMK keybox {}: {e:?}", root_path!("keybox.xml")));
     }
 
     if let Err(e) = crate::keybox::ensure_google_attestation_status_cache() {
@@ -142,16 +139,11 @@ fn prepare_android_storage() {
         ));
     }
 
-    for file in [
-        root_path!("keymint.log.lock"),
-        root_path!("injector.log.lock"),
-    ] {
+    for file in [root_path!("keymint.log.lock"), root_path!("injector.log.lock")] {
         match std::fs::remove_file(file) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => storage_warn(format!(
-                "Failed to remove legacy OMK lock file {file}: {e:?}"
-            )),
+            Err(e) => storage_warn(format!("Failed to remove legacy OMK lock file {file}: {e:?}")),
         }
     }
 
@@ -195,6 +187,7 @@ fn create_rpc_server() -> Result<Arc<RpcServer>> {
     let server = server.context("failed to bind OMK RPC socket")?;
     clear_result?;
     server.set_android13plus(rpc::WIRE_MAX_VERSION);
+    server.set_max_threads(num_cpus::get() as u32);
     std::fs::set_permissions(rpc::SOCKET, std::fs::Permissions::from_mode(0o660))
         .context("failed to chmod OMK RPC socket")?;
 
@@ -263,10 +256,7 @@ fn decode_webui_keybox_payload(chunks: Vec<String>) -> Result<Vec<u8>, String> {
     if chunks.len() > WEBUI_KEYBOX_MAX_CHUNKS {
         return Err("keybox payload contains too many chunks".to_string());
     }
-    if chunks
-        .iter()
-        .any(|chunk| chunk.is_empty() || chunk.len() > WEBUI_KEYBOX_CHUNK_BYTES)
-    {
+    if chunks.iter().any(|chunk| chunk.is_empty() || chunk.len() > WEBUI_KEYBOX_CHUNK_BYTES) {
         return Err("keybox payload contains an invalid chunk".to_string());
     }
 
@@ -407,9 +397,8 @@ fn process_pid(names: &[&str], expected_executable: Option<&Path>) -> Option<u32
         let Ok(executable) = std::str::from_utf8(executable) else {
             continue;
         };
-        let Some(executable) = std::path::Path::new(executable)
-            .file_name()
-            .and_then(|name| name.to_str())
+        let Some(executable) =
+            std::path::Path::new(executable).file_name().and_then(|name| name.to_str())
         else {
             continue;
         };
@@ -426,11 +415,7 @@ fn process_pid(names: &[&str], expected_executable: Option<&Path>) -> Option<u32
 }
 
 fn pidfile_process(path: &str, marker: &str) -> Option<u32> {
-    let pid = std::fs::read_to_string(path)
-        .ok()?
-        .trim()
-        .parse::<u32>()
-        .ok()?;
+    let pid = std::fs::read_to_string(path).ok()?.trim().parse::<u32>().ok()?;
     if pid == std::process::id() {
         return None;
     }
@@ -452,16 +437,8 @@ fn hardware_diagnostic(
             version: Some(info.versionNumber),
             name: Some(info.keyMintName),
         },
-        Ok(None) => WebUiHardwareDiagnostic {
-            status: "unavailable",
-            version: None,
-            name: None,
-        },
-        Err(_) => WebUiHardwareDiagnostic {
-            status: "error",
-            version: None,
-            name: None,
-        },
+        Ok(None) => WebUiHardwareDiagnostic { status: "unavailable", version: None, name: None },
+        Err(_) => WebUiHardwareDiagnostic { status: "error", version: None, name: None },
     }
 }
 
@@ -493,17 +470,13 @@ fn webui_diagnostics() -> String {
     use android::hardware::security::keymint::SecurityLevel::SecurityLevel;
     // A vendor KeyMint process does not prove that OMK itself is running.
     let executable = std::env::current_exe().ok();
-    let keymint_pid = executable
-        .as_deref()
-        .and_then(|path| process_pid(&["keymint"], Some(path)));
+    let keymint_pid = executable.as_deref().and_then(|path| process_pid(&["keymint"], Some(path)));
     let keystore_pid = process_pid(&["keystore2"], None);
     let injector_pid = pidfile_process("/data/adb/omk/injector-daemon.pid", "daemon-injector")
         .or_else(|| process_pid(&["inject"], None));
-    let soter_pid = pidfile_process(
-        "/data/misc/keystore/omk/data/soterta/daemon.pid",
-        "soterta-svc",
-    )
-    .or_else(|| process_pid(&["soterta-svc", "soter-svc"], None));
+    let soter_pid =
+        pidfile_process("/data/misc/keystore/omk/data/soterta/daemon.pid", "soterta-svc")
+            .or_else(|| process_pid(&["soterta-svc", "soter-svc"], None));
     let soter_status = match soter_hal::is_enabled() {
         Ok(true) if soter_pid.is_some() => "running",
         Ok(true) => "configured",
@@ -512,27 +485,15 @@ fn webui_diagnostics() -> String {
     };
     serde_json::to_string(&WebUiDiagnostics {
         keymint: service_diagnostic(
-            if keymint_pid.is_some() {
-                "running"
-            } else {
-                "stopped"
-            },
+            if keymint_pid.is_some() { "running" } else { "stopped" },
             keymint_pid,
         ),
         keystore2: service_diagnostic(
-            if keystore_pid.is_some() {
-                "running"
-            } else {
-                "stopped"
-            },
+            if keystore_pid.is_some() { "running" } else { "stopped" },
             keystore_pid,
         ),
         injector: service_diagnostic(
-            if injector_pid.is_some() {
-                "running"
-            } else {
-                "stopped"
-            },
+            if injector_pid.is_some() { "running" } else { "stopped" },
             injector_pid,
         ),
         soter: service_diagnostic(soter_status, soter_pid),
@@ -569,9 +530,7 @@ fn webui_keybox_revocation_status() -> Result<String, String> {
     let (state, _, serials) =
         keybox::installed_keybox_state_and_metadata().map_err(|error| format!("{error:#}"))?;
     if matches!(state, keybox::KeyboxFileState::Invalid) {
-        return Ok(keybox::KeyboxRevocationStatus::NotChecked
-            .as_str()
-            .to_string());
+        return Ok(keybox::KeyboxRevocationStatus::NotChecked.as_str().to_string());
     }
     let serials = serials.ok_or_else(|| {
         "failed to read every certificate serial number from the installed Keybox".to_string()
@@ -584,9 +543,7 @@ fn webui_keybox_revocation_status() -> Result<String, String> {
     if matches!(current_state, keybox::KeyboxFileState::Invalid)
         || current_serials.as_ref() != Some(&serials)
     {
-        return Err(
-            "installed Keybox changed while its certificate status was checked".to_string(),
-        );
+        return Err("installed Keybox changed while its certificate status was checked".to_string());
     }
 
     Ok(status.as_str().to_string())
@@ -605,16 +562,14 @@ fn handle_webui_keybox_command() -> Option<Result<String, String>> {
         ),
         "--webui-get-keybox-state" => {
             if args.next().is_some() {
-                return Some(Err(
-                    "--webui-get-keybox-state does not accept arguments".to_string()
-                ));
+                return Some(Err("--webui-get-keybox-state does not accept arguments".to_string()));
             }
             Some(webui_keybox_state())
         }
         "--webui-check-keybox-revocation" => {
             if args.next().is_some() {
                 return Some(Err(
-                    "--webui-check-keybox-revocation does not accept arguments".to_string(),
+                    "--webui-check-keybox-revocation does not accept arguments".to_string()
                 ));
             }
             Some(webui_keybox_revocation_status())
@@ -629,9 +584,7 @@ fn handle_webui_diagnostics_command() -> Option<Result<String, String>> {
     match args.next()?.as_str() {
         "--webui-get-diagnostics" => {
             if args.next().is_some() {
-                return Some(Err(
-                    "--webui-get-diagnostics does not accept arguments".to_string()
-                ));
+                return Some(Err("--webui-get-diagnostics does not accept arguments".to_string()));
             }
             // This short-lived command needs Binder but never forks the
             // privileged helper. The daemon initializes Binder after its fork.
@@ -641,7 +594,7 @@ fn handle_webui_diagnostics_command() -> Option<Result<String, String>> {
         "--webui-get-keybox-inspector" => {
             if args.next().is_some() {
                 return Some(Err(
-                    "--webui-get-keybox-inspector does not accept arguments".to_string(),
+                    "--webui-get-keybox-inspector does not accept arguments".to_string()
                 ));
             }
             Some(webui_keybox_inspector())
@@ -657,7 +610,7 @@ fn handle_webui_app_patch_command(
         "--webui-get-app-patch-levels" => {
             if args.next().is_some() {
                 return Some(Err(
-                    "--webui-get-app-patch-levels does not accept arguments".to_string(),
+                    "--webui-get-app-patch-levels does not accept arguments".to_string()
                 ));
             }
             Some(config::app_patch_levels_json().map_err(|error| format!("{error:#}")))
@@ -665,7 +618,7 @@ fn handle_webui_app_patch_command(
         "--webui-set-app-patch-levels-base64" => {
             let Some(payload) = args.next() else {
                 return Some(Err(
-                    "--webui-set-app-patch-levels-base64 requires one payload".to_string(),
+                    "--webui-set-app-patch-levels-base64 requires one payload".to_string()
                 ));
             };
             if payload.len() > 4096 || args.next().is_some() {
@@ -702,9 +655,7 @@ fn handle_webui_soter_beta_command(
     match args.next()?.as_str() {
         "--webui-get-soter-beta" => {
             if args.next().is_some() {
-                return Some(Err(
-                    "--webui-get-soter-beta does not accept arguments".to_string()
-                ));
+                return Some(Err("--webui-get-soter-beta does not accept arguments".to_string()));
             }
             Some(soter_beta::state_json().map_err(|error| format!("{error:#}")))
         }
@@ -712,7 +663,7 @@ fn handle_webui_soter_beta_command(
             let value = args.next();
             if value.is_none() || args.next().is_some() {
                 return Some(Err(
-                    "--webui-set-soter-beta requires exactly one argument: 0 or 1".to_string(),
+                    "--webui-set-soter-beta requires exactly one argument: 0 or 1".to_string()
                 ));
             }
             let enabled = match pif_common::soter::parse(value.unwrap().as_bytes()) {
@@ -752,18 +703,14 @@ fn handle_webui_soter_hal_command(
     match command.as_str() {
         "--webui-get-soter-hal" => {
             if args.next().is_some() {
-                return Some(Err(
-                    "--webui-get-soter-hal does not accept arguments".to_string()
-                ));
+                return Some(Err("--webui-get-soter-hal does not accept arguments".to_string()));
             }
             Some(soter_hal::state_json().map_err(|error| format!("{error:#}")))
         }
         "--webui-set-soter-hal" | "--webui-set-soter-hal-base64" => {
             let payload = args.next();
             if payload.is_none() || args.next().is_some() {
-                return Some(Err(format!(
-                    "{command} requires exactly one configuration argument"
-                )));
+                return Some(Err(format!("{command} requires exactly one configuration argument")));
             }
             let payload = payload.expect("payload checked above");
             let parsed = if command == "--webui-set-soter-hal-base64" {
@@ -851,13 +798,13 @@ fn handle_webui_security_bulletin_command() -> Option<Result<String, String>> {
         Some(url) => url,
         None => {
             return Some(Err(
-                "--webui-fetch-security-bulletin requires exactly one official URL".to_string(),
+                "--webui-fetch-security-bulletin requires exactly one official URL".to_string()
             ))
         }
     };
     if args.next().is_some() {
         return Some(Err(
-            "--webui-fetch-security-bulletin accepts exactly one official URL".to_string(),
+            "--webui-fetch-security-bulletin accepts exactly one official URL".to_string()
         ));
     }
 
@@ -876,7 +823,7 @@ fn handle_webui_pif_command() -> Option<Result<String, String>> {
         "--webui-get-pif-fingerprint-state" => {
             if args.next().is_some() {
                 return Some(Err(
-                    "--webui-get-pif-fingerprint-state does not accept arguments".to_string(),
+                    "--webui-get-pif-fingerprint-state does not accept arguments".to_string()
                 ));
             }
             prepare_android_storage();
@@ -884,9 +831,7 @@ fn handle_webui_pif_command() -> Option<Result<String, String>> {
         }
         "--webui-list-pif-devices" => {
             if args.next().is_some() {
-                return Some(Err(
-                    "--webui-list-pif-devices does not accept arguments".to_string()
-                ));
+                return Some(Err("--webui-list-pif-devices does not accept arguments".to_string()));
             }
             Some(pif_spoof::list_devices().map_err(|error| format!("{error:#}")))
         }
@@ -895,7 +840,7 @@ fn handle_webui_pif_command() -> Option<Result<String, String>> {
                 Some(product) => product,
                 None => {
                     return Some(Err(
-                        "--webui-apply-pif-fingerprint requires exactly one product".to_string(),
+                        "--webui-apply-pif-fingerprint requires exactly one product".to_string()
                     ))
                 }
             };
@@ -925,7 +870,7 @@ fn handle_webui_pif_command() -> Option<Result<String, String>> {
         "--webui-disable-pif-fingerprint" => {
             if args.next().is_some() {
                 return Some(Err(
-                    "--webui-disable-pif-fingerprint does not accept arguments".to_string(),
+                    "--webui-disable-pif-fingerprint does not accept arguments".to_string()
                 ));
             }
             prepare_android_storage();
@@ -943,9 +888,7 @@ fn handle_webui_activity_command() -> Option<Result<String, String>> {
     match command.as_str() {
         "--webui-get-activity-log" => {
             if args.next().is_some() {
-                return Some(Err(
-                    "--webui-get-activity-log does not accept arguments".to_string()
-                ));
+                return Some(Err("--webui-get-activity-log does not accept arguments".to_string()));
             }
             prepare_android_storage();
             Some(webui_activity::list_json().map_err(|error| format!("{error:#}")))
@@ -953,12 +896,12 @@ fn handle_webui_activity_command() -> Option<Result<String, String>> {
         "--webui-record-activity" => {
             let Some(action) = args.next() else {
                 return Some(Err(
-                    "--webui-record-activity requires an action and base64 detail".to_string(),
+                    "--webui-record-activity requires an action and base64 detail".to_string()
                 ));
             };
             let Some(encoded_detail) = args.next() else {
                 return Some(Err(
-                    "--webui-record-activity requires an action and base64 detail".to_string(),
+                    "--webui-record-activity requires an action and base64 detail".to_string()
                 ));
             };
             if args.next().is_some() {
@@ -1009,9 +952,7 @@ fn handle_webui_maintenance_command(
     match args.next()?.as_str() {
         "--webui-clear-gms-cache" => {
             if args.next().is_some() {
-                return Some(Err(
-                    "--webui-clear-gms-cache does not accept arguments".into()
-                ));
+                return Some(Err("--webui-clear-gms-cache does not accept arguments".into()));
             }
             Some(gms_cache::clear().map_err(|error| format!("{error:#}")))
         }
@@ -1167,10 +1108,7 @@ fn main() {
     }
 
     // A stale WebUI must not start the daemon after a helper command is removed.
-    if std::env::args()
-        .nth(1)
-        .is_some_and(|arg| arg.starts_with("--webui-"))
-    {
+    if std::env::args().nth(1).is_some_and(|arg| arg.starts_with("--webui-")) {
         eprintln!("unsupported WebUI command");
         std::process::exit(2);
     }
@@ -1197,13 +1135,8 @@ fn run() -> Result<()> {
     // cannot inherit and retain the flock file description.
     let security_patch_lock = security_patch::acquire_operation_lock()
         .context("failed to lock security-patch operations during startup")?;
-    let config_file = config::bootstrap_config_file().context("failed to bootstrap config")?;
-    let level = config_file
-        .main
-        .log_level
-        .trim()
-        .parse()
-        .unwrap_or(LevelFilter::Debug);
+    let mut config_file = config::bootstrap_config_file().context("failed to bootstrap config")?;
+    let level = config_file.main.log_level.trim().parse().unwrap_or(LevelFilter::Debug);
     log::set_max_level(level);
 
     info!("starting OhMyKeymint");
@@ -1215,7 +1148,7 @@ fn run() -> Result<()> {
     info!("initial process state");
     let _ = rsbinder::ProcessState::init_default();
 
-    let resolved_trust = plat::vbmeta::bootstrap_vbmeta(&config_file, &security_patch_lock)
+    let resolved_trust = plat::vbmeta::bootstrap_vbmeta(&mut config_file, &security_patch_lock)
         .context("failed to bootstrap vbmeta")?;
     prepare_android_storage();
     config::install_runtime_config(config_file, resolved_trust)
@@ -1321,11 +1254,9 @@ mod tests {
             vec!["--webui-set-soter-app-target-base64", "e30="],
             vec!["--webui-set-soter-app-target-base64", "bad", "extra"],
         ] {
-            assert!(
-                handle_webui_soter_hal_command(arguments.into_iter().map(str::to_string))
-                    .unwrap()
-                    .is_err()
-            );
+            assert!(handle_webui_soter_hal_command(arguments.into_iter().map(str::to_string))
+                .unwrap()
+                .is_err());
         }
     }
 
@@ -1337,11 +1268,9 @@ mod tests {
             vec!["--webui-repair-rkp", "true"],
             vec!["--webui-repair-rkp", "--confirm-persistent-write", "extra"],
         ] {
-            assert!(
-                handle_webui_maintenance_command(arguments.into_iter().map(str::to_string))
-                    .unwrap()
-                    .is_err()
-            );
+            assert!(handle_webui_maintenance_command(arguments.into_iter().map(str::to_string))
+                .unwrap()
+                .is_err());
         }
         assert!(handle_webui_maintenance_command(["unknown".to_string()].into_iter()).is_none());
     }
@@ -1360,11 +1289,9 @@ mod tests {
             vec!["--rkp-native-worker"],
             vec!["--rkp-native-worker", "/tmp", "extra"],
         ] {
-            assert!(
-                handle_local_rkp_command(args.into_iter().map(str::to_owned))
-                    .unwrap()
-                    .is_err()
-            );
+            assert!(handle_local_rkp_command(args.into_iter().map(str::to_owned))
+                .unwrap()
+                .is_err());
         }
         assert!(handle_local_rkp_command(["unknown".into()].into_iter()).is_none());
     }
@@ -1378,11 +1305,9 @@ mod tests {
             vec!["--webui-set-soter-beta", "1", "0"],
             vec!["--webui-set-soter-beta", "1\n"],
         ] {
-            assert!(
-                handle_webui_soter_beta_command(arguments.into_iter().map(str::to_string))
-                    .unwrap()
-                    .is_err()
-            );
+            assert!(handle_webui_soter_beta_command(arguments.into_iter().map(str::to_string))
+                .unwrap()
+                .is_err());
         }
     }
 

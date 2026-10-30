@@ -3,7 +3,7 @@ name: Build OhMyKeymint
 on:
   push:
     tags:
-      - 'v*'
+      - '*'
     branches: [ "master" ]
     paths-ignore:
       - '**.md'
@@ -29,7 +29,7 @@ jobs:
       id: boringssl-cache
       with:
         path: boringssl/build
-        key: boringssl-${{ hashFiles('boringssl/.git/HEAD', 'boringssl/.git/refs/heads/main') }}
+        key: boringssl-ndk30-api26-${{ hashFiles('boringssl/.git/HEAD', 'boringssl/.git/refs/heads/main') }}
 
     - name: Install Rust toolchain
       if: steps.boringssl-cache.outputs.cache-hit != 'true'
@@ -41,11 +41,13 @@ jobs:
     - name: Install Android SDK
       if: steps.boringssl-cache.outputs.cache-hit != 'true'
       uses: android-actions/setup-android@v4
+      with:
+        packages: platform-tools
     - name: Install Android NDK and bindgen
       if: steps.boringssl-cache.outputs.cache-hit != 'true'
       run: |
         cargo install bindgen-cli
-        echo "y" | sdkmanager --install "ndk;29.0.14206865" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
+        echo "y" | sdkmanager --install "ndk;30.0.16248370" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
         echo "y" | sdkmanager --install "ndk-bundle" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
         echo "y" | sdkmanager --install "cmake;4.1.2" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
 
@@ -62,11 +64,12 @@ jobs:
         export PATH="~/.cargo/bin:$PATH"
         $ANDROID_SDK_ROOT/cmake/4.1.2/bin/cmake -GNinja -B build \
           -DRUST_BINDINGS=aarch64-linux-android \
-          -DCMAKE_SYSROOT=$ANDROID_SDK_ROOT/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/sysroot/ \
-          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_SDK_ROOT/ndk/29.0.14206865/build/cmake/android.toolchain.cmake \
+          -DCMAKE_SYSROOT=$ANDROID_SDK_ROOT/ndk/30.0.16248370/toolchains/llvm/prebuilt/linux-x86_64/sysroot/ \
+          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_SDK_ROOT/ndk/30.0.16248370/build/cmake/android.toolchain.cmake \
+          -DCMAKE_C_FLAGS=-mno-outline-atomics \
+          -DCMAKE_CXX_FLAGS=-mno-outline-atomics \
           -DANDROID_ABI=arm64-v8a \
-          -DANDROID_PLATFORM=android-21 \
-          -DANDROID_STL=c++_shared
+          -DANDROID_PLATFORM=android-26
         ninja -j$(nproc) -C build
     - name: Tar BoringSSL
       run: |
@@ -78,6 +81,70 @@ jobs:
         name: boringssl.tar.gz
         path: boringssl.tar.gz
         retention-days: 3
+
+  lint:
+    runs-on: ubuntu-latest
+    needs: build-boringssl
+    permissions:
+      contents: read
+    env:
+      BORINGSSL_BUILD_DIR: ${{ github.workspace }}/boringssl/build
+      CARGO_HUSKY_DONT_INSTALL_HOOKS: '1'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+      with:
+        submodules: recursive
+
+    - name: Install Rust toolchain
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: nightly
+        target: aarch64-linux-android
+        components: rustfmt, clippy
+
+    - name: Install cargo-deny
+      run: cargo install cargo-deny --version 0.20.2 --locked
+
+    - name: Install Android SDK
+      uses: android-actions/setup-android@v4
+      with:
+        packages: platform-tools
+
+    - name: Install Android build dependencies
+      run: |
+        sdkmanager --install "ndk;30.0.16248370" "build-tools;35.0.0" --sdk_root="$ANDROID_SDK_ROOT"
+        sudo apt-get update
+        sudo apt-get install -y protobuf-compiler
+
+    - name: Download BoringSSL
+      uses: actions/download-artifact@v8
+      with:
+        name: boringssl.tar.gz
+        path: .
+
+    - name: Configure Cargo for Android target
+      run: |
+        tar xf boringssl.tar.gz
+        python scripts/setup_cargo_config.py \
+          --force \
+          --ndk-root "$ANDROID_SDK_ROOT/ndk/30.0.16248370" \
+          --api-level 26 \
+          --host-tag linux-x86_64
+        cat >> .cargo/config.toml <<EOF
+
+        [patch.crates-io]
+        bssl-sys = { path = "$GITHUB_WORKSPACE/boringssl/rust/bssl-sys" }
+        EOF
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Check Clippy
+      run: cargo clippy --target aarch64-linux-android --workspace --all-targets -- -D warnings
+
+    - name: Check dependencies
+      run: cargo deny --workspace check
 
   setup-and-build:
     runs-on: ubuntu-latest
@@ -143,9 +210,11 @@ jobs:
 
     - name: Install Android SDK
       uses: android-actions/setup-android@v4
+      with:
+        packages: platform-tools
     - name: Install Android NDK and bridge build tools
       run: |
-        echo "y" | sdkmanager --install "ndk;29.0.14206865" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
+        echo "y" | sdkmanager --install "ndk;30.0.16248370" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
         echo "y" | sdkmanager --install "build-tools;35.0.0" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
     - name: Install protoc
       run: |
@@ -163,7 +232,8 @@ jobs:
         tar xf boringssl.tar.gz
         python scripts/setup_cargo_config.py \
           --force \
-          --ndk-root "$ANDROID_SDK_ROOT/ndk/29.0.14206865" \
+          --ndk-root "$ANDROID_SDK_ROOT/ndk/30.0.16248370" \
+          --api-level 26 \
           --host-tag linux-x86_64
         cat >> .cargo/config.toml <<EOF
 

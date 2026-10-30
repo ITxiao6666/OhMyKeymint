@@ -305,11 +305,7 @@ impl KeyBox {
         }
         let identity_digest = Self::compute_identity_digest(rsa_info.as_ref(), ec_info.as_ref())?;
 
-        Ok(Self {
-            rsa_info,
-            ec_info,
-            identity_digest,
-        })
+        Ok(Self { rsa_info, ec_info, identity_digest })
     }
 
     fn build_rsa_info(entry: ParsedKeyEntry) -> Result<CertSignAlgoInfo> {
@@ -330,16 +326,10 @@ impl KeyBox {
         let chain: Vec<keymint::Certificate> = entry
             .chain
             .into_iter()
-            .map(|encoded_certificate| keymint::Certificate {
-                encoded_certificate,
-            })
+            .map(|encoded_certificate| keymint::Certificate { encoded_certificate })
             .collect();
         validate_chain_matches_key(&key, &chain, KeyAlgorithm::Rsa)?;
-        Ok(CertSignAlgoInfo {
-            key,
-            key_der,
-            chain,
-        })
+        Ok(CertSignAlgoInfo { key, key_der, chain })
     }
 
     fn build_ec_info(entry: ParsedKeyEntry) -> Result<CertSignAlgoInfo> {
@@ -368,16 +358,10 @@ impl KeyBox {
         let chain: Vec<keymint::Certificate> = entry
             .chain
             .into_iter()
-            .map(|encoded_certificate| keymint::Certificate {
-                encoded_certificate,
-            })
+            .map(|encoded_certificate| keymint::Certificate { encoded_certificate })
             .collect();
         validate_chain_matches_key(&key, &chain, KeyAlgorithm::Ec)?;
-        Ok(CertSignAlgoInfo {
-            key,
-            key_der,
-            chain,
-        })
+        Ok(CertSignAlgoInfo { key, key_der, chain })
     }
 
     fn compute_identity_digest(
@@ -416,10 +400,7 @@ impl KeyBox {
     pub fn metadata(&self) -> KeyboxMetadata {
         let chains = [self.ec_info.as_ref(), self.rsa_info.as_ref()];
         combine_chain_metadata(
-            chains
-                .into_iter()
-                .flatten()
-                .map(|info| metadata_for_chain(&info.chain)),
+            chains.into_iter().flatten().map(|info| metadata_for_chain(&info.chain)),
         )
     }
 
@@ -428,23 +409,14 @@ impl KeyBox {
     /// caller; they never affect KeyMint startup or key generation.
     pub fn inspector(&self) -> KeyboxInspector {
         KeyboxInspector {
-            rsa: self
-                .rsa_info
-                .as_ref()
-                .and_then(|info| inspector_for_chain("RSA", &info.chain)),
-            ec: self
-                .ec_info
-                .as_ref()
-                .and_then(|info| inspector_for_chain("EC", &info.chain)),
+            rsa: self.rsa_info.as_ref().and_then(|info| inspector_for_chain("RSA", &info.chain)),
+            ec: self.ec_info.as_ref().and_then(|info| inspector_for_chain("EC", &info.chain)),
         }
     }
 
     fn certificate_serials(&self) -> Result<Vec<String>> {
         let mut serials = BTreeSet::new();
-        for info in [self.ec_info.as_ref(), self.rsa_info.as_ref()]
-            .into_iter()
-            .flatten()
-        {
+        for info in [self.ec_info.as_ref(), self.rsa_info.as_ref()].into_iter().flatten() {
             for encoded in &info.chain {
                 serials.insert(canonical_certificate_serial(&encoded.encoded_certificate)?);
             }
@@ -497,10 +469,7 @@ impl KeyBox {
     ) -> Result<()> {
         let entry = ParsedKeyEntry {
             key_der,
-            chain: chain
-                .into_iter()
-                .map(|certificate| certificate.encoded_certificate)
-                .collect(),
+            chain: chain.into_iter().map(|certificate| certificate.encoded_certificate).collect(),
         };
         match algorithm {
             KeyAlgorithm::Ec => self.ec_info = Some(Self::build_ec_info(entry)?),
@@ -511,18 +480,13 @@ impl KeyBox {
 
     pub fn to_xml_string(&self) -> String {
         let key_blocks = [
-            self.ec_info
-                .as_ref()
-                .map(|info| Self::to_xml_block(KeyAlgorithm::Ec, info)),
-            self.rsa_info
-                .as_ref()
-                .map(|info| Self::to_xml_block(KeyAlgorithm::Rsa, info)),
+            self.ec_info.as_ref().map(|info| Self::to_xml_block(KeyAlgorithm::Ec, info)),
+            self.rsa_info.as_ref().map(|info| Self::to_xml_block(KeyAlgorithm::Rsa, info)),
         ]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
         .join("\n");
-
         format!(
             concat!(
                 "<?xml version=\"1.0\"?>\n",
@@ -577,11 +541,8 @@ fn canonical_certificate_serial(encoded_certificate: &[u8]) -> Result<String> {
     let certificate = <Certificate as x509_der::Decode>::from_der(encoded_certificate)
         .context("failed to parse a certificate while reading its serial number")?;
     let bytes = certificate.tbs_certificate().serial_number().as_bytes();
-    let significant = bytes
-        .iter()
-        .position(|byte| *byte != 0)
-        .map(|offset| &bytes[offset..])
-        .unwrap_or_default();
+    let significant =
+        bytes.iter().position(|byte| *byte != 0).map(|offset| &bytes[offset..]).unwrap_or_default();
     if significant.is_empty() {
         return Ok("0".to_string());
     }
@@ -606,10 +567,7 @@ fn inspector_for_chain(
         })
         .collect::<Option<Vec<_>>>()?;
     let leaf = certificates.first()?;
-    let serials = certificates
-        .iter()
-        .map(|certificate| certificate.serial.clone())
-        .collect();
+    let serials = certificates.iter().map(|certificate| certificate.serial.clone()).collect();
     Some(KeyboxChainInspector {
         algorithm,
         chain_length: chain.len(),
@@ -658,11 +616,7 @@ fn combine_chain_metadata(chains: impl IntoIterator<Item = ChainMetadata>) -> Ke
     }
 
     KeyboxMetadata {
-        source: if source_unknown {
-            KeyboxSource::Unknown
-        } else {
-            source.unwrap_or_default()
-        },
+        source: if source_unknown { KeyboxSource::Unknown } else { source.unwrap_or_default() },
         level,
     }
 }
@@ -737,9 +691,7 @@ fn validate_chain_matches_key(
     chain: &[keymint::Certificate],
     algorithm: KeyAlgorithm,
 ) -> Result<()> {
-    let first_cert = chain
-        .first()
-        .context("certificate chain must contain a leaf certificate")?;
+    let first_cert = chain.first().context("certificate chain must contain a leaf certificate")?;
     let certificate = <Certificate as x509_der::Decode>::from_der(&first_cert.encoded_certificate)
         .with_context(|| {
             format!(
@@ -795,10 +747,7 @@ struct ChainMetadata {
 fn metadata_for_chain(chain: &[keymint::Certificate]) -> ChainMetadata {
     metadata_for_chain_with_roots(
         chain,
-        &[
-            GOOGLE_HARDWARE_ROOT_SPKI_DER.as_slice(),
-            GOOGLE_EC_ROOT_SPKI_DER.as_slice(),
-        ],
+        &[GOOGLE_HARDWARE_ROOT_SPKI_DER.as_slice(), GOOGLE_EC_ROOT_SPKI_DER.as_slice()],
     )
 }
 
@@ -843,14 +792,9 @@ fn metadata_for_chain_with_roots(
         };
     }
 
-    let has_rkp_extension = leaf
-        .tbs_certificate()
-        .extensions()
-        .is_some_and(|extensions| {
-            extensions
-                .iter()
-                .any(|extension| extension.extn_id == RKP_PROVISIONING_OID)
-        });
+    let has_rkp_extension = leaf.tbs_certificate().extensions().is_some_and(|extensions| {
+        extensions.iter().any(|extension| extension.extn_id == RKP_PROVISIONING_OID)
+    });
     let root_adjacent = parsed_chain.iter().rev().nth(1);
     let has_factory_serial = root_adjacent.is_some_and(|certificate| {
         certificate
@@ -947,9 +891,7 @@ fn decode_pem(pem: &str) -> Result<Vec<u8>> {
         bail!("empty PEM payload");
     }
 
-    STANDARD
-        .decode(base64_body.as_bytes())
-        .context("failed to decode PEM payload")
+    STANDARD.decode(base64_body.as_bytes()).context("failed to decode PEM payload")
 }
 
 fn encode_pem_block(label: &str, der: &[u8]) -> String {
@@ -1022,11 +964,8 @@ pub fn installed_keybox_state_and_metadata(
     let Ok(keybox) = KeyBox::from_xml_str(xml) else {
         return Ok((KeyboxFileState::Invalid, KeyboxMetadata::default(), None));
     };
-    let state = if is_bundled_keybox_xml(xml) {
-        KeyboxFileState::Bundled
-    } else {
-        KeyboxFileState::Custom
-    };
+    let state =
+        if is_bundled_keybox_xml(xml) { KeyboxFileState::Bundled } else { KeyboxFileState::Custom };
     let metadata = keybox.metadata();
     let serials = keybox.certificate_serials().ok();
     Ok((state, metadata, serials))
@@ -1048,11 +987,8 @@ pub fn installed_keybox_inspector() -> Result<(KeyboxFileState, KeyboxInspector)
     let Ok(keybox) = KeyBox::from_xml_str(xml) else {
         return Ok((KeyboxFileState::Invalid, KeyboxInspector::default()));
     };
-    let state = if is_bundled_keybox_xml(xml) {
-        KeyboxFileState::Bundled
-    } else {
-        KeyboxFileState::Custom
-    };
+    let state =
+        if is_bundled_keybox_xml(xml) { KeyboxFileState::Bundled } else { KeyboxFileState::Custom };
     Ok((state, keybox.inspector()))
 }
 
@@ -1064,10 +1000,7 @@ pub fn ensure_google_attestation_status_cache() -> Result<()> {
     let path = Path::new(GOOGLE_ATTESTATION_STATUS_CACHE_PATH);
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_file() => {
-            bail!(
-                "Google attestation status cache is not a regular file: {}",
-                path.display()
-            )
+            bail!("Google attestation status cache is not a regular file: {}", path.display())
         }
         Ok(metadata) => {
             if metadata.len() <= MAX_ATTESTATION_STATUS_BYTES as u64 {
@@ -1084,10 +1017,7 @@ pub fn ensure_google_attestation_status_cache() -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
             return Err(error).with_context(|| {
-                format!(
-                    "failed to inspect the Google attestation status cache {}",
-                    path.display()
-                )
+                format!("failed to inspect the Google attestation status cache {}", path.display())
             })
         }
     }
@@ -1207,25 +1137,16 @@ fn read_and_classify_google_attestation_status_cache(
 fn read_google_attestation_status_cache() -> Result<String> {
     let path = Path::new(GOOGLE_ATTESTATION_STATUS_CACHE_PATH);
     let metadata = fs::symlink_metadata(path).with_context(|| {
-        format!(
-            "failed to inspect the Google attestation status cache {}",
-            path.display()
-        )
+        format!("failed to inspect the Google attestation status cache {}", path.display())
     })?;
     if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        bail!(
-            "Google attestation status cache is not a regular file: {}",
-            path.display()
-        );
+        bail!("Google attestation status cache is not a regular file: {}", path.display());
     }
     if metadata.len() > MAX_ATTESTATION_STATUS_BYTES as u64 {
         bail!("Google attestation status cache exceeds the 512 KiB limit");
     }
     let contents = fs::read(path).with_context(|| {
-        format!(
-            "failed to read the Google attestation status cache {}",
-            path.display()
-        )
+        format!("failed to read the Google attestation status cache {}", path.display())
     })?;
     String::from_utf8(contents).context("Google attestation status cache is not UTF-8")
 }
@@ -1248,10 +1169,7 @@ fn persist_google_attestation_status_cache(contents: &str) -> Result<()> {
         KEYSTORE_GID,
     )
     .with_context(|| {
-        format!(
-            "failed to atomically replace Google attestation status cache {}",
-            path.display()
-        )
+        format!("failed to atomically replace Google attestation status cache {}", path.display())
     })?;
 
     let saved = read_google_attestation_status_cache()?;
@@ -1286,10 +1204,7 @@ fn validate_google_attestation_status_cache_target(path: &Path) -> Result<()> {
 
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-            bail!(
-                "Google attestation status cache is not a regular file: {}",
-                path.display()
-            );
+            bail!("Google attestation status cache is not a regular file: {}", path.display());
         }
     }
     Ok(())
@@ -1394,10 +1309,7 @@ pub fn install_keybox_xml(contents: &[u8]) -> Result<()> {
 pub(crate) fn validate_issued_rkp_xml(contents: &[u8]) -> Result<()> {
     validate_issued_rkp_xml_with_roots(
         contents,
-        &[
-            GOOGLE_HARDWARE_ROOT_SPKI_DER.as_slice(),
-            GOOGLE_EC_ROOT_SPKI_DER.as_slice(),
-        ],
+        &[GOOGLE_HARDWARE_ROOT_SPKI_DER.as_slice(), GOOGLE_EC_ROOT_SPKI_DER.as_slice()],
     )
 }
 
@@ -1409,10 +1321,7 @@ fn validate_issued_rkp_xml_with_roots(contents: &[u8], roots: &[&[u8]]) -> Resul
     if keybox.rsa_info.is_some() {
         bail!("issued RKP result must contain only its generated EC key");
     }
-    let info = keybox
-        .ec_info
-        .as_ref()
-        .context("issued RKP result has no EC key")?;
+    let info = keybox.ec_info.as_ref().context("issued RKP result has no EC key")?;
     if !(2..=8).contains(&info.chain.len()) {
         bail!("invalid issued RKP certificate count");
     }
@@ -1454,21 +1363,14 @@ fn validate_issued_rkp_xml_with_roots(contents: &[u8], roots: &[&[u8]]) -> Resul
                 .iter()
                 .filter(|cert| {
                     cert.subject() != cert.issuer()
-                        && cert
-                            .basic_constraints()
-                            .ok()
-                            .flatten()
-                            .is_some_and(|bc| bc.value.ca)
+                        && cert.basic_constraints().ok().flatten().is_some_and(|bc| bc.value.ca)
                 })
                 .count();
             if intermediate_cas > limit as usize {
                 bail!("issued RKP chain exceeds CA path length");
             }
         }
-        if let Some(usage) = issuer
-            .key_usage()
-            .map_err(|_| anyhow!("invalid RKP key usage"))?
-        {
+        if let Some(usage) = issuer.key_usage().map_err(|_| anyhow!("invalid RKP key usage"))? {
             if !usage.value.key_cert_sign() {
                 bail!("RKP issuer is not permitted to sign certificates");
             }
@@ -1495,14 +1397,13 @@ fn is_bundled_keybox_xml(xml: &str) -> bool {
 
 fn retire_stale_keybox_bound_entries(current_identity: [u8; 32]) {
     if !db_retirement_allowed() {
-        warn!("skipping stale keybox-bound DB retirement while active keybox came from fallback");
+        debug!("skipping stale keybox-bound DB retirement (disabled or fallback keybox active)");
         return;
     }
 
-    match crate::global::DB.with(|db| {
-        db.borrow_mut()
-            .retire_stale_keybox_bound_entries(current_identity)
-    }) {
+    match crate::global::DB
+        .with(|db| db.borrow_mut().retire_stale_keybox_bound_entries(current_identity))
+    {
         Ok(0) => debug!("no stale keybox-bound key entries needed retirement"),
         Ok(retired) => info!("retired {retired} stale keybox-bound key entries"),
         Err(error) => error!("failed to retire stale keybox-bound key entries: {error:#}"),
@@ -1537,18 +1438,23 @@ fn install_keybox(
 
 pub fn db_retirement_allowed() -> bool {
     KEYBOX_DB_RETIRE_ALLOWED.load(Ordering::Acquire)
+        && match crate::config::config().read() {
+            Ok(config) => config.main.retire_stale_keybox_bound_keys,
+            Err(_) => {
+                error!("config lock poisoned while checking keybox retirement");
+                false
+            }
+        }
 }
 
 fn is_fallback_continuation(keybox: &KeyBox, contents: &str) -> bool {
-    let current_identity = KEYBOX
-        .read()
-        .map(|current| current.identity_digest())
-        .unwrap_or([0u8; 32]);
+    let current_identity =
+        KEYBOX.read().map(|current| current.identity_digest()).unwrap_or([0u8; 32]);
     is_fallback_continuation_with_state(
         keybox,
         contents,
         KEYBOX_RUNTIME_LOADED.load(Ordering::Acquire),
-        db_retirement_allowed(),
+        KEYBOX_DB_RETIRE_ALLOWED.load(Ordering::Acquire),
         current_identity,
     )
 }
@@ -1574,10 +1480,7 @@ fn load_keybox_with_fallback(path: &str) -> Result<(KeyBox, bool)> {
                 Ok((keybox, fallback_origin))
             }
             Err(error) => {
-                warn!(
-                    "invalid keybox.xml at {}: {:#}; rewriting bundled template",
-                    path, error
-                );
+                warn!("invalid keybox.xml at {}: {:#}; rewriting bundled template", path, error);
                 write_bundled_keybox(path)?;
                 Ok((KeyBox::new(), true))
             }
@@ -1600,15 +1503,9 @@ fn reload_from_disk_inner(retire_db_entries: bool) -> Result<bool> {
     let (keybox, used_fallback) = load_keybox_with_fallback(KEYBOX_PATH)?;
     let changed = install_keybox(keybox, retire_db_entries, !used_fallback);
     if changed {
-        info!(
-            "active keybox identity updated from {} (fallback={})",
-            KEYBOX_PATH, used_fallback
-        );
+        info!("active keybox identity updated from {} (fallback={})", KEYBOX_PATH, used_fallback);
     } else {
-        debug!(
-            "keybox reload completed without identity change (fallback={})",
-            used_fallback
-        );
+        debug!("keybox reload completed without identity change (fallback={})", used_fallback);
     }
     Ok(changed)
 }
@@ -1731,10 +1628,7 @@ mod tests {
         let key_pair = KeyPair::generate().unwrap();
         let certificate = params.self_signed(&key_pair).unwrap();
 
-        assert_eq!(
-            canonical_certificate_serial(certificate.der()).unwrap(),
-            "8001"
-        );
+        assert_eq!(canonical_certificate_serial(certificate.der()).unwrap(), "8001");
     }
 
     #[test]
@@ -1757,10 +1651,9 @@ mod tests {
     #[test]
     fn inspector_preserves_each_certificate_metadata_and_chain_order() {
         let keybox = KeyBox::from_xml_str(BUNDLED_KEYBOX_XML).unwrap();
-        for (algorithm, info) in [
-            ("RSA", keybox.rsa_info.as_ref().unwrap()),
-            ("EC", keybox.ec_info.as_ref().unwrap()),
-        ] {
+        for (algorithm, info) in
+            [("RSA", keybox.rsa_info.as_ref().unwrap()), ("EC", keybox.ec_info.as_ref().unwrap())]
+        {
             let inspected = inspector_for_chain(algorithm, &info.chain).unwrap();
             assert_eq!(inspected.algorithm, algorithm);
             assert_eq!(inspected.chain_length, info.chain.len());
@@ -1783,14 +1676,8 @@ mod tests {
                 );
                 assert_eq!(actual.subject, parsed.subject().to_string());
                 assert_eq!(actual.issuer, parsed.issuer().to_string());
-                assert_eq!(
-                    actual.valid_from,
-                    parsed.validity().not_before.to_rfc2822().unwrap()
-                );
-                assert_eq!(
-                    actual.valid_until,
-                    parsed.validity().not_after.to_rfc2822().unwrap()
-                );
+                assert_eq!(actual.valid_from, parsed.validity().not_before.to_rfc2822().unwrap());
+                assert_eq!(actual.valid_until, parsed.validity().not_after.to_rfc2822().unwrap());
             }
             let leaf = &inspected.certificates[0];
             assert_eq!(inspected.leaf_subject, leaf.subject);
@@ -1803,10 +1690,9 @@ mod tests {
     #[test]
     fn inspector_rejects_a_chain_with_any_malformed_certificate() {
         let keybox = KeyBox::from_xml_str(BUNDLED_KEYBOX_XML).unwrap();
-        for (algorithm, info) in [
-            ("RSA", keybox.rsa_info.as_ref().unwrap()),
-            ("EC", keybox.ec_info.as_ref().unwrap()),
-        ] {
+        for (algorithm, info) in
+            [("RSA", keybox.rsa_info.as_ref().unwrap()), ("EC", keybox.ec_info.as_ref().unwrap())]
+        {
             for index in 0..info.chain.len() {
                 let mut chain = info.chain.clone();
                 chain[index].encoded_certificate = vec![0xff, 0x00];
@@ -1959,12 +1845,8 @@ mod tests {
         let leaf = certificate_with_organization("TEE", true);
         let root = decode_pem(GOOGLE_EC_ROOT_CERT_PEM).unwrap();
         let metadata = metadata_for_chain(&[
-            keymint::Certificate {
-                encoded_certificate: leaf,
-            },
-            keymint::Certificate {
-                encoded_certificate: root,
-            },
+            keymint::Certificate { encoded_certificate: leaf },
+            keymint::Certificate { encoded_certificate: root },
         ]);
         assert_eq!(metadata.source, KeyboxSource::Unknown);
         assert_eq!(metadata.level, KeyboxLevel::Tee);
@@ -2011,18 +1893,14 @@ mod tests {
     #[test]
     fn pinned_google_ec_root_without_provisioning_cert_is_unknown() {
         let root = decode_pem(GOOGLE_EC_ROOT_CERT_PEM).unwrap();
-        let metadata = metadata_for_chain(&[keymint::Certificate {
-            encoded_certificate: root,
-        }]);
+        let metadata = metadata_for_chain(&[keymint::Certificate { encoded_certificate: root }]);
         assert_eq!(metadata.source, KeyboxSource::Unknown);
     }
 
     #[test]
     fn pinned_legacy_google_root_without_provisioning_cert_is_unknown() {
         let root = decode_pem(GOOGLE_HARDWARE_ROOT_CERT_PEM).unwrap();
-        let metadata = metadata_for_chain(&[keymint::Certificate {
-            encoded_certificate: root,
-        }]);
+        let metadata = metadata_for_chain(&[keymint::Certificate { encoded_certificate: root }]);
         assert_eq!(metadata.source, KeyboxSource::Unknown);
     }
 
@@ -2031,12 +1909,8 @@ mod tests {
         let leaf = certificate_with_organization("TEE", true);
         let root = decode_pem(GOOGLE_HARDWARE_ROOT_CERT_PEM).unwrap();
         let metadata = metadata_for_chain(&[
-            keymint::Certificate {
-                encoded_certificate: leaf,
-            },
-            keymint::Certificate {
-                encoded_certificate: root,
-            },
+            keymint::Certificate { encoded_certificate: leaf },
+            keymint::Certificate { encoded_certificate: root },
         ]);
         assert_eq!(metadata.source, KeyboxSource::Unknown);
         assert_eq!(metadata.level, KeyboxLevel::Tee);
@@ -2052,39 +1926,19 @@ mod tests {
 
     #[test]
     fn mixed_or_unknown_algorithm_sources_are_unknown() {
-        let hardware = ChainMetadata {
-            source: KeyboxSource::GoogleHardware,
-            level: KeyboxLevel::Tee,
-        };
-        let remote = ChainMetadata {
-            source: KeyboxSource::GoogleRemote,
-            level: KeyboxLevel::Tee,
-        };
-        let unknown = ChainMetadata {
-            source: KeyboxSource::Unknown,
-            level: KeyboxLevel::Tee,
-        };
+        let hardware =
+            ChainMetadata { source: KeyboxSource::GoogleHardware, level: KeyboxLevel::Tee };
+        let remote = ChainMetadata { source: KeyboxSource::GoogleRemote, level: KeyboxLevel::Tee };
+        let unknown = ChainMetadata { source: KeyboxSource::Unknown, level: KeyboxLevel::Tee };
 
-        assert_eq!(
-            combine_chain_metadata([hardware, remote]).source,
-            KeyboxSource::Unknown
-        );
-        assert_eq!(
-            combine_chain_metadata([hardware, unknown]).source,
-            KeyboxSource::Unknown
-        );
+        assert_eq!(combine_chain_metadata([hardware, remote]).source, KeyboxSource::Unknown);
+        assert_eq!(combine_chain_metadata([hardware, unknown]).source, KeyboxSource::Unknown);
         assert_eq!(
             combine_chain_metadata([hardware, hardware]).source,
             KeyboxSource::GoogleHardware
         );
-        assert_eq!(
-            combine_chain_metadata([remote]).source,
-            KeyboxSource::GoogleRemote
-        );
-        assert_eq!(
-            combine_chain_metadata([remote, remote]).source,
-            KeyboxSource::GoogleRemote
-        );
+        assert_eq!(combine_chain_metadata([remote]).source, KeyboxSource::GoogleRemote);
+        assert_eq!(combine_chain_metadata([remote, remote]).source, KeyboxSource::GoogleRemote);
     }
 
     const GOOGLE_EC_ROOT_CERT_PEM: &str = r"-----BEGIN CERTIFICATE-----
@@ -2135,16 +1989,12 @@ w1IdYIg2Wxg7yHcQZemFQg==
 
     fn certificate_with_organization(organization: &str, rkp_extension: bool) -> Vec<u8> {
         let mut params = CertificateParams::new(Vec::new()).unwrap();
-        params
-            .distinguished_name
-            .push(DnType::OrganizationName, organization);
+        params.distinguished_name.push(DnType::OrganizationName, organization);
         if rkp_extension {
-            params
-                .custom_extensions
-                .push(CustomExtension::from_oid_content(
-                    &[1, 3, 6, 1, 4, 1, 11129, 2, 1, 30],
-                    Vec::new(),
-                ));
+            params.custom_extensions.push(CustomExtension::from_oid_content(
+                &[1, 3, 6, 1, 4, 1, 11129, 2, 1, 30],
+                Vec::new(),
+            ));
         }
         let key_pair = KeyPair::generate().unwrap();
         params.self_signed(&key_pair).unwrap().der().to_vec()
@@ -2152,9 +2002,7 @@ w1IdYIg2Wxg7yHcQZemFQg==
 
     fn certificate_with_title(title: &str) -> Vec<u8> {
         let mut params = CertificateParams::new(Vec::new()).unwrap();
-        params
-            .distinguished_name
-            .push(DnType::CustomDnType(vec![2, 5, 4, 12]), title);
+        params.distinguished_name.push(DnType::CustomDnType(vec![2, 5, 4, 12]), title);
         let key_pair = KeyPair::generate().unwrap();
         params.self_signed(&key_pair).unwrap().der().to_vec()
     }
@@ -2166,48 +2014,34 @@ w1IdYIg2Wxg7yHcQZemFQg==
     ) -> (Vec<keymint::Certificate>, Vec<u8>) {
         let mut root_params = CertificateParams::new(Vec::new()).unwrap();
         root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        root_params
-            .distinguished_name
-            .push(DnType::CommonName, "Metadata test root");
+        root_params.distinguished_name.push(DnType::CommonName, "Metadata test root");
         let root_key = KeyPair::generate().unwrap();
         let root_certificate = root_params.self_signed(&root_key).unwrap();
         let root_issuer = Issuer::new(root_params, root_key);
 
         let mut leaf_params = CertificateParams::new(Vec::new()).unwrap();
-        leaf_params
-            .distinguished_name
-            .push(DnType::OrganizationName, organization);
+        leaf_params.distinguished_name.push(DnType::OrganizationName, organization);
         if factory_serial {
             leaf_params
                 .distinguished_name
                 .push(DnType::CustomDnType(vec![2, 5, 4, 5]), "factory-key-id");
         }
         if rkp_extension {
-            leaf_params
-                .custom_extensions
-                .push(CustomExtension::from_oid_content(
-                    &[1, 3, 6, 1, 4, 1, 11129, 2, 1, 30],
-                    Vec::new(),
-                ));
+            leaf_params.custom_extensions.push(CustomExtension::from_oid_content(
+                &[1, 3, 6, 1, 4, 1, 11129, 2, 1, 30],
+                Vec::new(),
+            ));
         }
         let leaf_key = KeyPair::generate().unwrap();
         let leaf_certificate = leaf_params.signed_by(&leaf_key, &root_issuer).unwrap();
         let root_der = root_certificate.der().to_vec();
         let parsed_root = <Certificate as x509_der::Decode>::from_der(&root_der).unwrap();
-        let root_spki = parsed_root
-            .tbs_certificate()
-            .subject_public_key_info()
-            .to_der()
-            .unwrap();
+        let root_spki = parsed_root.tbs_certificate().subject_public_key_info().to_der().unwrap();
 
         (
             vec![
-                keymint::Certificate {
-                    encoded_certificate: leaf_certificate.der().to_vec(),
-                },
-                keymint::Certificate {
-                    encoded_certificate: root_der,
-                },
+                keymint::Certificate { encoded_certificate: leaf_certificate.der().to_vec() },
+                keymint::Certificate { encoded_certificate: root_der },
             ],
             root_spki,
         )
@@ -2215,14 +2049,9 @@ w1IdYIg2Wxg7yHcQZemFQg==
 
     fn issued_fixture(root_ca: bool, expired: bool, signing_usage: bool) -> (String, Vec<u8>) {
         let mut root_params = CertificateParams::new(Vec::new()).unwrap();
-        root_params
-            .distinguished_name
-            .push(DnType::CommonName, "Issuance test root");
-        root_params.is_ca = if root_ca {
-            IsCa::Ca(BasicConstraints::Constrained(0))
-        } else {
-            IsCa::NoCa
-        };
+        root_params.distinguished_name.push(DnType::CommonName, "Issuance test root");
+        root_params.is_ca =
+            if root_ca { IsCa::Ca(BasicConstraints::Constrained(0)) } else { IsCa::NoCa };
         root_params.key_usages = vec![if signing_usage {
             rcgen::KeyUsagePurpose::KeyCertSign
         } else {
@@ -2234,9 +2063,7 @@ w1IdYIg2Wxg7yHcQZemFQg==
         let root_spki = parsed.public_key().raw.to_vec();
         let issuer = Issuer::new(root_params, root_key);
         let mut leaf_params = CertificateParams::new(Vec::new()).unwrap();
-        leaf_params
-            .distinguished_name
-            .push(DnType::CommonName, "Issued attestation key");
+        leaf_params.distinguished_name.push(DnType::CommonName, "Issued attestation key");
         leaf_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
         if expired {
             leaf_params.not_before = rcgen::date_time_ymd(2000, 1, 1);
@@ -2261,11 +2088,8 @@ w1IdYIg2Wxg7yHcQZemFQg==
 
     #[test]
     fn issued_chain_rejects_expired_non_ca_and_wrong_usage() {
-        for (ca, expired, usage) in [
-            (true, true, true),
-            (false, false, true),
-            (true, false, false),
-        ] {
+        for (ca, expired, usage) in [(true, true, true), (false, false, true), (true, false, false)]
+        {
             let (xml, root) = issued_fixture(ca, expired, usage);
             assert!(validate_issued_rkp_xml_with_roots(xml.as_bytes(), &[&root]).is_err());
         }
@@ -2277,10 +2101,8 @@ w1IdYIg2Wxg7yHcQZemFQg==
         let mut keybox = KeyBox::from_xml_str(&xml).unwrap();
         let leaf = &mut keybox.ec_info.as_mut().unwrap().chain[0].encoded_certificate;
         *leaf.last_mut().unwrap() ^= 1;
-        assert!(
-            validate_issued_rkp_xml_with_roots(keybox.to_xml_string().as_bytes(), &[&root])
-                .is_err()
-        );
+        assert!(validate_issued_rkp_xml_with_roots(keybox.to_xml_string().as_bytes(), &[&root])
+            .is_err());
         let other_key = KeyPair::generate().unwrap().serialize_pem();
         let start = xml.find("-----BEGIN PRIVATE KEY-----").unwrap();
         let end =
@@ -2292,50 +2114,32 @@ w1IdYIg2Wxg7yHcQZemFQg==
     fn generated_droid_ca2_chain() -> (Vec<keymint::Certificate>, Vec<u8>) {
         let mut root_params = CertificateParams::new(Vec::new()).unwrap();
         root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        root_params
-            .distinguished_name
-            .push(DnType::CommonName, "Metadata test root");
+        root_params.distinguished_name.push(DnType::CommonName, "Metadata test root");
         let root_key = KeyPair::generate().unwrap();
         let root_certificate = root_params.self_signed(&root_key).unwrap();
         let root_issuer = Issuer::new(root_params, root_key);
 
         let mut ca2_params = CertificateParams::new(Vec::new()).unwrap();
         ca2_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        ca2_params
-            .distinguished_name
-            .push(DnType::CommonName, "Droid CA2");
-        ca2_params
-            .distinguished_name
-            .push(DnType::OrganizationName, "Google LLC");
+        ca2_params.distinguished_name.push(DnType::CommonName, "Droid CA2");
+        ca2_params.distinguished_name.push(DnType::OrganizationName, "Google LLC");
         let ca2_key = KeyPair::generate().unwrap();
         let ca2_certificate = ca2_params.signed_by(&ca2_key, &root_issuer).unwrap();
         let ca2_issuer = Issuer::new(ca2_params, ca2_key);
 
         let mut leaf_params = CertificateParams::new(Vec::new()).unwrap();
-        leaf_params
-            .distinguished_name
-            .push(DnType::OrganizationName, "TEE");
+        leaf_params.distinguished_name.push(DnType::OrganizationName, "TEE");
         let leaf_key = KeyPair::generate().unwrap();
         let leaf_certificate = leaf_params.signed_by(&leaf_key, &ca2_issuer).unwrap();
         let root_der = root_certificate.der().to_vec();
         let parsed_root = <Certificate as x509_der::Decode>::from_der(&root_der).unwrap();
-        let root_spki = parsed_root
-            .tbs_certificate()
-            .subject_public_key_info()
-            .to_der()
-            .unwrap();
+        let root_spki = parsed_root.tbs_certificate().subject_public_key_info().to_der().unwrap();
 
         (
             vec![
-                keymint::Certificate {
-                    encoded_certificate: leaf_certificate.der().to_vec(),
-                },
-                keymint::Certificate {
-                    encoded_certificate: ca2_certificate.der().to_vec(),
-                },
-                keymint::Certificate {
-                    encoded_certificate: root_der,
-                },
+                keymint::Certificate { encoded_certificate: leaf_certificate.der().to_vec() },
+                keymint::Certificate { encoded_certificate: ca2_certificate.der().to_vec() },
+                keymint::Certificate { encoded_certificate: root_der },
             ],
             root_spki,
         )
@@ -2343,19 +2147,10 @@ w1IdYIg2Wxg7yHcQZemFQg==
 
     #[test]
     fn classifies_installed_keybox_contents_without_modifying_them() {
-        assert_eq!(
-            classify_keybox_xml(BUNDLED_KEYBOX_XML.as_bytes()),
-            KeyboxFileState::Bundled
-        );
+        assert_eq!(classify_keybox_xml(BUNDLED_KEYBOX_XML.as_bytes()), KeyboxFileState::Bundled);
         let custom = format!("{BUNDLED_KEYBOX_XML}\n<!-- selected by user -->\n");
-        assert_eq!(
-            classify_keybox_xml(custom.as_bytes()),
-            KeyboxFileState::Custom
-        );
-        assert_eq!(
-            classify_keybox_xml(b"<AndroidAttestation/>"),
-            KeyboxFileState::Invalid
-        );
+        assert_eq!(classify_keybox_xml(custom.as_bytes()), KeyboxFileState::Custom);
+        assert_eq!(classify_keybox_xml(b"<AndroidAttestation/>"), KeyboxFileState::Invalid);
     }
 
     #[test]
@@ -2408,11 +2203,7 @@ w1IdYIg2Wxg7yHcQZemFQg==
                 .unwrap();
         PrivateKeyInfo {
             version: 0,
-            algorithm: certificate
-                .tbs_certificate()
-                .subject_public_key_info()
-                .algorithm
-                .clone(),
+            algorithm: certificate.tbs_certificate().subject_public_key_info().algorithm.clone(),
             private_key: der::asn1::OctetString::new(key_der).unwrap(),
         }
         .to_der()
@@ -2433,10 +2224,7 @@ w1IdYIg2Wxg7yHcQZemFQg==
 
         for algo_hint in [SigningAlgorithm::Rsa, SigningAlgorithm::Ec] {
             let snapshot = parsed
-                .signing_info(SigningKeyType {
-                    which: SigningKey::Batch,
-                    algo_hint,
-                })
+                .signing_info(SigningKeyType { which: SigningKey::Batch, algo_hint })
                 .unwrap();
             assert!(matches!(&snapshot.signing_key, KeyMaterial::Ec(_, _, _)));
             validate_chain_matches_key(
@@ -2487,10 +2275,7 @@ w1IdYIg2Wxg7yHcQZemFQg==
                 );
                 for algo_hint in [SigningAlgorithm::Rsa, SigningAlgorithm::Ec] {
                     let snapshot = parsed
-                        .signing_info(SigningKeyType {
-                            which: SigningKey::Batch,
-                            algo_hint,
-                        })
+                        .signing_info(SigningKeyType { which: SigningKey::Batch, algo_hint })
                         .unwrap();
                     let algorithm = if keybox.rsa_info.is_some()
                         && matches!(algo_hint, SigningAlgorithm::Rsa)
@@ -2533,10 +2318,8 @@ w1IdYIg2Wxg7yHcQZemFQg==
 
         let pkcs8_xml = sec1_xml.replacen(&sec1_pem, &encode_pem_block("PRIVATE KEY", &pkcs8), 1);
         let other_key = KeyPair::generate().unwrap();
-        let other_certificate = CertificateParams::new(Vec::new())
-            .unwrap()
-            .self_signed(&other_key)
-            .unwrap();
+        let other_certificate =
+            CertificateParams::new(Vec::new()).unwrap().self_signed(&other_key).unwrap();
         let mismatch = pkcs8_xml.replacen(
             &encode_pem_block("CERTIFICATE", &ec_info.chain[0].encoded_certificate),
             &encode_pem_block("CERTIFICATE", other_certificate.der()),
@@ -2546,14 +2329,8 @@ w1IdYIg2Wxg7yHcQZemFQg==
         assert!(format!("{error:#}").contains("does not match the supplied private key"));
 
         let wrong_count = pkcs8_xml.replacen(
-            &format!(
-                "<NumberOfCertificates>{}</NumberOfCertificates>",
-                ec_info.chain.len()
-            ),
-            &format!(
-                "<NumberOfCertificates>{}</NumberOfCertificates>",
-                ec_info.chain.len() + 1
-            ),
+            &format!("<NumberOfCertificates>{}</NumberOfCertificates>", ec_info.chain.len()),
+            &format!("<NumberOfCertificates>{}</NumberOfCertificates>", ec_info.chain.len() + 1),
             1,
         );
         let error = validate_keybox_xml(wrong_count.as_bytes()).unwrap_err();
@@ -2572,17 +2349,11 @@ w1IdYIg2Wxg7yHcQZemFQg==
         assert!(parsed.rsa_info.is_some());
         assert!(parsed.ec_info.is_none());
         assert_eq!(parsed.identity_digest(), rsa_only.identity_digest());
-        assert_eq!(
-            parsed.certificate_serials().unwrap(),
-            rsa_only.certificate_serials().unwrap()
-        );
+        assert_eq!(parsed.certificate_serials().unwrap(), rsa_only.certificate_serials().unwrap());
 
         for algo_hint in [SigningAlgorithm::Rsa, SigningAlgorithm::Ec] {
             let snapshot = parsed
-                .signing_info(SigningKeyType {
-                    which: SigningKey::Batch,
-                    algo_hint,
-                })
+                .signing_info(SigningKeyType { which: SigningKey::Batch, algo_hint })
                 .unwrap();
             assert!(matches!(&snapshot.signing_key, KeyMaterial::Rsa(_)));
             validate_chain_matches_key(
@@ -2612,10 +2383,7 @@ w1IdYIg2Wxg7yHcQZemFQg==
         assert_eq!(parsed.to_xml_string(), pkcs1_xml);
         for algo_hint in [SigningAlgorithm::Rsa, SigningAlgorithm::Ec] {
             let snapshot = parsed
-                .signing_info(SigningKeyType {
-                    which: SigningKey::Batch,
-                    algo_hint,
-                })
+                .signing_info(SigningKeyType { which: SigningKey::Batch, algo_hint })
                 .unwrap();
             assert!(matches!(&snapshot.signing_key, KeyMaterial::Rsa(_)));
             validate_chain_matches_key(
@@ -2686,14 +2454,12 @@ w1IdYIg2Wxg7yHcQZemFQg==
         }
 
         let (expected_chain, expected_signature_oid) = match signer {
-            KeyAlgorithm::Rsa => (
-                keybox.rsa_info.as_ref().unwrap().chain.clone(),
-                "1.2.840.113549.1.1.11",
-            ),
-            KeyAlgorithm::Ec => (
-                keybox.ec_info.as_ref().unwrap().chain.clone(),
-                "1.2.840.10045.4.3.2",
-            ),
+            KeyAlgorithm::Rsa => {
+                (keybox.rsa_info.as_ref().unwrap().chain.clone(), "1.2.840.113549.1.1.11")
+            }
+            KeyAlgorithm::Ec => {
+                (keybox.ec_info.as_ref().unwrap().chain.clone(), "1.2.840.10045.4.3.2")
+            }
         };
         let mut ta = test_ta();
         assert_eq!(set_boot_info(&mut ta), 0);
@@ -2738,9 +2504,7 @@ w1IdYIg2Wxg7yHcQZemFQg==
                     KeyParam::AttestationChallenge(b"single-algorithm-keybox".to_vec()),
                     KeyParam::AttestationApplicationId(b"test".to_vec()),
                     KeyParam::CertificateNotBefore(DateTime { ms_since_epoch: 0 }),
-                    KeyParam::CertificateNotAfter(DateTime {
-                        ms_since_epoch: 2_000_000_000_000,
-                    }),
+                    KeyParam::CertificateNotAfter(DateTime { ms_since_epoch: 2_000_000_000_000 }),
                 ];
                 if algorithm == Algorithm::Rsa {
                     key_params.extend([
@@ -2784,10 +2548,7 @@ w1IdYIg2Wxg7yHcQZemFQg==
                             &ring::signature::RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
                             issuer.public_key().subject_public_key.data.as_ref(),
                         )
-                        .verify(
-                            leaf.tbs_certificate.as_ref(),
-                            leaf.signature_value.data.as_ref(),
-                        )
+                        .verify(leaf.tbs_certificate.as_ref(), leaf.signature_value.data.as_ref())
                         .unwrap();
                     }
                     KeyAlgorithm::Ec => leaf.verify_signature(Some(issuer.public_key())).unwrap(),
@@ -2877,6 +2638,55 @@ w1IdYIg2Wxg7yHcQZemFQg==
             KeyAlgorithm::Ec,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn ec_only_keybox_signs_rsa_attestation_with_ec_key() {
+        let rsa_block = Regex::new(r#"(?s)<Key\s+algorithm="rsa">.*?</Key>"#).unwrap();
+        let ec_only_xml = rsa_block.replace_all(BUNDLED_KEYBOX_XML, "");
+        let keybox = KeyBox::from_xml_str(&ec_only_xml).unwrap();
+
+        let ec_snapshot = keybox
+            .signing_info(SigningKeyType {
+                which: SigningKey::Batch,
+                algo_hint: SigningAlgorithm::Ec,
+            })
+            .unwrap();
+        let rsa_snapshot = keybox
+            .signing_info(SigningKeyType {
+                which: SigningKey::Batch,
+                algo_hint: SigningAlgorithm::Rsa,
+            })
+            .unwrap();
+
+        assert_eq!(rsa_snapshot.signing_key, ec_snapshot.signing_key);
+        assert_eq!(rsa_snapshot.cert_chain, ec_snapshot.cert_chain);
+        assert_eq!(rsa_snapshot.identity_digest, ec_snapshot.identity_digest);
+        assert!(keybox.rsa_info.is_none());
+        validate_chain_matches_key(
+            &rsa_snapshot.signing_key,
+            &rsa_snapshot.cert_chain,
+            KeyAlgorithm::Ec,
+        )
+        .unwrap();
+
+        // Switching from the bundled RSA entry to the EC entry must invalidate cached
+        // attestation chains.
+        let bundled_rsa_snapshot = KeyBox::new()
+            .signing_info(SigningKeyType {
+                which: SigningKey::Batch,
+                algo_hint: SigningAlgorithm::Rsa,
+            })
+            .unwrap();
+        assert_ne!(bundled_rsa_snapshot.identity_digest, rsa_snapshot.identity_digest);
+        // Dropping the RSA entry changes the keybox identity; keys bound to the previous
+        // identity are not carried over.
+        assert_ne!(keybox.identity_digest(), KeyBox::new().identity_digest());
+
+        let rewritten = keybox.to_xml_string();
+        assert!(!rewritten.contains("algorithm=\"rsa\""));
+        assert!(rewritten.contains("<NumberOfKeyboxes>1</NumberOfKeyboxes>"));
+        assert!(KeyBox::from_xml_str(&rewritten).is_ok());
     }
 
     #[test]

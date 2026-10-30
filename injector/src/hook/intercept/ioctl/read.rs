@@ -1,5 +1,8 @@
 use super::super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(in crate::hook::intercept) unsafe fn parse_read_buffer(
     fd: c_int,
     read: &mut [u8],
@@ -36,18 +39,13 @@ pub(in crate::hook::intercept) unsafe fn parse_read_buffer(
 
         let cmd_nr = _ioc_nr(cmd);
         let is_read = _ioc_dir(cmd) == 2;
-        let terminal_reply = matches!(
-            cmd_nr,
-            BR_DEAD_REPLY_NR | BR_FAILED_REPLY_NR | BR_FROZEN_REPLY_NR
-        );
+        let terminal_reply =
+            matches!(cmd_nr, BR_DEAD_REPLY_NR | BR_FAILED_REPLY_NR | BR_FROZEN_REPLY_NR);
 
         if cmd == BR_TRANSACTION_COMPLETE_CMD {
             complete_transaction_submission(fd);
         } else if terminal_reply
-            || matches!(
-                cmd_nr,
-                BR_ONEWAY_SPAM_SUSPECT_NR | BR_TRANSACTION_PENDING_FROZEN_NR
-            )
+            || matches!(cmd_nr, BR_ONEWAY_SPAM_SUSPECT_NR | BR_TRANSACTION_PENDING_FROZEN_NR)
         {
             complete_failed_transaction_submission(fd, cmd_nr);
         } else if is_read {
@@ -57,51 +55,61 @@ pub(in crate::hook::intercept) unsafe fn parse_read_buffer(
                         let tr = std::ptr::read_unaligned(
                             payload as *const binder_transaction_data_secctx,
                         );
-                        let caller_sid = if tr.secctx == 0 {
-                            Some(None)
-                        } else {
-                            copy_process_c_string(tr.secctx as usize).map(Some)
-                        };
-                        caller_sid.map(|caller_sid| {
-                            (tr.transaction_data, caller_sid, "BR_TRANSACTION_SEC_CTX")
-                        })
+                        Some((tr.transaction_data, tr.secctx as usize, "BR_TRANSACTION_SEC_CTX"))
                     } else if cmd_size == size_of::<binder_transaction_data>() {
                         Some((
                             std::ptr::read_unaligned(payload as *const binder_transaction_data),
-                            None,
+                            0,
                             "BR_TRANSACTION",
                         ))
                     } else {
                         warn!("unexpected BR_TRANSACTION-like payload size {}", cmd_size);
                         None
                     };
-                    if let Some((mut tr, caller_sid, label)) = transaction {
-                        if let Some(mut shadow) = TransactionPayloadShadow::read(&tr) {
-                            shadow.install(&mut tr);
-                            let handled =
-                                handle_incoming_transaction(fd, &mut tr, caller_sid, label);
-                            if handled {
-                                if tr.data_size != 0
-                                    && tr.data.ptr.buffer as usize == shadow.data_ptr()
-                                {
-                                    effects.staged_inbound_shadows.push(
-                                        retain_inbound_transaction_shadow(connection, shadow),
-                                    );
-                                } else {
-                                    shadow.restore(&mut tr);
-                                }
-                                std::ptr::write_unaligned(
-                                    payload as *mut binder_transaction_data,
-                                    tr,
-                                );
-                            } else {
-                                shadow.restore(&mut tr);
+                    if let Some((mut tr, secctx, label)) = transaction {
+                        let target = LocalBinderTarget { ptr: tr.target.ptr, cookie: tr.cookie };
+                        if lookup_synthetic_target(target).is_some() {
+                            if (tr.flags & TF_ONE_WAY) == 0 {
+                                push_native_pending_frame(connection, target);
                             }
                         } else {
-                            warn!(
-                                "event=binder skipped unsafe incoming transaction parcel fd={} data_size={} offsets_size={}",
-                                fd, tr.data_size, tr.offsets_size
-                            );
+                            let caller_sid = if secctx == 0 {
+                                Some(None)
+                            } else {
+                                copy_process_c_string(secctx).map(Some)
+                            };
+                            if let Some(caller_sid) = caller_sid {
+                                if let Some(mut shadow) = TransactionPayloadShadow::read(&tr) {
+                                    shadow.install(&mut tr);
+                                    let handled = handle_br_transaction(
+                                        connection, &mut tr, caller_sid, label,
+                                    );
+                                    if handled {
+                                        if tr.data_size != 0
+                                            && tr.data.ptr.buffer as usize == shadow.data_ptr()
+                                        {
+                                            effects.staged_inbound_shadows.push(
+                                                retain_inbound_transaction_shadow(
+                                                    connection, shadow,
+                                                ),
+                                            );
+                                        } else {
+                                            shadow.restore(&mut tr);
+                                        }
+                                        std::ptr::write_unaligned(
+                                            payload as *mut binder_transaction_data,
+                                            tr,
+                                        );
+                                    } else {
+                                        shadow.restore(&mut tr);
+                                    }
+                                } else {
+                                    warn!(
+                                        "event=binder skipped unsafe incoming transaction parcel fd={} data_size={} offsets_size={}",
+                                        fd, tr.data_size, tr.offsets_size
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -109,10 +117,8 @@ pub(in crate::hook::intercept) unsafe fn parse_read_buffer(
                     if cmd_size == size_of::<binder_ptr_cookie>() {
                         let ptr_cookie =
                             std::ptr::read_unaligned(payload as *const binder_ptr_cookie);
-                        let target = LocalBinderTarget {
-                            ptr: ptr_cookie.ptr,
-                            cookie: ptr_cookie.cookie,
-                        };
+                        let target =
+                            LocalBinderTarget { ptr: ptr_cookie.ptr, cookie: ptr_cookie.cookie };
                         if let Some(retirement) = observe_operation_acquire(fd, target) {
                             effects.operation_acquires.push(retirement);
                         }
@@ -128,9 +134,10 @@ pub(in crate::hook::intercept) unsafe fn parse_read_buffer(
                     if cmd_size == size_of::<binder_transaction_data>() {
                         let mut tr =
                             std::ptr::read_unaligned(payload as *const binder_transaction_data);
-                        if let Some(mut shadow) = TransactionPayloadShadow::read(&tr) {
-                            shadow.install(&mut tr);
-                            debug!(
+                        if log::log_enabled!(log::Level::Debug) {
+                            if let Some(mut shadow) = TransactionPayloadShadow::read(&tr) {
+                                shadow.install(&mut tr);
+                                debug!(
                                 ">>> BR_REPLY | target: {}, code: 0x{:x}, sender_euid: {}, sender_pid: {}, flags: 0x{:x}{}, parcel_size: {}, offsets_size: {}, parcel: {}",
                                 format_target(&tr),
                                 tr.code,
@@ -142,11 +149,12 @@ pub(in crate::hook::intercept) unsafe fn parse_read_buffer(
                                 tr.offsets_size,
                                 preview_transaction_parcel(&tr),
                             );
-                        } else {
-                            warn!(
+                            } else {
+                                warn!(
                                 "event=binder skipped unsafe BR_REPLY parcel fd={} data_size={} offsets_size={}",
                                 fd, tr.data_size, tr.offsets_size
                             );
+                            }
                         }
                     } else {
                         warn!("unexpected BR_REPLY payload size {}", cmd_size);
@@ -160,25 +168,6 @@ pub(in crate::hook::intercept) unsafe fn parse_read_buffer(
     effects
 }
 
-unsafe fn handle_incoming_transaction(
-    fd: c_int,
-    tr: &mut binder_transaction_data,
-    caller_sid: Option<String>,
-    label: &str,
-) -> bool {
-    let target = LocalBinderTarget {
-        ptr: tr.target.ptr,
-        cookie: tr.cookie,
-    };
-    if lookup_synthetic_target(target).is_some() {
-        if (tr.flags & TF_ONE_WAY) == 0 {
-            push_pending_frame(binder_state_key(fd));
-        }
-        return false;
-    }
-
-    handle_br_transaction(binder_state_key(fd), tr, caller_sid, label)
-}
 pub(in crate::hook::intercept) fn record_transaction_completion(
     fd: c_int,
     is_reply: bool,
@@ -189,11 +178,7 @@ pub(in crate::hook::intercept) fn record_transaction_completion(
     let pending_count = PENDING_TRANSACTION_COMPLETIONS.with(|pending| {
         let mut pending = pending.borrow_mut();
         let queue = pending.entry(connection).or_default();
-        queue.push_back(PendingTransactionCompletion {
-            is_reply,
-            expects_reply,
-            operation_target,
-        });
+        queue.push_back(PendingTransactionCompletion { is_reply, expects_reply, operation_target });
         queue.len()
     });
     if expects_reply {
@@ -286,9 +271,7 @@ unsafe fn operation_binder_node_exists(
         }
     };
     if ret < 0 {
-        let error = std::io::Error::last_os_error()
-            .raw_os_error()
-            .unwrap_or(libc::EIO);
+        let error = std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EIO);
         if error == libc::EBADF {
             debug!(
                 "event=synthetic operation node query fd no longer references its Binder connection; retaining because process-wide acquire work may still be in flight fd={} ptr=0x{:x} cookie=0x{:x} errno={}",
@@ -390,10 +373,8 @@ fn complete_sync_transaction(fd: c_int, expected: SyncTransactionState) -> bool 
 
 fn complete_failed_transaction_submission(fd: c_int, cmd_nr: u32) {
     let connection = binder_state_key(fd);
-    let terminal_reply = matches!(
-        cmd_nr,
-        BR_DEAD_REPLY_NR | BR_FAILED_REPLY_NR | BR_FROZEN_REPLY_NR
-    );
+    let terminal_reply =
+        matches!(cmd_nr, BR_DEAD_REPLY_NR | BR_FAILED_REPLY_NR | BR_FROZEN_REPLY_NR);
     if terminal_reply {
         let failed_reply = PENDING_TRANSACTION_COMPLETIONS.with(|pending| {
             let mut pending = pending.borrow_mut();
@@ -498,6 +479,3 @@ pub(in crate::hook::intercept) fn observe_native_completion(fd: c_int, cmd: u32)
         complete_sync_transaction(fd, SyncTransactionState::AwaitingReply);
     }
 }
-
-#[cfg(test)]
-mod tests;

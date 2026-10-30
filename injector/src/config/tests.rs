@@ -17,21 +17,16 @@ impl Drop for TempConfigPath {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
         if let (Some(parent), Some(file_name)) = (self.0.parent(), self.0.file_name()) {
-            let temp = parent.join(format!(
-                ".{}.tmp-{}",
-                file_name.to_string_lossy(),
-                std::process::id()
-            ));
+            let temp =
+                parent.join(format!(".{}.tmp-{}", file_name.to_string_lossy(), std::process::id()));
             let _ = fs::remove_file(temp);
         }
     }
 }
 
 fn temp_config_path(name: &str) -> TempConfigPath {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time should move forward")
-        .as_nanos();
+    let unique =
+        SystemTime::now().duration_since(UNIX_EPOCH).expect("time should move forward").as_nanos();
     TempConfigPath(std::env::temp_dir().join(format!("omk-injector-{name}-{unique}.toml")))
 }
 
@@ -65,57 +60,30 @@ fn config_defaults_and_log_levels_match_contract() {
 
 #[test]
 fn attestation_generation_delay_is_optional_bounded_and_preserved() {
-    assert_eq!(
-        parse_config("")
-            .unwrap()
-            .main
-            .attestation_generation_delay_ms,
-        0
-    );
+    assert_eq!(parse_config("").unwrap().main.attestation_generation_delay_ms, 0);
     for delay in [0, 25, 250] {
-        let config = parse_config(&format!(
-            "[main]\nattestation_generation_delay_ms = {delay}\n"
-        ))
-        .unwrap();
+        let config =
+            parse_config(&format!("[main]\nattestation_generation_delay_ms = {delay}\n")).unwrap();
         let rendered = render_config(&config).unwrap();
-        assert_eq!(
-            parse_config(&rendered)
-                .unwrap()
-                .main
-                .attestation_generation_delay_ms,
-            delay
-        );
+        assert_eq!(parse_config(&rendered).unwrap().main.attestation_generation_delay_ms, delay);
     }
     for delay in ["-1", "251", "65536", "1.5", "true", "\"25\""] {
-        assert!(parse_config(&format!(
-            "[main]\nattestation_generation_delay_ms = {delay}\n"
-        ))
-        .is_err());
+        assert!(
+            parse_config(&format!("[main]\nattestation_generation_delay_ms = {delay}\n")).is_err()
+        );
     }
 }
 
 #[test]
 fn operation_start_delay_is_optional_bounded_and_preserved() {
     for contents in ["", "version = 1\n[main]\nenabled = true\n"] {
-        assert_eq!(
-            parse_config(contents)
-                .unwrap()
-                .main
-                .operation_start_delay_ms,
-            0
-        );
+        assert_eq!(parse_config(contents).unwrap().main.operation_start_delay_ms, 0);
     }
     for delay in [0, 12, 250] {
         let config =
             parse_config(&format!("[main]\noperation_start_delay_ms = {delay}\n")).unwrap();
         let rendered = render_config(&config).unwrap();
-        assert_eq!(
-            parse_config(&rendered)
-                .unwrap()
-                .main
-                .operation_start_delay_ms,
-            delay
-        );
+        assert_eq!(parse_config(&rendered).unwrap().main.operation_start_delay_ms, delay);
     }
     for delay in ["-1", "251", "65536", "1.5", "true", "\"12\""] {
         assert!(parse_config(&format!("[main]\noperation_start_delay_ms = {delay}\n")).is_err());
@@ -125,11 +93,7 @@ fn operation_start_delay_is_optional_bounded_and_preserved() {
 #[test]
 fn invalid_operation_start_delay_reload_is_rejected_without_rewriting() {
     let path = temp_config_path("operation-start-delay-reload");
-    fs::write(
-        &*path,
-        "version = 1\n[main]\noperation_start_delay_ms = 12\n",
-    )
-    .unwrap();
+    fs::write(&*path, "version = 1\n[main]\noperation_start_delay_ms = 12\n").unwrap();
     let loaded = load_or_seed(&path, LoadContext::Reload(WatchTrigger::CloseWrite))
         .expect("valid delay should load");
     assert_eq!(loaded.main.operation_start_delay_ms, 12);
@@ -176,10 +140,7 @@ get_supplementary_attestation_info = true
     )
     .expect("config should parse");
 
-    assert_eq!(
-        parsed.scoop,
-        vec!["com.example.app".to_string(), "com.other.app".to_string()]
-    );
+    assert_eq!(parsed.scoop, vec!["com.example.app".to_string(), "com.other.app".to_string()]);
     assert_eq!(parsed.main.log_level_filter(), LevelFilter::Trace);
     assert!(!parsed.main.enabled);
     assert_eq!(
@@ -218,10 +179,7 @@ scoop = [
     )
     .expect("line-based scoop entries should parse");
 
-    assert_eq!(
-        parsed.scoop,
-        vec!["com.example.app".to_string(), "com.other.app".to_string()]
-    );
+    assert_eq!(parsed.scoop, vec!["com.example.app".to_string(), "com.other.app".to_string()]);
 }
 
 #[test]
@@ -230,10 +188,7 @@ fn parses_tricky_store_style_scoop_lines_with_crlf() {
         parse_config("version = 1\r\nscoop = [\r\n  com.example.app\r\n  com.other.app\r\n]\r\n")
             .expect("CRLF line-based scoop entries should parse");
 
-    assert_eq!(
-        parsed.scoop,
-        vec!["com.example.app".to_string(), "com.other.app".to_string()]
-    );
+    assert_eq!(parsed.scoop, vec!["com.example.app".to_string(), "com.other.app".to_string()]);
 }
 
 #[test]
@@ -260,16 +215,12 @@ allow_packages = ["com.legacy.app"]
 }
 
 #[test]
-fn rendered_config_uses_tricky_store_style_scoop_format() {
-    let mut config = InjectorConfig {
-        scoop: vec!["com.example.app".to_string()],
-        ..Default::default()
-    };
+fn rendered_config_uses_new_scoop_format() {
+    let mut config =
+        InjectorConfig { scoop: vec!["com.example.app".to_string()], ..Default::default() };
     let mut table = toml::Table::new();
     table.insert("enabled".to_string(), toml::Value::Boolean(true));
-    config
-        .scoop_details
-        .insert("com.example.app".to_string(), table);
+    config.scoop_details.insert("com.example.app".to_string(), table);
 
     let rendered = render_config(&config).expect("config should render");
     assert!(rendered.contains("scoop = [\n  com.example.app\n]\n"));
@@ -318,20 +269,13 @@ mode = "strict"
 
     replace_scoop_at_path(
         &path,
-        vec![
-            " com.new.app ".to_string(),
-            "com.new.app".to_string(),
-            "com.second.app".to_string(),
-        ],
+        vec![" com.new.app ".to_string(), "com.new.app".to_string(), "com.second.app".to_string()],
     )
     .expect("WebUI scoop update should succeed");
 
     let written = fs::read_to_string(&*path).unwrap();
     let parsed = parse_config(&written).expect("updated config should remain valid");
-    assert_eq!(
-        parsed.scoop,
-        vec!["com.new.app".to_string(), "com.second.app".to_string()]
-    );
+    assert_eq!(parsed.scoop, vec!["com.new.app".to_string(), "com.second.app".to_string()]);
     assert!(!parsed.main.enabled);
     assert_eq!(parsed.main.log_level, "info");
     assert_eq!(parsed.filter.deny_packages, ["com.denied.app"]);
@@ -344,10 +288,7 @@ mode = "strict"
             .and_then(toml::Value::as_str),
         Some("strict")
     );
-    assert_eq!(
-        read_scoop_from_path(&path).unwrap(),
-        ["com.new.app", "com.second.app"]
-    );
+    assert_eq!(read_scoop_from_path(&path).unwrap(), ["com.new.app", "com.second.app"]);
 }
 
 #[test]
@@ -407,13 +348,7 @@ fn caller_targets_round_trip_and_normalize_without_losing_bare_scope() {
     .unwrap();
     assert_eq!(
         read_scoop_from_path(&path).unwrap(),
-        [
-            "com.example@10",
-            "uid:10123",
-            "com.example",
-            "uid:4294967295",
-            "com.example@42949",
-        ]
+        ["com.example@10", "uid:10123", "com.example", "uid:4294967295", "com.example@42949",]
     );
 }
 
@@ -434,20 +369,14 @@ mode = "strict"
     fs::write(&*path, original).unwrap();
     update_scoop_at_path(
         &path,
-        ScoopDelta {
-            added: vec!["com.installed@0".into()],
-            removed: Vec::new(),
-        },
+        ScoopDelta { added: vec!["com.installed@0".into()], removed: Vec::new() },
     )
     .unwrap();
     // The UI was opened before com.installed appeared and removes only its
     // own original selection. It must not replace the whole current list.
     let targets = update_scoop_at_path(
         &path,
-        ScoopDelta {
-            added: vec!["com.manual@10".into()],
-            removed: vec!["com.old".into()],
-        },
+        ScoopDelta { added: vec!["com.manual@10".into()], removed: vec!["com.old".into()] },
     )
     .unwrap();
     assert_eq!(targets, ["uid:1001", "com.installed@0", "com.manual@10"]);
@@ -457,28 +386,18 @@ mode = "strict"
     assert!(!config.main.enabled);
     assert_eq!(config.filter.deny_packages, ["com.denied"]);
     assert!(!config.intercept.get_key_entry);
-    assert_eq!(
-        config.scoop_details["com.old"]["mode"].as_str(),
-        Some("strict")
-    );
+    assert_eq!(config.scoop_details["com.old"]["mode"].as_str(), Some("strict"));
 }
 
 #[test]
 fn scoop_delta_preserves_global_scope_and_canonicalizes_targets() {
     let path = temp_config_path("scoop-delta-scopes");
-    fs::write(
-        &*path,
-        "version = 1\nscoop = [\"com.global\", \"com.user@10\", \"uid:1001\"]\n",
-    )
-    .unwrap();
+    fs::write(&*path, "version = 1\nscoop = [\"com.global\", \"com.user@10\", \"uid:1001\"]\n")
+        .unwrap();
     let targets = update_scoop_at_path(
         &path,
         ScoopDelta {
-            added: vec![
-                "com.global@10".into(),
-                "com.new@010".into(),
-                "com.new@10".into(),
-            ],
+            added: vec!["com.global@10".into(), "com.new@010".into(), "com.new@10".into()],
             removed: vec!["com.user@010".into()],
         },
     )
@@ -493,14 +412,8 @@ fn invalid_scoop_delta_does_not_modify_configuration() {
     let original = "version = 1\nscoop = [\"com.existing\"]\n";
     fs::write(&*path, original).unwrap();
     for delta in [
-        ScoopDelta {
-            added: vec!["bad package".into()],
-            removed: vec!["com.existing".into()],
-        },
-        ScoopDelta {
-            added: vec!["com.new".into()],
-            removed: vec!["*".into()],
-        },
+        ScoopDelta { added: vec!["bad package".into()], removed: vec!["com.existing".into()] },
+        ScoopDelta { added: vec!["com.new".into()], removed: vec!["*".into()] },
     ] {
         assert!(update_scoop_at_path(&path, delta).is_err());
         assert_eq!(fs::read_to_string(&*path).unwrap(), original);
@@ -509,10 +422,7 @@ fn invalid_scoop_delta_does_not_modify_configuration() {
     fs::write(&*path, invalid).unwrap();
     assert!(update_scoop_at_path(
         &path,
-        ScoopDelta {
-            added: vec!["com.new".into()],
-            removed: Vec::new(),
-        }
+        ScoopDelta { added: vec!["com.new".into()], removed: Vec::new() }
     )
     .is_err());
     assert_eq!(fs::read_to_string(&*path).unwrap(), invalid);
@@ -525,14 +435,8 @@ fn unchanged_scoop_delta_does_not_rewrite_configuration() {
         "# Preserve custom formatting when nothing changes.\nversion = 1\nscoop = [\"com.global\"]\n";
     fs::write(&*path, original).unwrap();
     for delta in [
-        ScoopDelta {
-            added: Vec::new(),
-            removed: Vec::new(),
-        },
-        ScoopDelta {
-            added: vec!["com.global@0".into()],
-            removed: vec!["com.missing".into()],
-        },
+        ScoopDelta { added: Vec::new(), removed: Vec::new() },
+        ScoopDelta { added: vec!["com.global@0".into()], removed: vec!["com.missing".into()] },
     ] {
         assert_eq!(update_scoop_at_path(&path, delta).unwrap(), ["com.global"]);
         assert_eq!(fs::read_to_string(&*path).unwrap(), original);
@@ -541,13 +445,7 @@ fn unchanged_scoop_delta_does_not_rewrite_configuration() {
 
 #[test]
 fn malformed_caller_targets_reject_configuration() {
-    for target in [
-        "com.example@",
-        "com.example@x",
-        "uid:",
-        "uid:4294967296",
-        "*",
-    ] {
+    for target in ["com.example@", "com.example@x", "uid:", "uid:4294967296", "*"] {
         assert!(parse_config(&format!("version = 1\nscoop = [\"{target}\"]\n")).is_err());
     }
 }
@@ -569,10 +467,7 @@ fn missing_config_is_seeded_but_invalid_startup_config_is_untouched() {
     fs::write(&*path, invalid).expect("invalid config should be written");
 
     let loaded = load_or_seed(&path, LoadContext::Startup).unwrap();
-    assert!(
-        !loaded.main.enabled,
-        "invalid startup config must disable injection"
-    );
+    assert!(!loaded.main.enabled, "invalid startup config must disable injection");
     assert_eq!(fs::read_to_string(&*path).unwrap(), invalid);
     assert!(!PathBuf::from(format!("{}.bak", path.display())).exists());
 }
@@ -597,10 +492,7 @@ fn v0_config_migrates_through_public_scoop_syntax_and_preserves_mode() {
     );
 
     let migrated = fs::read_to_string(&*path).unwrap();
-    assert_eq!(
-        migrated,
-        v0.replacen('\u{feff}', "\u{feff}version = 1\r\n", 1)
-    );
+    assert_eq!(migrated, v0.replacen('\u{feff}', "\u{feff}version = 1\r\n", 1));
     assert_eq!(fs::metadata(&*path).unwrap().mode() & 0o777, 0o640);
 }
 
@@ -609,10 +501,7 @@ fn v0_migration_finds_version_after_line_based_scoop() {
     let v0 = "scoop = [\n  com.example.app\n]\nversion = 0\n";
     let (_, migrated) = parse_versioned_config(v0, true).expect("config should migrate");
 
-    assert_eq!(
-        migrated.as_deref(),
-        Some("scoop = [\n  com.example.app\n]\nversion = 1\n")
-    );
+    assert_eq!(migrated.as_deref(), Some("scoop = [\n  com.example.app\n]\nversion = 1\n"));
 }
 
 #[test]
@@ -680,9 +569,7 @@ fn replace_save_retry_only_retries_read_failures() {
             attempts += 1;
             match attempts {
                 1 => Err(LoadError::Io(io::Error::from(io::ErrorKind::NotFound))),
-                2 => Err(LoadError::Io(io::Error::from(
-                    io::ErrorKind::PermissionDenied,
-                ))),
+                2 => Err(LoadError::Io(io::Error::from(io::ErrorKind::PermissionDenied))),
                 _ => Ok(InjectorConfig::default()),
             }
         },
@@ -693,9 +580,7 @@ fn replace_save_retry_only_retries_read_failures() {
     assert_eq!(loaded.retries, 2);
     assert_eq!(attempts, 3);
     assert_eq!(sleeps.len(), 2);
-    assert!(sleeps
-        .iter()
-        .all(|duration| *duration == REPLACE_SAVE_RETRY_INTERVAL));
+    assert!(sleeps.iter().all(|duration| *duration == REPLACE_SAVE_RETRY_INTERVAL));
 
     let path = temp_config_path("replace-save-parse");
     let mut sleeps = Vec::new();
@@ -710,4 +595,8 @@ fn replace_save_retry_only_retries_read_failures() {
 
     assert!(matches!(error, LoadError::Parse(_)));
     assert!(sleeps.is_empty());
+}
+
+fn parse_config(contents: &str) -> Result<InjectorConfig, String> {
+    parse_versioned_config(contents, true).map(|(config, _)| config)
 }

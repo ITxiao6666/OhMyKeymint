@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
+#[cfg(test)]
+mod tests;
+
 pub const DEFAULT_CONFIG_PATH: &str = "/data/misc/keystore/omk/injector.toml";
 const CURRENT_CONFIG_VERSION: u32 = 1;
 const REPLACE_SAVE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
@@ -197,9 +200,7 @@ impl Drop for DirectoryLock {
 }
 
 fn lock_config_directory(path: &Path) -> io::Result<DirectoryLock> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::other("config has no parent"))?;
+    let parent = path.parent().ok_or_else(|| io::Error::other("config has no parent"))?;
     fs::create_dir_all(parent)?;
     DirectoryLock::acquire(parent)
 }
@@ -305,11 +306,7 @@ fn load_or_seed(path: &Path, context: LoadContext) -> Option<InjectorConfig> {
                 );
             }
             if matches!(context, LoadContext::Startup) {
-                log::info!(
-                    "loaded config from {} via {}",
-                    path.display(),
-                    context.label()
-                );
+                log::info!("loaded config from {} via {}", path.display(), context.label());
             }
             Some(loaded.value)
         }
@@ -393,18 +390,14 @@ fn read_scoop_from_path(path: &Path) -> Result<Vec<String>, String> {
 }
 
 fn replace_scoop_at_path(path: &Path, packages: Vec<String>) -> Result<(), String> {
-    let _write_guard = CONFIG_FILE_WRITE_LOCK
-        .lock()
-        .map_err(|_| "config file write lock poisoned".to_string())?;
+    let _write_guard =
+        CONFIG_FILE_WRITE_LOCK.lock().map_err(|_| "config file write lock poisoned".to_string())?;
     let _directory_guard = lock_config_directory(path).map_err(|error| error.to_string())?;
     let contents = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let (mut config, _) = parse_versioned_config(&contents, false)?;
     let packages = normalize_packages(packages);
-    if let Some(package) = packages
-        .iter()
-        .find(|package| parse_scoop_target(package).is_none())
-    {
+    if let Some(package) = packages.iter().find(|package| parse_scoop_target(package).is_none()) {
         return Err(format!("invalid caller target in scoop: {package}"));
     }
     config.scoop = packages;
@@ -428,9 +421,8 @@ pub(crate) fn update_scoop_for_webui(delta: ScoopDelta) -> Result<Vec<String>, S
 }
 
 fn update_scoop_at_path(path: &Path, delta: ScoopDelta) -> Result<Vec<String>, String> {
-    let _write_guard = CONFIG_FILE_WRITE_LOCK
-        .lock()
-        .map_err(|_| "config file write lock poisoned".to_string())?;
+    let _write_guard =
+        CONFIG_FILE_WRITE_LOCK.lock().map_err(|_| "config file write lock poisoned".to_string())?;
     let _directory_guard = lock_config_directory(path).map_err(|error| error.to_string())?;
     let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let (mut config, _) = parse_versioned_config(&contents, false)?;
@@ -468,9 +460,7 @@ fn is_valid_exact_package_name(value: &str) -> bool {
         && value.len() <= 255
         && value.split('.').all(|segment| {
             !segment.is_empty()
-                && segment
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                && segment.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
         })
 }
 
@@ -562,11 +552,6 @@ fn render_config(config: &InjectorConfig) -> io::Result<String> {
     Ok(contents)
 }
 
-#[cfg(test)]
-fn parse_config(contents: &str) -> Result<InjectorConfig, String> {
-    parse_versioned_config(contents, true).map(|(config, _)| config)
-}
-
 fn parse_versioned_config(
     contents: &str,
     allow_migration: bool,
@@ -580,7 +565,7 @@ fn parse_versioned_config(
         None => {
             if !allow_migration {
                 return Err(
-                    "injector config version 0 requires an injector restart to migrate".into(),
+                    "injector config version 0 requires an injector restart to migrate".into()
                 );
             }
             Some(insert_config_version(contents, bom_len))
@@ -589,7 +574,7 @@ fn parse_versioned_config(
             0 if allow_migration => Some(replace_config_version(contents, bom_len)?),
             0 => {
                 return Err(
-                    "injector config version 0 requires an injector restart to migrate".into(),
+                    "injector config version 0 requires an injector restart to migrate".into()
                 )
             }
             version if version == i64::from(CURRENT_CONFIG_VERSION) => None,
@@ -615,22 +600,14 @@ fn parse_versioned_config(
         return Err("main.operation_start_delay_ms must be in 0..=250".into());
     }
     let parsed = parsed.normalized();
-    if let Some(target) = parsed
-        .scoop
-        .iter()
-        .find(|target| parse_scoop_target(target).is_none())
-    {
+    if let Some(target) = parsed.scoop.iter().find(|target| parse_scoop_target(target).is_none()) {
         return Err(format!("invalid caller target in scoop: {target}"));
     }
     Ok((parsed, migrated))
 }
 
 fn insert_config_version(contents: &str, bom_len: usize) -> String {
-    let newline = if contents.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
+    let newline = if contents.contains("\r\n") { "\r\n" } else { "\n" };
     let mut migrated = String::with_capacity(contents.len() + 12);
     migrated.push_str(&contents[..bom_len]);
     migrated.push_str("version = 1");
@@ -687,10 +664,7 @@ fn version_key_suffix(line: &str) -> Option<&str> {
         return Some(after_name);
     }
 
-    let quote = line
-        .chars()
-        .next()
-        .filter(|character| *character == '"' || *character == '\'')?;
+    let quote = line.chars().next().filter(|character| *character == '"' || *character == '\'')?;
     let close = if quote == '"' {
         let mut escaped = false;
         line.char_indices().skip(1).find_map(|(index, character)| {
@@ -760,9 +734,7 @@ fn scoop_array_open_index(line: &str) -> Option<usize> {
         return None;
     }
     let after_equals = after_name.trim_start().strip_prefix('=')?.trim_start();
-    after_equals
-        .starts_with('[')
-        .then(|| line.len() - after_equals.len())
+    after_equals.starts_with('[').then(|| line.len() - after_equals.len())
 }
 
 fn scoop_bracket_delta(text: &str) -> i32 {
@@ -838,10 +810,7 @@ fn is_bare_scoop_package(value: &str) -> bool {
     !value.is_empty()
         && value.chars().all(|character| {
             !character.is_whitespace()
-                && !matches!(
-                    character,
-                    '"' | '\'' | '[' | ']' | '{' | '}' | '=' | ',' | '#'
-                )
+                && !matches!(character, '"' | '\'' | '[' | ']' | '{' | '}' | '=' | ',' | '#')
         })
 }
 
@@ -868,9 +837,7 @@ fn rewrite_scoop_header(line: &str, line_no: usize) -> Result<String, String> {
 
     let leading = &line[..line.len() - trimmed.len()];
     let Some(close_idx) = trimmed.find(']') else {
-        return Err(format!(
-            "line {line_no}: unterminated [scoop.<package>] header"
-        ));
+        return Err(format!("line {line_no}: unterminated [scoop.<package>] header"));
     };
     let header = &trimmed[..=close_idx];
     let trailer = &trimmed[close_idx + 1..];
@@ -953,23 +920,18 @@ fn reload_runtime_config(path: &Path, trigger: WatchTrigger) {
         return;
     };
     if let Some(lock) = CONFIG.get() {
+        let level = config.main.log_level_filter();
+        let next = Arc::new(config);
         match lock.write() {
             Ok(mut guard) => {
-                let level = config.main.log_level_filter();
-                *guard = Arc::new(config);
+                let previous = std::mem::replace(&mut *guard, next);
                 log::set_max_level(level);
-                log::info!(
-                    "reloaded config from {} via {}",
-                    path.display(),
-                    trigger.label()
-                );
+                drop(guard);
+                drop(previous);
+                log::info!("reloaded config from {} via {}", path.display(), trigger.label());
             }
             Err(error) => {
-                log::error!(
-                    "failed to apply config reload from {}: {}",
-                    path.display(),
-                    error
-                );
+                log::error!("failed to apply config reload from {}: {}", path.display(), error);
             }
         }
     }
@@ -1033,6 +995,3 @@ impl InjectorConfig {
         self
     }
 }
-
-#[cfg(test)]
-mod tests;

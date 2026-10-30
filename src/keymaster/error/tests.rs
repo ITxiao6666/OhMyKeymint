@@ -17,7 +17,7 @@
 use super::*;
 use crate::selinux;
 use anyhow::{anyhow, Context};
-use rsbinder::{status::Result as BinderResult, ExceptionCode, Status as BinderStatus, StatusCode};
+use rsbinder::{BinderResult, ExceptionCode, Status as BinderStatus, StatusCode};
 
 fn nested_nested_rc(rc: ResponseCode) -> anyhow::Result<()> {
     Err(anyhow!(Error::Rc(rc))).context("nested nested rc")
@@ -75,7 +75,7 @@ fn binder_exception(ex: ExceptionCode) -> BinderResult<()> {
 
 #[test]
 fn keystore_error_test() -> anyhow::Result<(), String> {
-    crate::keymaster::utils::init_test_logging();
+    crate::keymaster::utils::tests::init_test_logging();
     // All Error::Rc(x) get mapped on a service specific error
     // code of x.
     for rc in ResponseCode::LOCKED.0..ResponseCode::BACKEND_BUSY.0 {
@@ -125,10 +125,7 @@ fn keystore_error_test() -> anyhow::Result<(), String> {
 
     // map_km_error creates a Error::Binder variant storing the given exception code.
     let binder_exception = map_km_error(binder_exception(ExceptionCode::TransactionFailed));
-    assert_eq!(
-        Err(Error::BinderTransaction(StatusCode::FailedTransaction)),
-        binder_exception
-    );
+    assert_eq!(Err(Error::BinderTransaction(StatusCode::FailedTransaction)), binder_exception);
     // into_binder then maps it on a service specific error of ResponseCode::SYSTEM_ERROR.
     assert_eq!(
         Result::<(), ResponseCode>::Err(ResponseCode::SYSTEM_ERROR),
@@ -193,9 +190,8 @@ fn client_message_re_roots_source_paths() {
 
 #[test]
 fn service_specific_message_hides_the_local_source_root() {
-    let e: anyhow::Result<()> = Err(Error::Km(ErrorCode::INVALID_ARGUMENT)).context(format!(
-        "{LOCAL_SOURCE_ROOT}security_level.rs:331 Malformed KeyParameter."
-    ));
+    let e: anyhow::Result<()> = Err(Error::Km(ErrorCode::INVALID_ARGUMENT))
+        .context(format!("{LOCAL_SOURCE_ROOT}security_level.rs:331 Malformed KeyParameter."));
 
     let message = anyhow_error_to_cstring(&e.unwrap_err()).expect("message is a valid string");
 
@@ -210,9 +206,7 @@ pub fn check_result_contains_error_string<T>(
 ) {
     let error_str = format!(
         "{:#?}",
-        result
-            .err()
-            .unwrap_or_else(|| panic!("Expected the error: {expected_error_string}"))
+        result.err().unwrap_or_else(|| panic!("Expected the error: {expected_error_string}"))
     );
     assert!(
         error_str.contains(expected_error_string),

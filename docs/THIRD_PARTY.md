@@ -136,6 +136,9 @@ AGPL-3.0-or-later. The service is isolated behind
 `vendor.qti.hardware.soter.ISoter/default`, uses OMK's persistent data path,
 and retains the upstream remote-relay contract. It does not replace the OMK
 KeyMint route or the independent Tencent Soter compatibility experiment.
+The shared SOTER codec uses the project's BoringSSL build through the openssl
+Rust interface for RSA key generation, PKCS#8/SPKI conversion and RSA-PSS/SHA-256
+signing and verification. Its wire format uses SHA-256 MGF1 and a 20-byte salt.
 
 Relay package hints and per-instance SoterServer reconnection are adapted from
 [jiyin004-jpg/ommega](https://github.com/jiyin004-jpg/ommega), under the same

@@ -138,14 +138,12 @@ fn candidate_methods(protocol: Protocol) -> Result<Vec<Protocol>> {
     let aidl = crate::rkp_v1_bridge::available();
     let native = native::available();
     let candidates = match protocol {
-        Protocol::Auto => [
-            (Protocol::V2, native),
-            (Protocol::V1, aidl),
-            (Protocol::V1Native, native),
-        ]
-        .into_iter()
-        .filter_map(|(method, available)| available.then_some(method))
-        .collect(),
+        Protocol::Auto => {
+            [(Protocol::V2, native), (Protocol::V1, aidl), (Protocol::V1Native, native)]
+                .into_iter()
+                .filter_map(|(method, available)| available.then_some(method))
+                .collect()
+        }
         Protocol::V1 if aidl => vec![Protocol::V1],
         Protocol::V2 | Protocol::V1Native if native => vec![protocol],
         _ => Vec::new(),
@@ -226,18 +224,11 @@ fn post(route: &str, body: &[u8], submission: bool) -> Result<Vec<u8>> {
         .header("Accept-Encoding", "identity")
         .send(body)
         .map_err(|_| {
-            anyhow!(if submission {
-                SUBMISSION_UNKNOWN
-            } else {
-                "RKP challenge transport failed"
-            })
+            anyhow!(if submission { SUBMISSION_UNKNOWN } else { "RKP challenge transport failed" })
         })?;
     if !response.status().is_success() {
         // Never echo the server body, headers or URL (which contains the challenge).
-        bail!(
-            "RKP server returned HTTP {}; no Keybox was imported",
-            response.status().as_u16()
-        );
+        bail!("RKP server returned HTTP {}; no Keybox was imported", response.status().as_u16());
     }
     let result = response
         .body_mut()
@@ -261,10 +252,7 @@ fn post(route: &str, body: &[u8], submission: bool) -> Result<Vec<u8>> {
 
 fn fetch_eek(fingerprint: &str) -> Result<Eek> {
     let payload = encode(&Value::Map(vec![
-        (
-            Value::Text("fingerprint".into()),
-            Value::Text(fingerprint.into()),
-        ),
+        (Value::Text("fingerprint".into()), Value::Text(fingerprint.into())),
         (Value::Text("id".into()), int(42)),
     ]))?;
     parse_eek(&post("fetchEekChain", &payload, false)?)
@@ -281,11 +269,7 @@ fn parse_eek(body: &[u8]) -> Result<Eek> {
     if challenge.is_empty() || challenge.len() > 64 {
         bail!("invalid RKP challenge length");
     }
-    let mut eek = Eek {
-        challenge,
-        p256: Vec::new(),
-        x25519: Vec::new(),
-    };
+    let mut eek = Eek { challenge, p256: Vec::new(), x25519: Vec::new() };
     for entry in as_array(&fields[0], "EEK chains")? {
         let Ok(pair) = as_array(entry, "EEK pair") else {
             continue;
@@ -299,11 +283,7 @@ fn parse_eek(body: &[u8]) -> Result<Eek> {
         }
         let encoded = encode(&pair[1])?;
         v1::validate_eek(&encoded)?;
-        let target = if curve == 1 {
-            &mut eek.p256
-        } else {
-            &mut eek.x25519
-        };
+        let target = if curve == 1 { &mut eek.p256 } else { &mut eek.x25519 };
         if target.is_empty() {
             *target = encoded;
         }
@@ -390,10 +370,7 @@ fn order_chain(der: &[u8], point: &[u8]) -> Result<Vec<Vec<u8>>> {
     if visited.len() != certs.len() {
         bail!("issued chain contains unrelated certificates");
     }
-    Ok(visited
-        .into_iter()
-        .map(|index| certs[index].0.clone())
-        .collect())
+    Ok(visited.into_iter().map(|index| certs[index].0.clone()).collect())
 }
 
 fn pem(label: &str, der: &[u8]) -> Zeroizing<String> {
@@ -458,11 +435,8 @@ mod tests {
     }
     #[test]
     fn signed_response_requires_exactly_one_nonempty_key_chain() {
-        let reply = encode(&Value::Array(vec![
-            bytes([1, 2]),
-            Value::Array(vec![bytes([3])]),
-        ]))
-        .unwrap();
+        let reply =
+            encode(&Value::Array(vec![bytes([1, 2]), Value::Array(vec![bytes([3])])])).unwrap();
         assert_eq!(parse_signed(&reply).unwrap(), vec![1, 2, 3]);
         for value in [
             Value::Array(vec![]),
@@ -509,10 +483,7 @@ mod tests {
             (int(CWT_ISSUER), Value::Text("root".into())),
             (int(CWT_SUBJECT), Value::Text("leaf".into())),
             (int(DICE_KEY_USAGE), bytes([32])),
-            (
-                int(DICE_SUBJECT_PUB_KEY),
-                bytes(encode(&cose_key(&leaf)).unwrap()),
-            ),
+            (int(DICE_SUBJECT_PUB_KEY), bytes(encode(&cose_key(&leaf)).unwrap())),
         ]);
         let mut device = vec![];
         for (name, value) in [
@@ -528,11 +499,7 @@ mod tests {
         ] {
             device.push((Value::Text(name.into()), Value::Text(value.into())));
         }
-        for name in [
-            "system_patch_level",
-            "boot_patch_level",
-            "vendor_patch_level",
-        ] {
+        for name in ["system_patch_level", "boot_patch_level", "vendor_patch_level"] {
             device.push((Value::Text(name.into()), int(20260101)));
         }
         device.push((Value::Text("fused".into()), int(1)));
@@ -542,10 +509,8 @@ mod tests {
             Value::Map(device),
             Value::Array(vec![public.clone()]),
         ]);
-        let signed = sign(
-            &leaf,
-            &Value::Array(vec![bytes(challenge), bytes(encode(&payload).unwrap())]),
-        );
+        let signed =
+            sign(&leaf, &Value::Array(vec![bytes(challenge), bytes(encode(&payload).unwrap())]));
         encode(&Value::Array(vec![
             int(1),
             Value::Map(vec![]),
@@ -558,8 +523,8 @@ mod tests {
     #[test]
     fn v2_signature_and_challenge_key_binding_are_all_required() {
         let key = p256::SecretKey::from_slice(&[3; 32]).unwrap();
-        use p256::elliptic_curve::sec1::ToEncodedPoint;
-        let point = key.public_key().to_encoded_point(false);
+        use p256::elliptic_curve::sec1::ToSec1Point;
+        let point = key.public_key().to_sec1_point(false);
         let point = point.as_bytes();
         let public = Value::Map(vec![
             (int(1), int(2)),

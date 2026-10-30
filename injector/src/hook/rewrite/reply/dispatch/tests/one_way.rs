@@ -10,11 +10,7 @@ fn one_way_synthetic_operation_abort_finalizes_mapping() {
         aborts: aborts.clone(),
         update_aad_status: None,
     });
-    let caller = CallerInfo {
-        uid: 10002,
-        sid: "u:r:untrusted_app:s0:c123,c456".into(),
-        pid: 2000,
-    };
+    let caller = CallerInfo { uid: 10002, sid: "u:r:untrusted_app:s0:c123,c456".into(), pid: 2000 };
     let (carrier, _) = register_synthetic_operation_carrier(backend, true, &caller)
         .expect("operation carrier should register");
     let target = carrier_target(&carrier);
@@ -25,18 +21,15 @@ fn one_way_synthetic_operation_abort_finalizes_mapping() {
         let (data, data_size, offsets, offsets_size) = raw_parts(&mut reply);
         let status = unsafe { parcel::parse_reply_status(data, data_size, offsets, offsets_size) }
             .expect("status reply should parse");
-        assert_eq!(
-            status.exception_code(),
-            rsbinder::ExceptionCode::ServiceSpecific
-        );
+        assert_eq!(status.exception_code(), rsbinder::ExceptionCode::ServiceSpecific);
         status.service_specific_error()
     };
 
     let abort_request = request_parcel(identify::KEYSTORE_OPERATION_INTERFACE);
-    let mut abort_tr = transaction_for_parcel(
+    let (mut abort_tr, _abort_data) = transaction_for_parcel(
         target,
         crate::android::system::keystore2::IKeystoreOperation::transactions::r#abort,
-        &abort_request,
+        abort_request,
     );
     abort_tr.flags |= crate::hook::binder::TF_ONE_WAY;
 
@@ -48,10 +41,10 @@ fn one_way_synthetic_operation_abort_finalizes_mapping() {
 
     let mut update_request = request_parcel(identify::KEYSTORE_OPERATION_INTERFACE);
     update_request.write(&vec![1u8]).unwrap();
-    let update_tr = transaction_for_parcel(
+    let (update_tr, _update_data) = transaction_for_parcel(
         target,
         crate::android::system::keystore2::IKeystoreOperation::transactions::r#update,
-        &update_request,
+        update_request,
     );
     let update_reply =
         unsafe { handle_synthetic_br_transaction(&update_tr, None, "BR_TRANSACTION") }
@@ -63,10 +56,10 @@ fn one_way_synthetic_operation_abort_finalizes_mapping() {
     );
 
     let abort_again_request = request_parcel(identify::KEYSTORE_OPERATION_INTERFACE);
-    let abort_again_tr = transaction_for_parcel(
+    let (abort_again_tr, _abort_again_data) = transaction_for_parcel(
         target,
         crate::android::system::keystore2::IKeystoreOperation::transactions::r#abort,
-        &abort_again_request,
+        abort_again_request,
     );
     let abort_again_reply =
         unsafe { handle_synthetic_br_transaction(&abort_again_tr, None, "BR_TRANSACTION") }

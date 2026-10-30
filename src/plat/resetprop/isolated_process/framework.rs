@@ -19,14 +19,11 @@ fn read_framework() -> Result<u32> {
     let mut archive = zip::ZipArchive::new(File::open("/system/framework/framework.jar")?)?;
     for index in 0..archive.len() {
         let mut file = archive.by_index(index)?;
-        let name = file.name();
+        let name = file.name()?;
         if !(name == "classes.dex"
-            || name
-                .strip_prefix("classes")
-                .and_then(|tail| tail.strip_suffix(".dex"))
-                .is_some_and(|number| {
-                    !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())
-                }))
+            || name.strip_prefix("classes").and_then(|tail| tail.strip_suffix(".dex")).is_some_and(
+                |number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()),
+            ))
         {
             continue;
         }
@@ -68,9 +65,7 @@ impl<'a> Dex<'a> {
 
     fn bytes(&self, offset: usize, len: usize) -> Result<&'a [u8]> {
         let end = offset.checked_add(len).context("DEX offset overflow")?;
-        self.data
-            .get(offset..end)
-            .context("truncated framework DEX")
+        self.data.get(offset..end).context("truncated framework DEX")
     }
 
     fn u16(&self, offset: usize) -> Result<u16> {
@@ -108,9 +103,7 @@ impl<'a> Dex<'a> {
             bail!("DEX table index out of bounds");
         }
         let base = self.u32(header + 4)? as usize;
-        let size = (count as usize)
-            .checked_mul(width)
-            .context("DEX table size overflow")?;
+        let size = (count as usize).checked_mul(width).context("DEX table size overflow")?;
         self.bytes(base, size)?;
         Ok(base + index as usize * width)
     }

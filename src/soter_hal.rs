@@ -124,9 +124,8 @@ impl Config {
         if encoded.is_empty() || encoded.len() > MAX_JSON_BYTES.div_ceil(3) * 4 {
             bail!("invalid Soter HAL payload size");
         }
-        let bytes = BASE64_STANDARD
-            .decode(encoded)
-            .context("invalid Soter HAL payload encoding")?;
+        let bytes =
+            BASE64_STANDARD.decode(encoded).context("invalid Soter HAL payload encoding")?;
         let raw = std::str::from_utf8(&bytes).context("Soter HAL payload is not UTF-8")?;
         Self::parse(raw)
     }
@@ -189,8 +188,7 @@ impl Config {
         let mut config = match fs::read_to_string(config_path) {
             Ok(raw) => {
                 let legacy = !raw.lines().any(|line| {
-                    line.split_once('=')
-                        .is_some_and(|(key, _)| key.trim() == "remote_enabled")
+                    line.split_once('=').is_some_and(|(key, _)| key.trim() == "remote_enabled")
                 });
                 let mut config = Self::parse_file(&raw)?;
                 // Before the split, `enabled` controlled both the watchdog
@@ -225,9 +223,7 @@ fn validate_text(name: &str, value: &str, max_bytes: usize, allow_empty: bool) -
 }
 
 fn validate_url(value: &str) -> Result<()> {
-    let uri: Uri = value
-        .parse()
-        .map_err(|_| anyhow!("invalid Soter server URL"))?;
+    let uri: Uri = value.parse().map_err(|_| anyhow!("invalid Soter server URL"))?;
     let scheme = uri
         .scheme()
         .map(|scheme| scheme.as_str())
@@ -235,9 +231,8 @@ fn validate_url(value: &str) -> Result<()> {
     if scheme != "http" && scheme != "https" {
         bail!("Soter server URL must use HTTP or HTTPS");
     }
-    let authority = uri
-        .authority()
-        .ok_or_else(|| anyhow!("Soter server URL must include a host"))?;
+    let authority =
+        uri.authority().ok_or_else(|| anyhow!("Soter server URL must include a host"))?;
     if authority.as_str().is_empty() || authority.as_str().contains('@') {
         bail!("Soter server URL must not contain embedded credentials");
     }
@@ -410,8 +405,7 @@ pub fn save(config: Config) -> Result<()> {
     config.validate()?;
     ensure_config_dir()?;
     let lock = fs::File::open(CONFIG_DIR)?;
-    lock.lock()
-        .context("failed to lock Soter configuration directory")?;
+    lock.lock().context("failed to lock Soter configuration directory")?;
     let previous = Config::load()?;
     // Per-app selections have a separate delta API. A dialog opened earlier
     // must not overwrite a newer app selection when saving relay preferences.
@@ -498,9 +492,7 @@ impl AppTargetChange {
         if encoded.len() > 1024 {
             bail!("Soter app change is too large");
         }
-        let raw = BASE64_STANDARD
-            .decode(encoded)
-            .context("invalid Soter app change encoding")?;
+        let raw = BASE64_STANDARD.decode(encoded).context("invalid Soter app change encoding")?;
         let change: Self = serde_json::from_slice(&raw).context("invalid Soter app change")?;
         if serde_json::to_vec(&change)? != raw
             || pif_common::soter::parse_app_target(&change.target).is_none()
@@ -528,9 +520,7 @@ fn apply_app_change(
     // Prepare and validate the whole change before touching the caller's state.
     // An opt-in is the complete activation action, not a dormant saved target.
     let mut updated = config.clone();
-    updated
-        .app_targets
-        .retain(|target| target != &change.target);
+    updated.app_targets.retain(|target| target != &change.target);
     if change.enabled {
         updated = updated.with_webui_defaults();
         updated.remote_enabled = true;
@@ -551,8 +541,7 @@ pub fn save_app_target(change: AppTargetChange) -> Result<String> {
     let beta_enabled = change.enabled && crate::soter_beta::is_enabled()?;
     ensure_config_dir()?;
     let lock = fs::File::open(CONFIG_DIR)?;
-    lock.lock()
-        .context("failed to lock Soter configuration directory")?;
+    lock.lock().context("failed to lock Soter configuration directory")?;
     let previous = Config::load()?;
     let mut config = previous.clone().with_webui_defaults();
     apply_app_change(&mut config, &change, beta_enabled)?;
@@ -580,10 +569,7 @@ mod tests {
         assert!(host_mode_changed(&off, &current));
         assert!(host_mode_changed(&current, &off));
         assert!(!host_mode_changed(&current, &current));
-        let global = Config {
-            enabled: true,
-            ..off.clone()
-        };
+        let global = Config { enabled: true, ..off.clone() };
         assert!(host_mode_changed(&current, &global));
         assert!(host_mode_changed(&global, &off));
     }
@@ -601,29 +587,16 @@ mod tests {
     fn app_selection_activates_remote_mode_and_remains_independent_per_user() {
         let mut config = Config::default().with_webui_defaults();
         for target in ["com.example.wallet@10", "com.example.wallet@0"] {
-            let change = AppTargetChange {
-                target: target.into(),
-                enabled: true,
-            };
+            let change = AppTargetChange { target: target.into(), enabled: true };
             let encoded = BASE64_STANDARD.encode(serde_json::to_vec(&change).unwrap());
-            apply_app_change(
-                &mut config,
-                &AppTargetChange::parse_base64(&encoded).unwrap(),
-                false,
-            )
-            .unwrap();
+            apply_app_change(&mut config, &AppTargetChange::parse_base64(&encoded).unwrap(), false)
+                .unwrap();
         }
-        assert_eq!(
-            config.app_targets,
-            ["com.example.wallet@0", "com.example.wallet@10"]
-        );
+        assert_eq!(config.app_targets, ["com.example.wallet@0", "com.example.wallet@10"]);
         assert!(!config.enabled && config.remote_enabled && config.app_enabled);
         apply_app_change(
             &mut config,
-            &AppTargetChange {
-                target: "com.example.wallet@0".into(),
-                enabled: false,
-            },
+            &AppTargetChange { target: "com.example.wallet@0".into(), enabled: false },
             false,
         )
         .unwrap();
@@ -647,10 +620,7 @@ mod tests {
         let mut config = previous.clone();
         apply_app_change(
             &mut config,
-            &AppTargetChange {
-                target: "com.example.wallet@0".into(),
-                enabled: true,
-            },
+            &AppTargetChange { target: "com.example.wallet@0".into(), enabled: true },
             false,
         )
         .unwrap();
@@ -661,17 +631,11 @@ mod tests {
         assert_eq!(config.device_id, previous.device_id);
         assert_eq!(config.uid_map, previous.uid_map);
         assert_eq!(config.tls_insecure, previous.tls_insecure);
-        assert_eq!(
-            config.app_targets,
-            ["com.example.other@10", "com.example.wallet@0"]
-        );
+        assert_eq!(config.app_targets, ["com.example.other@10", "com.example.wallet@0"]);
         let active = config.clone();
         apply_app_change(
             &mut config,
-            &AppTargetChange {
-                target: "com.example.wallet@0".into(),
-                enabled: true,
-            },
+            &AppTargetChange { target: "com.example.wallet@0".into(), enabled: true },
             false,
         )
         .unwrap();
@@ -681,10 +645,7 @@ mod tests {
 
     #[test]
     fn app_opt_in_fills_defaults_and_rejects_invalid_or_conflicting_changes() {
-        let change = AppTargetChange {
-            target: "com.example.wallet@0".into(),
-            enabled: true,
-        };
+        let change = AppTargetChange { target: "com.example.wallet@0".into(), enabled: true };
         let mut config = Config::default();
         apply_app_change(&mut config, &change, false).unwrap();
         assert_eq!(config.url, DEFAULT_RELAY_URL);
@@ -692,13 +653,7 @@ mod tests {
         assert_eq!(config.device_id, DEFAULT_RELAY_DEVICE_ID);
         for (mut rejected, beta) in [
             (Config::default(), true),
-            (
-                Config {
-                    url: "file:///invalid".into(),
-                    ..Config::default()
-                },
-                false,
-            ),
+            (Config { url: "file:///invalid".into(), ..Config::default() }, false),
         ] {
             let unchanged = rejected.clone();
             assert!(apply_app_change(&mut rejected, &change, beta).is_err());
@@ -708,29 +663,20 @@ mod tests {
 
     #[test]
     fn app_opt_out_preserves_modes_and_other_targets_even_with_beta_enabled() {
-        for (global, remote, app) in [
-            (false, false, false),
-            (false, true, true),
-            (true, false, false),
-            (true, true, true),
-        ] {
+        for (global, remote, app) in
+            [(false, false, false), (false, true, true), (true, false, false), (true, true, true)]
+        {
             let previous = Config {
                 enabled: global,
                 remote_enabled: remote,
                 app_enabled: app,
-                app_targets: vec![
-                    "com.example.wallet@0".into(),
-                    "com.example.wallet@10".into(),
-                ],
+                app_targets: vec!["com.example.wallet@0".into(), "com.example.wallet@10".into()],
                 ..Config::default().with_webui_defaults()
             };
             let mut config = previous.clone();
             apply_app_change(
                 &mut config,
-                &AppTargetChange {
-                    target: "com.example.wallet@0".into(),
-                    enabled: false,
-                },
+                &AppTargetChange { target: "com.example.wallet@0".into(), enabled: false },
                 true,
             )
             .unwrap();
@@ -760,32 +706,19 @@ mod tests {
 
     #[test]
     fn only_full_software_ta_shutdown_is_scheduled_asynchronously() {
-        let enabled = Config {
-            enabled: true,
-            app_enabled: true,
-            ..Config::default()
-        };
+        let enabled = Config { enabled: true, app_enabled: true, ..Config::default() };
         let fully_disabled = Config::default();
         assert!(should_restore_soter_async(&enabled, &fully_disabled));
 
-        let app_only = Config {
-            enabled: false,
-            app_enabled: true,
-            ..Config::default()
-        };
+        let app_only = Config { enabled: false, app_enabled: true, ..Config::default() };
         assert!(!should_restore_soter_async(&enabled, &app_only));
         assert!(!should_restore_soter_async(&app_only, &fully_disabled));
-        assert!(!should_restore_soter_async(
-            &fully_disabled,
-            &fully_disabled
-        ));
+        assert!(!should_restore_soter_async(&fully_disabled, &fully_disabled));
     }
 
     #[test]
     fn per_app_transition_requires_a_confirmed_stock_snapshot() {
-        assert!(stock_hal_restored(
-            "enabled=0\nrunning=0\nowner=hal\nhal=running\n"
-        ));
+        assert!(stock_hal_restored("enabled=0\nrunning=0\nowner=hal\nhal=running\n"));
         for report in [
             "enabled=0\nrunning=1\nowner=us\nhal=stopped\n",
             "enabled=0\nrunning=0\nowner=none\nhal=stopped\n",
@@ -835,42 +768,22 @@ mod tests {
                 } else {
                     String::new()
                 },
-                device_id: if fields & 2 != 0 {
-                    "custom-device".into()
-                } else {
-                    String::new()
-                },
-                token: if fields & 4 != 0 {
-                    "custom-token".into()
-                } else {
-                    String::new()
-                },
+                device_id: if fields & 2 != 0 { "custom-device".into() } else { String::new() },
+                token: if fields & 4 != 0 { "custom-token".into() } else { String::new() },
                 ..Config::default()
             };
             let resolved = config.with_webui_defaults();
             assert_eq!(
                 resolved.url,
-                if fields & 1 != 0 {
-                    "https://relay.example.test"
-                } else {
-                    DEFAULT_RELAY_URL
-                }
+                if fields & 1 != 0 { "https://relay.example.test" } else { DEFAULT_RELAY_URL }
             );
             assert_eq!(
                 resolved.device_id,
-                if fields & 2 != 0 {
-                    "custom-device"
-                } else {
-                    DEFAULT_RELAY_DEVICE_ID
-                }
+                if fields & 2 != 0 { "custom-device" } else { DEFAULT_RELAY_DEVICE_ID }
             );
             assert_eq!(
                 resolved.token,
-                if fields & 4 != 0 {
-                    "custom-token"
-                } else {
-                    DEFAULT_RELAY_TOKEN
-                }
+                if fields & 4 != 0 { "custom-token" } else { DEFAULT_RELAY_TOKEN }
             );
         }
     }
@@ -881,21 +794,13 @@ mod tests {
             for fields in 0..=7 {
                 let partial = Config {
                     remote_enabled,
-                    url: if fields & 1 != 0 {
-                        DEFAULT_RELAY_URL.into()
-                    } else {
-                        String::new()
-                    },
+                    url: if fields & 1 != 0 { DEFAULT_RELAY_URL.into() } else { String::new() },
                     device_id: if fields & 2 != 0 {
                         DEFAULT_RELAY_DEVICE_ID.into()
                     } else {
                         String::new()
                     },
-                    token: if fields & 4 != 0 {
-                        DEFAULT_RELAY_TOKEN.into()
-                    } else {
-                        String::new()
-                    },
+                    token: if fields & 4 != 0 { DEFAULT_RELAY_TOKEN.into() } else { String::new() },
                     ..Config::default()
                 };
                 let resolved = Config::parse_file(&file_contents(&partial)).unwrap();
@@ -913,12 +818,9 @@ mod tests {
 
     #[test]
     fn webui_defaults_preserve_advanced_settings() {
-        let config = Config {
-            tls_insecure: true,
-            uid_map: "10001=10002".into(),
-            ..Config::default()
-        }
-        .with_webui_defaults();
+        let config =
+            Config { tls_insecure: true, uid_map: "10001=10002".into(), ..Config::default() }
+                .with_webui_defaults();
         assert!(!config.enabled);
         assert!(config.tls_insecure);
         assert_eq!(config.uid_map, "10001=10002");
@@ -926,19 +828,14 @@ mod tests {
 
     #[test]
     fn enabled_config_requires_relay_identity() {
-        let config = Config {
-            remote_enabled: true,
-            ..Config::default()
-        };
+        let config = Config { remote_enabled: true, ..Config::default() };
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn rejects_credentials_and_bad_uid_mappings() {
-        let mut config = Config {
-            url: "https://user:pass@example.test".into(),
-            ..Config::default()
-        };
+        let mut config =
+            Config { url: "https://user:pass@example.test".into(), ..Config::default() };
         assert!(config.validate().is_err());
         config.url = "https://example.test".into();
         config.uid_map = "1000=1001 1000=1002".into();
@@ -1011,10 +908,7 @@ mod tests {
                     } else if flag_path.exists() {
                         fs::remove_file(&flag_path).unwrap();
                     }
-                    assert_eq!(
-                        Config::load_from_paths(&config_path, &flag_path).unwrap(),
-                        config
-                    );
+                    assert_eq!(Config::load_from_paths(&config_path, &flag_path).unwrap(), config);
                 }
             }
         }
@@ -1025,10 +919,7 @@ mod tests {
         let directory = tempfile::TempDir::new().unwrap();
         let config_path = directory.path().join("remote.conf");
         let flag_path = directory.path().join("enabled");
-        assert_eq!(
-            Config::load_from_paths(&config_path, &flag_path).unwrap(),
-            Config::default()
-        );
+        assert_eq!(Config::load_from_paths(&config_path, &flag_path).unwrap(), Config::default());
         fs::write(&flag_path, b"1\n").unwrap();
         let local = Config::load_from_paths(&config_path, &flag_path).unwrap();
         assert!(local.enabled);
@@ -1104,18 +995,12 @@ mod tests {
             token: "a".repeat(MAX_TOKEN_BYTES),
             device_id: "b".repeat(MAX_DEVICE_ID_BYTES),
             tls_insecure: false,
-            uid_map: (10000..10200)
-                .map(|uid| format!("{uid}={uid}"))
-                .collect::<Vec<_>>()
-                .join(","),
+            uid_map: (10000..10200).map(|uid| format!("{uid}={uid}")).collect::<Vec<_>>().join(","),
             app_enabled: false,
             app_targets: vec![],
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.len() > 4096);
-        assert_eq!(
-            Config::parse_base64(&BASE64_STANDARD.encode(json)).unwrap(),
-            config
-        );
+        assert_eq!(Config::parse_base64(&BASE64_STANDARD.encode(json)).unwrap(), config);
     }
 }

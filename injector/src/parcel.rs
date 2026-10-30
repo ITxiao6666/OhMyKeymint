@@ -1,19 +1,19 @@
-use std::mem::size_of;
-
-use anyhow::{anyhow, bail, Context, Result};
-use rsbinder::{Parcel, StatusCode};
-
 use crate::hook::binder::{flat_binder_object, BINDER_TYPE_FD};
 use crate::identify::{
     KEYSTORE_AUTHORIZATION_INTERFACE, KEYSTORE_MAINTENANCE_INTERFACE, KEYSTORE_OPERATION_INTERFACE,
     KEYSTORE_SECURITY_LEVEL_INTERFACE, KEYSTORE_SERVICE_INTERFACE,
 };
-
-mod reply;
-mod request;
+use anyhow::{anyhow, bail, Context, Result};
+use rsbinder::{Parcel, StatusCode};
+use std::mem::size_of;
 
 pub use reply::*;
 pub use request::*;
+
+mod reply;
+mod request;
+#[cfg(test)]
+mod tests;
 
 /// # Safety
 ///
@@ -174,13 +174,7 @@ unsafe fn parse_typed_request<M>(
     interface_name: &str,
     method_from_code: impl FnOnce(u32) -> Option<M>,
 ) -> Result<(Parcel, M)> {
-    let RequestEnvelope {
-        data,
-        data_size,
-        offsets,
-        offsets_size,
-        code,
-    } = envelope;
+    let RequestEnvelope { data, data_size, offsets, offsets_size, code } = envelope;
     let mut parcel = parcel_from_ipc_parts(data, data_size, offsets, offsets_size);
     let interface = read_request_interface(&mut parcel)?;
     if interface != expected_interface {
@@ -198,16 +192,9 @@ unsafe fn parcel_from_ipc_parts(
     offsets: *mut usize,
     offsets_size: usize,
 ) -> Parcel {
-    let data = if data_size == 0 {
-        std::ptr::NonNull::<u8>::dangling().as_ptr()
-    } else {
-        data
-    };
-    let offsets = if offsets_size == 0 {
-        std::ptr::NonNull::<usize>::dangling().as_ptr()
-    } else {
-        offsets
-    };
+    let data = if data_size == 0 { std::ptr::NonNull::<u8>::dangling().as_ptr() } else { data };
+    let offsets =
+        if offsets_size == 0 { std::ptr::NonNull::<usize>::dangling().as_ptr() } else { offsets };
 
     Parcel::from_ipc_parts(
         data,
@@ -229,14 +216,6 @@ fn noop_free_buffer(
 }
 
 fn contains_utf16_token(parcel: &[u8], token: &str) -> bool {
-    let encoded: Vec<u8> = token
-        .encode_utf16()
-        .flat_map(|unit| unit.to_le_bytes())
-        .collect();
-    parcel
-        .windows(encoded.len())
-        .any(|window| window == encoded)
+    let encoded: Vec<u8> = token.encode_utf16().flat_map(|unit| unit.to_le_bytes()).collect();
+    parcel.windows(encoded.len()).any(|window| window == encoded)
 }
-
-#[cfg(test)]
-mod tests;

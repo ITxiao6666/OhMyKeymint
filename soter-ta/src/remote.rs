@@ -128,13 +128,9 @@ impl Config {
             if config.token.is_empty() || config.device_id.is_empty() {
                 return Err("SOTER token and device_id are required when enabled".to_string());
             }
-            if [
-                config.token.as_str(),
-                config.device_id.as_str(),
-                config.uid_map.as_str(),
-            ]
-            .iter()
-            .any(|value| value.contains(['\r', '\n']))
+            if [config.token.as_str(), config.device_id.as_str(), config.uid_map.as_str()]
+                .iter()
+                .any(|value| value.contains(['\r', '\n']))
             {
                 return Err("SOTER remote config contains a newline".to_string());
             }
@@ -149,17 +145,11 @@ impl Config {
             .open(config_path())
         {
             Ok(file) => {
-                if !file
-                    .metadata()
-                    .map_err(|error| error.to_string())?
-                    .is_file()
-                {
+                if !file.metadata().map_err(|error| error.to_string())?.is_file() {
                     return Err("Soter remote config is not a regular file".into());
                 }
                 let mut raw = String::new();
-                file.take(32769)
-                    .read_to_string(&mut raw)
-                    .map_err(|error| error.to_string())?;
+                file.take(32769).read_to_string(&mut raw).map_err(|error| error.to_string())?;
                 if raw.len() > 32768 {
                     return Err("Soter remote config exceeds limit".into());
                 }
@@ -176,10 +166,7 @@ impl Config {
 pub fn app_uids(config: &Config) -> Result<Vec<u32>, String> {
     let mut table = String::new();
     std::fs::File::open("/data/system/packages.list")
-        .and_then(|file| {
-            file.take(MAX_PACKAGE_TABLE_BYTES + 1)
-                .read_to_string(&mut table)
-        })
+        .and_then(|file| file.take(MAX_PACKAGE_TABLE_BYTES + 1).read_to_string(&mut table))
         .map_err(|error| format!("cannot resolve Soter application selection: {error}"))?;
     if table.len() as u64 > MAX_PACKAGE_TABLE_BYTES {
         return Err("Android package table exceeds limit".into());
@@ -195,17 +182,12 @@ fn app_uids_in_table(config: &Config, table: &str) -> Vec<u32> {
         };
         let id = table.lines().find_map(|line| {
             let mut fields = line.split_ascii_whitespace();
-            (fields.next()? == wanted)
-                .then(|| fields.next()?.parse::<u32>().ok())
-                .flatten()
+            (fields.next()? == wanted).then(|| fields.next()?.parse::<u32>().ok()).flatten()
         });
         let Some(id) = id.filter(|id| (10000..20000).contains(id)) else {
             continue;
         };
-        let Some(uid) = user
-            .checked_mul(100000)
-            .and_then(|base| base.checked_add(id))
-        else {
+        let Some(uid) = user.checked_mul(100000).and_then(|base| base.checked_add(id)) else {
             continue;
         };
         if package_in_table(table, uid) == Some(wanted) {
@@ -322,11 +304,7 @@ fn request_body(
             body["uid"] = json!(mapped_uid(*uid, &config.uid_map));
             body["alias"] = json!(kname);
         }
-        Request::InitSign {
-            uid,
-            kname,
-            challenge,
-        } => {
+        Request::InitSign { uid, kname, challenge } => {
             body["uid"] = json!(mapped_uid(*uid, &config.uid_map));
             body["alias"] = json!(kname);
             body["challenge"] = json!(challenge);
@@ -388,16 +366,9 @@ fn decode_reply(tx: u32, body: &Value) -> Result<Outcome, String> {
             None => return Err("remote SOTER success reply is missing data".to_string()),
         };
         let data = device_id_bytes(&payload);
-        return Ok(Outcome::Buffer {
-            code,
-            field: data.len() as i32,
-            data,
-        });
+        return Ok(Outcome::Buffer { code, field: data.len() as i32, data });
     }
-    if matches!(
-        tx,
-        dispatch::TX_EXPORT_ASK | dispatch::TX_EXPORT_AUTH | dispatch::TX_FINISH_SIGN
-    ) {
+    if matches!(tx, dispatch::TX_EXPORT_ASK | dispatch::TX_EXPORT_AUTH | dispatch::TX_FINISH_SIGN) {
         let data = match body.get("data").and_then(Value::as_str) {
             Some(encoded) => base64::engine::general_purpose::STANDARD
                 .decode(encoded)
@@ -424,11 +395,8 @@ fn decode_reply(tx: u32, body: &Value) -> Result<Outcome, String> {
 /// every blob carries as `cpu_id`. Handing the spelling up instead would let one
 /// device report two different ids.
 fn device_id_bytes(payload: &[u8]) -> Vec<u8> {
-    let kept = payload
-        .iter()
-        .rev()
-        .skip_while(|byte| **byte == 0 || byte.is_ascii_whitespace())
-        .count();
+    let kept =
+        payload.iter().rev().skip_while(|byte| **byte == 0 || byte.is_ascii_whitespace()).count();
     let trimmed = &payload[..kept];
     match std::str::from_utf8(trimmed) {
         Ok(text) if text.len() == 32 && text.bytes().all(|byte| byte.is_ascii_hexdigit()) => {
@@ -519,10 +487,7 @@ fn forward_with_ask_confirmation(
     if tx != dispatch::TX_GENERATE_ASK || outcome != Outcome::Code(crate::error::SOTER_ERR_NO_KEY) {
         return Ok(outcome);
     }
-    let Some(uid) = body
-        .get("uid")
-        .and_then(Value::as_u64)
-        .and_then(|uid| u32::try_from(uid).ok())
+    let Some(uid) = body.get("uid").and_then(Value::as_u64).and_then(|uid| u32::try_from(uid).ok())
     else {
         return Ok(outcome);
     };
@@ -536,12 +501,7 @@ fn forward_with_ask_confirmation(
         return Ok(outcome);
     }
     probe["op"] = json!("export_ask_public_key");
-    if let Ok(Outcome::Buffer {
-        code: 0,
-        data,
-        field,
-    }) = send(dispatch::TX_EXPORT_ASK, &probe)
-    {
+    if let Ok(Outcome::Buffer { code: 0, data, field }) = send(dispatch::TX_EXPORT_ASK, &probe) {
         if usable_ask_export(&data, field, uid) {
             log::info!(target: "omk_soter_remote",
                 "event=soter path=remote_transport stage=ask_confirmation state=confirmed tx={tx}");
@@ -698,22 +658,18 @@ mod tests {
 
     #[test]
     fn transport_diagnostic_category_does_not_expose_error_url() {
-        let error = reqwest::blocking::Client::new()
-            .get("http://[")
-            .build()
-            .unwrap_err()
-            .with_url(
-                reqwest::Url::parse("https://secret-endpoint.invalid/?token=secret-token").unwrap(),
-            );
+        let error = reqwest::blocking::Client::new().get("http://[").build().unwrap_err().with_url(
+            reqwest::Url::parse("https://secret-endpoint.invalid/?token=secret-token").unwrap(),
+        );
         assert_eq!(error.url().unwrap().query(), Some("token=secret-token"));
         assert_eq!(transport_error_kind(&error), "request_build");
     }
     fn ask_document(uid: u32) -> Value {
         // A public-only structural fixture; no private key or hardware trust
         // is involved in checking whether an exported ASK is well formed.
-        let key = rsa::RsaPublicKey::new(
-            rsa::BigUint::from_bytes_be(&[0xff; 256]),
-            rsa::BigUint::from(65537u32),
+        let key = openssl::rsa::Rsa::from_public_components(
+            openssl::bn::BigNum::from_slice(&[0xff; 256]).unwrap(),
+            openssl::bn::BigNum::from_u32(65537).unwrap(),
         )
         .unwrap();
         json!({
@@ -725,15 +681,9 @@ mod tests {
     }
 
     fn ask_export(document: &Value, signature_len: usize) -> Outcome {
-        let data = crate::blob::encode(
-            &serde_json::to_vec(document).unwrap(),
-            &vec![1; signature_len],
-        );
-        Outcome::Buffer {
-            code: 0,
-            field: data.len() as i32,
-            data,
-        }
+        let data =
+            crate::blob::encode(&serde_json::to_vec(document).unwrap(), &vec![1; signature_len]);
+        Outcome::Buffer { code: 0, field: data.len() as i32, data }
     }
 
     #[test]
@@ -743,12 +693,9 @@ mod tests {
             uid_map: "10123=10456".into(),
             ..Config::default()
         };
-        let body = request_body(
-            &config,
-            dispatch::TX_GENERATE_ASK,
-            &Request::Uid(10123),
-            |_| Some("com.example.wallet".into()),
-        )
+        let body = request_body(&config, dispatch::TX_GENERATE_ASK, &Request::Uid(10123), |_| {
+            Some("com.example.wallet".into())
+        })
         .unwrap();
         let mut calls = Vec::new();
         let result =
@@ -778,11 +725,7 @@ mod tests {
         assert_eq!(result, Outcome::Code(0));
         assert_eq!(
             calls,
-            [
-                dispatch::TX_GENERATE_ASK,
-                dispatch::TX_HAS_ASK,
-                dispatch::TX_EXPORT_ASK
-            ]
+            [dispatch::TX_GENERATE_ASK, dispatch::TX_HAS_ASK, dispatch::TX_EXPORT_ASK]
         );
     }
 
@@ -804,11 +747,7 @@ mod tests {
             assert_eq!(result, answer);
             assert_eq!(count, 1);
         }
-        for has_reply in [
-            Ok(Outcome::Code(-5)),
-            Ok(Outcome::Code(1)),
-            Err("timeout".into()),
-        ] {
+        for has_reply in [Ok(Outcome::Code(-5)), Ok(Outcome::Code(1)), Err("timeout".into())] {
             let mut calls = Vec::new();
             let result =
                 forward_with_ask_confirmation(dispatch::TX_GENERATE_ASK, &body, |tx, _| {
@@ -825,16 +764,8 @@ mod tests {
         }
         for export_reply in [
             Err("offline".into()),
-            Ok(Outcome::Buffer {
-                code: -20,
-                data: Vec::new(),
-                field: 0,
-            }),
-            Ok(Outcome::Buffer {
-                code: 0,
-                data: vec![1, 2, 3],
-                field: 3,
-            }),
+            Ok(Outcome::Buffer { code: -20, data: Vec::new(), field: 0 }),
+            Ok(Outcome::Buffer { code: 0, data: vec![1, 2, 3], field: 3 }),
         ] {
             let result =
                 forward_with_ask_confirmation(dispatch::TX_GENERATE_ASK, &body, |tx, _| match tx {
@@ -865,11 +796,7 @@ mod tests {
         assert!(!usable_ask_export(&[], 0, 10123));
         assert!(!usable_ask_export(&[0xff; 4], 4, 10123));
         let malformed_json = crate::blob::encode(b"not json", &[1; crate::blob::SIGNATURE_LEN]);
-        assert!(!usable_ask_export(
-            &malformed_json,
-            malformed_json.len() as i32,
-            10123
-        ));
+        assert!(!usable_ask_export(&malformed_json, malformed_json.len() as i32, 10123));
         for (field, value) in [
             ("pub_key", json!("not a public key")),
             ("cpu_id", json!("wrong-device-id")),
@@ -881,9 +808,7 @@ mod tests {
             assert!(!validate(&malformed, 256, 0, 10123), "invalid {field}");
         }
         let oversized = ask_export(&valid, MAX_RESPONSE_BYTES as usize);
-        let Outcome::Buffer { data, field, .. } = oversized else {
-            unreachable!()
-        };
+        let Outcome::Buffer { data, field, .. } = oversized else { unreachable!() };
         assert!(!usable_ask_export(&data, field, 10123));
     }
 
@@ -896,9 +821,7 @@ mod tests {
         let destination_port = destination.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             let (mut socket, _) = origin.accept().unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
             let mut request = [0u8; 4096];
             assert!(socket.read(&mut request).unwrap() > 0);
             socket.write_all(format!(
@@ -915,10 +838,7 @@ mod tests {
         let error = forward(&config, dispatch::TX_HAS_ASK, &Request::Uid(10123)).unwrap_err();
         assert!(error.contains("HTTP 302"), "{error}");
         server.join().unwrap();
-        assert_eq!(
-            destination.accept().unwrap_err().kind(),
-            std::io::ErrorKind::WouldBlock
-        );
+        assert_eq!(destination.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
     }
 
     #[test]
@@ -929,32 +849,21 @@ mod tests {
         assert_eq!(package_in_table(table, 1010123), Some("com.example.wallet"));
         assert_eq!(package_in_table(table, 10999), None);
         assert_eq!(package_in_table("android 1000 0", 1000), None);
-        assert_eq!(
-            package_in_table("com.example.isolated 99001 0", 99001),
-            None
-        );
-        assert_eq!(
-            package_in_table("malformed\ncom.example.no_uid bad 0", 10123),
-            None
-        );
+        assert_eq!(package_in_table("com.example.isolated 99001 0", 99001), None);
+        assert_eq!(package_in_table("malformed\ncom.example.no_uid bad 0", 10123), None);
         assert_eq!(package_in_table("com.example/invalid 10123 0", 10123), None);
         let shared = format!("{table}com.example.shared 10123 0\n");
         assert_eq!(package_in_table(&shared, 10123), None);
         // A fresh table must not retain a previous package after UID reuse.
-        assert_eq!(
-            package_in_table("com.example.new 10123 0", 10123),
-            Some("com.example.new")
-        );
+        assert_eq!(package_in_table("com.example.new 10123 0", 10123), Some("com.example.new"));
     }
 
     #[test]
     fn app_selection_is_empty_by_default_and_profile_specific() {
         let table = "com.example.wallet 10123 0\ncom.example.other 10124 0\n";
         assert!(app_uids_in_table(&Config::default(), table).is_empty());
-        let config = Config {
-            app_targets: vec!["com.example.wallet@10".into()],
-            ..Config::default()
-        };
+        let config =
+            Config { app_targets: vec!["com.example.wallet@10".into()], ..Config::default() };
         assert_eq!(app_uids_in_table(&config, table), [1010123]);
         assert!(app_uids_in_table(&config, "com.example.replacement 10123 0\n").is_empty());
         let shared = format!("{table}com.example.shared 10123 0\n");
@@ -969,26 +878,13 @@ mod tests {
 
     #[test]
     fn package_hint_uses_unmapped_argument_uid_and_is_never_trusted() {
-        let config = Config {
-            uid_map: "10123=10456".into(),
-            ..Config::default()
-        };
+        let config = Config { uid_map: "10123=10456".into(), ..Config::default() };
         for (tx, request) in [
             (dispatch::TX_HAS_ASK, Request::Uid(10123)),
-            (
-                dispatch::TX_HAS_AUTH,
-                Request::UidKey {
-                    uid: 10123,
-                    kname: "auth".into(),
-                },
-            ),
+            (dispatch::TX_HAS_AUTH, Request::UidKey { uid: 10123, kname: "auth".into() }),
             (
                 dispatch::TX_INIT_SIGN,
-                Request::InitSign {
-                    uid: 10123,
-                    kname: "auth".into(),
-                    challenge: "nonce".into(),
-                },
+                Request::InitSign { uid: 10123, kname: "auth".into(), challenge: "nonce".into() },
             ),
         ] {
             let body = request_body(&config, tx, &request, |uid| {
@@ -1001,10 +897,8 @@ mod tests {
             assert_eq!(body["caller_pkg_src"], "arg");
             assert!(body.get("caller_uid").is_none());
         }
-        let unknown = request_body(&config, dispatch::TX_HAS_ASK, &Request::Uid(10123), |_| {
-            None
-        })
-        .unwrap();
+        let unknown =
+            request_body(&config, dispatch::TX_HAS_ASK, &Request::Uid(10123), |_| None).unwrap();
         assert!(unknown.get("caller_pkg").is_none());
         assert!(unknown.get("caller_pkg_src").is_none());
         for (tx, request) in [
@@ -1034,11 +928,8 @@ mod tests {
             .is_err());
         }
         assert_eq!(
-            decode_reply(
-                dispatch::TX_HAS_ASK,
-                &json!({"local_only": false, "error_code": -5})
-            )
-            .unwrap(),
+            decode_reply(dispatch::TX_HAS_ASK, &json!({"local_only": false, "error_code": -5}))
+                .unwrap(),
             Outcome::Code(-5)
         );
     }
@@ -1054,9 +945,7 @@ mod tests {
             let _inner = test_config_path(nested.clone());
             assert_eq!(config_path().as_ref(), nested.as_path());
             assert_eq!(
-                std::thread::spawn(|| config_path().into_owned())
-                    .join()
-                    .unwrap(),
+                std::thread::spawn(|| config_path().into_owned()).join().unwrap(),
                 PathBuf::from(CONFIG_PATH)
             );
         }
@@ -1074,21 +963,9 @@ mod tests {
         for fields in 0..=7 {
             let raw = format!(
                 "enabled=true\nurl={}\ndevice_id={}\ntoken={}",
-                if fields & 1 != 0 {
-                    DEFAULT_RELAY_URL
-                } else {
-                    ""
-                },
-                if fields & 2 != 0 {
-                    DEFAULT_RELAY_DEVICE_ID
-                } else {
-                    ""
-                },
-                if fields & 4 != 0 {
-                    DEFAULT_RELAY_TOKEN
-                } else {
-                    ""
-                },
+                if fields & 1 != 0 { DEFAULT_RELAY_URL } else { "" },
+                if fields & 2 != 0 { DEFAULT_RELAY_DEVICE_ID } else { "" },
+                if fields & 4 != 0 { DEFAULT_RELAY_TOKEN } else { "" },
             );
             assert!(Config::parse(&raw).unwrap() == defaults);
         }
@@ -1109,11 +986,7 @@ mod tests {
         let body = request_body(
             &cfg,
             dispatch::TX_INIT_SIGN,
-            &Request::InitSign {
-                uid: 10001,
-                kname: "AuthKey".into(),
-                challenge: "nonce".into(),
-            },
+            &Request::InitSign { uid: 10001, kname: "AuthKey".into(), challenge: "nonce".into() },
             |_| None,
         )
         .unwrap();
@@ -1125,15 +998,9 @@ mod tests {
     #[test]
     fn remote_reply_preserves_session_and_negative_vendor_status() {
         assert_eq!(
-            decode_reply(
-                dispatch::TX_INIT_SIGN,
-                &json!({"error_code": 0, "session": 42}),
-            )
-            .unwrap(),
-            Outcome::Init {
-                code: 0,
-                session: 42
-            }
+            decode_reply(dispatch::TX_INIT_SIGN, &json!({"error_code": 0, "session": 42}),)
+                .unwrap(),
+            Outcome::Init { code: 0, session: 42 }
         );
         assert_eq!(
             decode_reply(
@@ -1141,48 +1008,26 @@ mod tests {
                 &json!({"error_code": -26, "data": "", "length": 0}),
             )
             .unwrap(),
-            Outcome::Buffer {
-                code: -26,
-                data: Vec::new(),
-                field: 0,
-            }
+            Outcome::Buffer { code: -26, data: Vec::new(), field: 0 }
         );
         assert_eq!(
             decode_reply(dispatch::TX_INIT_SIGN, &json!({"error_code": -5}),).unwrap(),
-            Outcome::Init {
-                code: -5,
-                session: 0,
-            }
+            Outcome::Init { code: -5, session: 0 }
         );
         assert!(decode_reply(dispatch::TX_INIT_SIGN, &json!({"error_code": 0})).is_err());
         // The ATTK trio is answered from the local ledger (ffi never forwards
         // it), so the relay mapping must not invent a remote ATTK operation.
-        assert!(request_body(
-            &Config::default(),
-            dispatch::TX_EXPORT_ATTK,
-            &Request::None,
-            |_| None
-        )
+        assert!(request_body(&Config::default(), dispatch::TX_EXPORT_ATTK, &Request::None, |_| {
+            None
+        })
         .is_err());
-        assert!(request_body(
-            &Config::default(),
-            dispatch::TX_VERIFY_ATTK,
-            &Request::None,
-            |_| None
-        )
+        assert!(request_body(&Config::default(), dispatch::TX_VERIFY_ATTK, &Request::None, |_| {
+            None
+        })
         .is_err());
-        let signed = decode_reply(
-            dispatch::TX_INIT_SIGN,
-            &json!({"error_code": 0, "session": -2}),
-        )
-        .unwrap();
-        assert_eq!(
-            signed,
-            Outcome::Init {
-                code: 0,
-                session: (-2i64) as u64
-            }
-        );
+        let signed =
+            decode_reply(dispatch::TX_INIT_SIGN, &json!({"error_code": 0, "session": -2})).unwrap();
+        assert_eq!(signed, Outcome::Init { code: 0, session: (-2i64) as u64 });
     }
 
     #[test]
@@ -1216,11 +1061,7 @@ mod tests {
                 &json!({"error_code": 0, "data": raw, "length": 3}),
             )
             .unwrap(),
-            Outcome::Buffer {
-                code: 0,
-                data: vec![0x0a, 0xff, 0x00],
-                field: 3,
-            }
+            Outcome::Buffer { code: 0, data: vec![0x0a, 0xff, 0x00], field: 3 }
         );
     }
 
@@ -1230,9 +1071,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
             let mut request = Vec::new();
             let mut chunk = [0u8; 4096];
             loop {
@@ -1277,25 +1116,13 @@ mod tests {
         let outcome = forward(
             &config,
             dispatch::TX_INIT_SIGN,
-            &Request::InitSign {
-                uid: 10001,
-                kname: "AuthKey".into(),
-                challenge: "nonce".into(),
-            },
+            &Request::InitSign { uid: 10001, kname: "AuthKey".into(), challenge: "nonce".into() },
         )
         .unwrap();
-        assert_eq!(
-            outcome,
-            Outcome::Init {
-                code: 0,
-                session: 42
-            }
-        );
+        assert_eq!(outcome, Outcome::Init { code: 0, session: 42 });
         let request = server.join().unwrap();
         assert!(request.starts_with("POST /api/soter/ HTTP/1.1"));
-        assert!(request
-            .to_ascii_lowercase()
-            .contains("x-relay-token: soter-token"));
+        assert!(request.to_ascii_lowercase().contains("x-relay-token: soter-token"));
         assert!(request.contains("\"device_id\":\"soter-b\""));
         assert!(request.contains("\"uid\":10002"));
     }

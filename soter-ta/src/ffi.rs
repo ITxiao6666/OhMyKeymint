@@ -140,10 +140,7 @@ pub fn save() -> Result<(), String> {
     let Some(shared) = slot.as_mut() else {
         return Err("state is not initialized".to_string());
     };
-    shared
-        .state
-        .store(&shared.path)
-        .map_err(|error| error.to_string())
+    shared.state.store(&shared.path).map_err(|error| error.to_string())
 }
 
 fn create_state_dir(path: &Path) -> std::io::Result<()> {
@@ -190,10 +187,9 @@ fn request_for(
         dispatch::TX_GENERATE_AUTH
         | dispatch::TX_HAS_AUTH
         | dispatch::TX_EXPORT_AUTH
-        | dispatch::TX_REMOVE_AUTH => Some(Request::UidKey {
-            uid,
-            kname: kname.unwrap_or_default(),
-        }),
+        | dispatch::TX_REMOVE_AUTH => {
+            Some(Request::UidKey { uid, kname: kname.unwrap_or_default() })
+        }
         dispatch::TX_INIT_SIGN => Some(Request::InitSign {
             uid,
             kname: kname.unwrap_or_default(),
@@ -384,11 +380,9 @@ pub fn answer(tx: u32, request: Request) -> Result<Option<Outcome>, String> {
             let code = crate::error::SOTER_ERR_NO_FINGERPRINT;
             return Ok(match tx {
                 dispatch::TX_INIT_SIGN => Some(Outcome::Init { code, session: 0 }),
-                dispatch::TX_FINISH_SIGN => Some(Outcome::Buffer {
-                    code,
-                    data: Vec::new(),
-                    field: 0,
-                }),
+                dispatch::TX_FINISH_SIGN => {
+                    Some(Outcome::Buffer { code, data: Vec::new(), field: 0 })
+                }
                 _ => None,
             });
         };
@@ -509,11 +503,7 @@ mod tests {
             assert!(!relays(true, tx), "ATTK tx {tx} must stay local");
             assert!(!relays(false, tx));
         }
-        for tx in [
-            dispatch::TX_EXPORT_ASK,
-            dispatch::TX_GET_DEVICE_ID,
-            dispatch::TX_FINISH_SIGN,
-        ] {
+        for tx in [dispatch::TX_EXPORT_ASK, dispatch::TX_GET_DEVICE_ID, dispatch::TX_FINISH_SIGN] {
             assert!(relays(true, tx));
             assert!(!relays(false, tx));
         }

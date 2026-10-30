@@ -45,9 +45,7 @@ pub(super) fn keys_mac_tag(key: &[u8], public: &Value) -> Result<[u8; 32]> {
     let protected = encode(&Value::Map(vec![(int(1), int(5))]))?;
     let payload = encode(&Value::Array(vec![public.clone()]))?;
     let input = build_sig_structure("MAC0", &protected, &payload)?;
-    Ok(hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, key), &input)
-        .as_ref()
-        .try_into()?)
+    Ok(hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, key), &input).as_ref().try_into()?)
 }
 
 pub(super) fn maced_keys(public: &Value, tag: &[u8]) -> Result<Vec<u8>> {

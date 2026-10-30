@@ -46,10 +46,7 @@ fn test_asymmetric_invalid_purposes() {
             };
             let error = result.expect_err("invalid asymmetric purpose must be rejected");
             assert!(
-                matches!(
-                    error.kind(),
-                    crate::ErrorKind::Hal(ErrorCode::IncompatiblePurpose, _)
-                ),
+                matches!(error.kind(), crate::ErrorKind::Hal(ErrorCode::IncompatiblePurpose, _)),
                 "unexpected error for {algorithm:?} {purposes:?}: {error:?}"
             );
         }
@@ -68,10 +65,7 @@ fn test_rsa_valid_purposes() {
     for purpose in non_attest_purposes {
         check_rsa_params(&[KeyParam::Purpose(purpose)]).unwrap();
     }
-    let params: Vec<_> = non_attest_purposes
-        .into_iter()
-        .map(KeyParam::Purpose)
-        .collect();
+    let params: Vec<_> = non_attest_purposes.into_iter().map(KeyParam::Purpose).collect();
     check_rsa_params(&params).unwrap();
     check_rsa_params(&[]).unwrap();
     check_rsa_params(&[KeyParam::Purpose(KeyPurpose::AttestKey)]).unwrap();
@@ -86,12 +80,9 @@ fn test_rsa_valid_purposes() {
 
 #[test]
 fn test_ec_valid_purposes() {
-    for purpose in [
-        KeyPurpose::Sign,
-        KeyPurpose::Verify,
-        KeyPurpose::AgreeKey,
-        KeyPurpose::AttestKey,
-    ] {
+    for purpose in
+        [KeyPurpose::Sign, KeyPurpose::Verify, KeyPurpose::AgreeKey, KeyPurpose::AttestKey]
+    {
         assert_eq!(
             check_ec_params(
                 EcCurve::P256,
@@ -140,10 +131,9 @@ fn test_asymmetric_attest_key_excludes_private_key_purposes() {
         (Algorithm::Ec, KeyPurpose::AgreeKey),
         (Algorithm::MlDsa, KeyPurpose::Sign),
     ] {
-        for purposes in [
-            [KeyPurpose::AttestKey, other_purpose],
-            [other_purpose, KeyPurpose::AttestKey],
-        ] {
+        for purposes in
+            [[KeyPurpose::AttestKey, other_purpose], [other_purpose, KeyPurpose::AttestKey]]
+        {
             let params = purposes.map(KeyParam::Purpose);
             let result = match algorithm {
                 Algorithm::Rsa => check_rsa_params(&params),
@@ -156,10 +146,7 @@ fn test_asymmetric_attest_key_excludes_private_key_purposes() {
             };
             let error = result.expect_err("ATTEST_KEY must exclude other private-key purposes");
             assert!(
-                matches!(
-                    error.kind(),
-                    crate::ErrorKind::Hal(ErrorCode::IncompatiblePurpose, _)
-                ),
+                matches!(error.kind(), crate::ErrorKind::Hal(ErrorCode::IncompatiblePurpose, _)),
                 "unexpected error for {algorithm:?} {purposes:?}: {error:?}"
             );
         }
@@ -168,16 +155,9 @@ fn test_asymmetric_attest_key_excludes_private_key_purposes() {
 
 #[test]
 fn test_curve25519_signing_and_agreement_purposes_stay_separate() {
-    for purpose in [
-        KeyPurpose::Sign,
-        KeyPurpose::AttestKey,
-        KeyPurpose::AgreeKey,
-    ] {
+    for purpose in [KeyPurpose::Sign, KeyPurpose::AttestKey, KeyPurpose::AgreeKey] {
         let keygen_info = check_ec_gen_params(
-            &[
-                KeyParam::EcCurve(EcCurve::Curve25519),
-                KeyParam::Purpose(purpose),
-            ],
+            &[KeyParam::EcCurve(EcCurve::Curve25519), KeyParam::Purpose(purpose)],
             SecurityLevel::TrustedEnvironment,
         )
         .unwrap();
@@ -190,17 +170,13 @@ fn test_curve25519_signing_and_agreement_purposes_stay_separate() {
         }
     }
     for signing_purpose in [KeyPurpose::Sign, KeyPurpose::AttestKey] {
-        for purposes in [
-            [signing_purpose, KeyPurpose::AgreeKey],
-            [KeyPurpose::AgreeKey, signing_purpose],
-        ] {
+        for purposes in
+            [[signing_purpose, KeyPurpose::AgreeKey], [KeyPurpose::AgreeKey, signing_purpose]]
+        {
             let params = purposes.map(KeyParam::Purpose);
-            let error = check_ec_params(
-                EcCurve::Curve25519,
-                &params,
-                SecurityLevel::TrustedEnvironment,
-            )
-            .expect_err("Curve25519 signing and key agreement cannot be combined");
+            let error =
+                check_ec_params(EcCurve::Curve25519, &params, SecurityLevel::TrustedEnvironment)
+                    .expect_err("Curve25519 signing and key agreement cannot be combined");
             assert!(matches!(
                 error.kind(),
                 crate::ErrorKind::Hal(ErrorCode::IncompatiblePurpose, _)
@@ -212,14 +188,8 @@ fn test_curve25519_signing_and_agreement_purposes_stay_separate() {
 #[test]
 fn test_characteristics_invalid() {
     let tests = vec![
-        (
-            vec![KeyParam::UsageCountLimit(42), KeyParam::UsageCountLimit(43)],
-            "duplicate value",
-        ),
-        (
-            vec![KeyParam::Nonce(vec![1, 2])],
-            "not a valid key characteristic",
-        ),
+        (vec![KeyParam::UsageCountLimit(42), KeyParam::UsageCountLimit(43)], "duplicate value"),
+        (vec![KeyParam::Nonce(vec![1, 2])], "not a valid key characteristic"),
     ];
     for (characteristics, msg) in tests {
         let result = crate::tag::characteristics_valid(&characteristics);
@@ -265,10 +235,7 @@ fn test_legacy_serialization() {
 fn test_copyable_tags() {
     for tag in UNPOLICED_COPYABLE_TAGS {
         let info = info(*tag).unwrap();
-        assert!(
-            info.user_can_specify.0,
-            "tag {tag:?} not listed as user-specifiable"
-        );
+        assert!(info.user_can_specify.0, "tag {tag:?} not listed as user-specifiable");
         assert!(
             info.characteristic == info::Characteristic::KeyMintEnforced
                 || info.characteristic == info::Characteristic::KeystoreEnforced
@@ -282,12 +249,7 @@ fn test_copyable_tags() {
 
 #[test]
 fn test_luhn_checksum() {
-    let tests = vec![
-        (0, 0),
-        (7992739871, 3),
-        (735423462345, 6),
-        (721367498765427, 4),
-    ];
+    let tests = vec![(0, 0), (7992739871, 3), (735423462345, 6), (721367498765427, 4)];
     for (input, want) in tests {
         let got = luhn_checksum(input);
         assert_eq!(got, want, "mismatch for input {input}");
@@ -305,10 +267,7 @@ fn test_increment_imei() {
         ("c328", ""),                 // Invalid UTF-8
         ("18446844073709551613", ""), // 20-digit and bigger than u64::MAX == 18_446_744_073_709_551_615
         // 721367498765404 => 721367498765412
-        (
-            "373231333637343938373635343034",
-            "373231333637343938373635343132",
-        ),
+        ("373231333637343938373635343034", "373231333637343938373635343132"),
         ("39393930", "3130303039"), // String gets longer
     ];
     for (input, want) in tests {

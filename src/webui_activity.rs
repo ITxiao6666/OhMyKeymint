@@ -87,11 +87,7 @@ pub fn record(action: &str, detail: &str) -> Result<()> {
     let path = Path::new(ACTIVITY_LOG_PATH);
     let _lock = security_patch::acquire_data_operation_lock(path)?;
     let mut entries = load_entries(path)?;
-    entries.push(ActivityEntry {
-        action,
-        detail: detail.to_string(),
-        timestamp,
-    });
+    entries.push(ActivityEntry { action, detail: detail.to_string(), timestamp });
     if entries.len() > MAX_ACTIVITY_ENTRIES {
         entries.drain(..entries.len() - MAX_ACTIVITY_ENTRIES);
     }
@@ -154,12 +150,8 @@ fn persist_entries(path: &Path, entries: &[ActivityEntry]) -> Result<()> {
     } else {
         (unsafe { libc::geteuid() }, unsafe { libc::getegid() })
     };
-    atomic_replace_preserving_metadata(path, &contents, 0o600, uid, gid).with_context(|| {
-        format!(
-            "failed to save the WebUI activity log at {}",
-            path.display()
-        )
-    })
+    atomic_replace_preserving_metadata(path, &contents, 0o600, uid, gid)
+        .with_context(|| format!("failed to save the WebUI activity log at {}", path.display()))
 }
 
 #[cfg(test)]
@@ -173,18 +165,12 @@ mod tests {
             ("keybox_changed", ActivityAction::KeyboxChanged),
             ("widevine_installed", ActivityAction::WidevineInstalled),
             ("security_patch_synced", ActivityAction::SecurityPatchSynced),
-            (
-                "security_patch_restored",
-                ActivityAction::SecurityPatchRestored,
-            ),
+            ("security_patch_restored", ActivityAction::SecurityPatchRestored),
             ("pif_enabled", ActivityAction::PifEnabled),
             ("pif_disabled", ActivityAction::PifDisabled),
         ] {
             assert_eq!(ActivityAction::parse(name).unwrap(), action);
-            assert_eq!(
-                serde_json::to_string(&action).unwrap(),
-                format!("\"{name}\"")
-            );
+            assert_eq!(serde_json::to_string(&action).unwrap(), format!("\"{name}\""));
         }
         assert!(ActivityAction::parse("unknown").is_err());
     }
@@ -229,9 +215,6 @@ mod tests {
             json,
             r#"[{"action":"security_patch_synced","detail":"2026-08-01","timestamp":1788537600}]"#
         );
-        assert_eq!(
-            serde_json::from_str::<Vec<ActivityEntry>>(&json).unwrap(),
-            vec![entry]
-        );
+        assert_eq!(serde_json::from_str::<Vec<ActivityEntry>>(&json).unwrap(), vec![entry]);
     }
 }

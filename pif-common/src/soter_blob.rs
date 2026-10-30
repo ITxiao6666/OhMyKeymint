@@ -6,10 +6,13 @@
 //! `pub_key, cpu_id, counter, uid`, and the tail is RSA-PSS/SHA-256 with a
 //! 20-byte salt over the exact JSON bytes.
 
-use rsa::pkcs8::{DecodePublicKey, EncodePublicKey, LineEnding};
-use rsa::{Pss, RsaPrivateKey, RsaPublicKey};
+use openssl::{
+    hash::MessageDigest,
+    pkey::{HasPublic, PKey, Private, Public},
+    rsa::{Padding, Rsa},
+    sign::{RsaPssSaltlen, Signer, Verifier},
+};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 /// Salt length used by the real device on every stage of the chain.
 pub const PSS_SALT_LEN: usize = 20;
@@ -49,12 +52,7 @@ struct SignedJson<'a> {
 /// counter is a number, and there is no certificate array (the Qualcomm backend
 /// never returns one).
 pub fn key_json(public_pem: &str, cpu_id: &str, counter: u64, uid: u32) -> Vec<u8> {
-    let json = KeyJson {
-        pub_key: public_pem,
-        cpu_id,
-        counter,
-        uid: uid.to_string(),
-    };
+    let json = KeyJson { pub_key: public_pem, cpu_id, counter, uid: uid.to_string() };
     serde_json::to_vec(&json).expect("key JSON is serializable")
 }
 
@@ -98,34 +96,94 @@ pub fn parse(blob: &[u8]) -> Option<(&[u8], &[u8])> {
 }
 
 /// RSA-PSS/SHA-256 with the device's 20-byte salt, over the JSON bytes.
-pub fn sign(key: &RsaPrivateKey, data: &[u8]) -> Option<Vec<u8>> {
-    let digest = Sha256::digest(data);
-    let mut rng = rand_core::OsRng;
-    key.sign_with_rng(
-        &mut rng,
-        Pss::new_with_salt::<Sha256>(PSS_SALT_LEN),
-        &digest,
-    )
-    .ok()
+pub fn sign(key: &Rsa<Private>, data: &[u8]) -> Option<Vec<u8>> {
+    let key = PKey::from_rsa(key.clone()).ok()?;
+    let mut signer = Signer::new(MessageDigest::sha256(), &key).ok()?;
+    signer.set_rsa_padding(Padding::PKCS1_PSS).ok()?;
+    signer.set_rsa_mgf1_md(MessageDigest::sha256()).ok()?;
+    signer.set_rsa_pss_saltlen(RsaPssSaltlen::custom(PSS_SALT_LEN as i32)).ok()?;
+    signer.update(data).ok()?;
+    signer.sign_to_vec().ok()
 }
 
 /// Verify a blob tail produced by [`sign`].
-pub fn verify(key: &RsaPublicKey, data: &[u8], signature: &[u8]) -> bool {
-    let digest = Sha256::digest(data);
-    key.verify(
-        Pss::new_with_salt::<Sha256>(PSS_SALT_LEN),
-        &digest,
-        signature,
-    )
-    .is_ok()
+pub fn verify(key: &Rsa<Public>, data: &[u8], signature: &[u8]) -> bool {
+    let result = || -> Result<bool, openssl::error::ErrorStack> {
+        let key = PKey::from_rsa(key.clone())?;
+        let mut verifier = Verifier::new(MessageDigest::sha256(), &key)?;
+        verifier.set_rsa_padding(Padding::PKCS1_PSS)?;
+        verifier.set_rsa_mgf1_md(MessageDigest::sha256())?;
+        verifier.set_rsa_pss_saltlen(RsaPssSaltlen::custom(PSS_SALT_LEN as i32))?;
+        verifier.update(data)?;
+        verifier.verify(signature)
+    };
+    result().unwrap_or(false)
 }
 
 /// SPKI/PEM encoding of a public key, the spelling the blobs use.
-pub fn public_key_pem(key: &RsaPublicKey) -> Option<String> {
-    key.to_public_key_pem(LineEnding::LF).ok()
+pub fn public_key_pem<T: HasPublic>(key: &Rsa<T>) -> Option<String> {
+    String::from_utf8(key.public_key_to_pem().ok()?).ok()
 }
 
 /// Parse an SPKI/PEM public key out of a blob's `pub_key` field.
-pub fn public_key_from_pem(pem: &str) -> Option<RsaPublicKey> {
-    RsaPublicKey::from_public_key_pem(pem).ok()
+pub fn public_key_from_pem(pem: &str) -> Option<Rsa<Public>> {
+    Rsa::public_key_from_pem(pem.as_bytes()).ok()
+}
+
+/// Read the existing unencrypted PKCS#8 ledger keys and reject invalid RSA material.
+pub fn private_key_from_pem(pem: &str) -> Option<Rsa<Private>> {
+    let key = PKey::private_key_from_pem(pem.as_bytes()).ok()?.rsa().ok()?;
+    key.check_key().ok()?.then_some(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pkcs8_and_spki_round_trip_keep_the_same_signing_identity() {
+        let original = Rsa::generate(2048).unwrap();
+        let pem = PKey::from_rsa(original.clone()).unwrap().private_key_to_pem_pkcs8().unwrap();
+        let pem = String::from_utf8(pem).unwrap();
+        assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----"));
+        let key = private_key_from_pem(&pem).unwrap();
+        let crlf = private_key_from_pem(&pem.replace('\n', "\r\n")).unwrap();
+        assert_eq!(key.n(), original.n());
+        assert_eq!(key.n(), crlf.n());
+        assert_eq!(key.e().to_vec(), [1, 0, 1]);
+        let public_pem = public_key_pem(&key).unwrap();
+        assert!(public_pem.starts_with("-----BEGIN PUBLIC KEY-----"));
+        let public = public_key_from_pem(&public_pem).unwrap();
+        let data = key_json(&public_pem, "device", 1, 10001);
+        let signature = sign(&key, &data).unwrap();
+        assert_eq!(signature.len(), SIGNATURE_LEN);
+        assert!(verify(&public, &data, &signature));
+        assert!(!verify(&public, b"different JSON", &signature));
+        assert!(!verify(&public, &data, &signature[..signature.len() - 1]));
+        let mut changed = signature.clone();
+        changed[0] ^= 1;
+        assert!(!verify(&public, &data, &changed));
+        assert!(private_key_from_pem(&public_pem).is_none());
+        assert!(private_key_from_pem("invalid PEM").is_none());
+    }
+
+    #[test]
+    fn verifier_rejects_wrong_pss_salt_and_pkcs1_padding() {
+        let rsa = Rsa::generate(2048).unwrap();
+        let public = public_key_from_pem(&public_key_pem(&rsa).unwrap()).unwrap();
+        let key = PKey::from_rsa(rsa).unwrap();
+        let data = b"SOTER wire-format compatibility";
+        for salt_len in [0, 20, 32] {
+            let mut signer = Signer::new(MessageDigest::sha256(), &key).unwrap();
+            signer.set_rsa_padding(Padding::PKCS1_PSS).unwrap();
+            signer.set_rsa_mgf1_md(MessageDigest::sha256()).unwrap();
+            signer.set_rsa_pss_saltlen(RsaPssSaltlen::custom(salt_len)).unwrap();
+            signer.update(data).unwrap();
+            assert_eq!(verify(&public, data, &signer.sign_to_vec().unwrap()), salt_len == 20);
+        }
+        let mut signer = Signer::new(MessageDigest::sha256(), &key).unwrap();
+        signer.set_rsa_padding(Padding::PKCS1).unwrap();
+        signer.update(data).unwrap();
+        assert!(!verify(&public, data, &signer.sign_to_vec().unwrap()));
+    }
 }

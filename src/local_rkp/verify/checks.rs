@@ -13,10 +13,7 @@ pub(super) fn ensure_array_len(items: &[Value], expected: usize, label: &str) ->
         return Ok(());
     }
 
-    Err(anyhow!(
-        "{label} must contain {expected} entries, got {}",
-        items.len()
-    ))
+    Err(anyhow!("{label} must contain {expected} entries, got {}", items.len()))
 }
 
 pub(super) fn ensure_unique_integer_keys(entries: &[(Value, Value)], label: &str) -> Result<()> {
@@ -103,10 +100,7 @@ pub(super) fn validate_challenge(challenge: &[u8], label: &str) -> Result<()> {
         return Ok(());
     }
 
-    Err(anyhow!(
-        "{label} must be at most {MAX_CHALLENGE_LEN} bytes, got {}",
-        challenge.len()
-    ))
+    Err(anyhow!("{label} must be at most {MAX_CHALLENGE_LEN} bytes, got {}", challenge.len()))
 }
 
 /// DeviceInfo must already be in canonical CBOR order; re-encoding canonically must not

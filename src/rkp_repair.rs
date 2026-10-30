@@ -47,8 +47,7 @@ pub fn run() -> Result<()> {
     {
         bail!("vendor RKP tool must be a root-owned executable, not writable by apps");
     }
-    tool.try_lock()
-        .context("another RKP repair is in progress")?;
+    tool.try_lock().context("another RKP repair is in progress")?;
     let (mut reader, writer) = UnixStream::pair()?;
     reader.set_nonblocking(true)?;
     let stderr: OwnedFd = writer.try_clone()?.into();
@@ -117,10 +116,7 @@ mod tests {
         let command = command();
         assert_eq!(command.get_program(), TOOL);
         assert_eq!(command.get_args().collect::<Vec<_>>(), ARGS);
-        assert_eq!(
-            command.get_current_dir().unwrap(),
-            std::path::Path::new("/vendor/bin")
-        );
+        assert_eq!(command.get_current_dir().unwrap(), std::path::Path::new("/vendor/bin"));
         assert_eq!(
             command.get_envs().collect::<Vec<_>>(),
             [(OsStr::new("LD_LIBRARY_PATH"), Some(OsStr::new(LIBRARIES)))]

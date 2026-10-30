@@ -44,9 +44,8 @@ fn validate_request(request: &[u8]) -> Result<()> {
     if request.len() > MAX_REQUEST {
         bail!("native RKP request is too large");
     }
-    let (command, payload) = request
-        .split_at_checked(4)
-        .ok_or_else(|| anyhow!("native RKP command missing"))?;
+    let (command, payload) =
+        request.split_at_checked(4).ok_or_else(|| anyhow!("native RKP command missing"))?;
     let value = decode(payload)?;
     let fields = as_map(&value, "native RKP request")?;
     let challenge = as_bytes(required(fields, 4)?, "challenge")?;
@@ -131,9 +130,8 @@ mod android {
                 bail!("native RKP worker failed; vendor ABI may be unsupported");
             }
             let reply = read_bounded_reply(&directory.path.join("reply.bin"))?;
-            let (header, payload) = reply
-                .split_at_checked(4)
-                .context("truncated native worker reply")?;
+            let (header, payload) =
+                reply.split_at_checked(4).context("truncated native worker reply")?;
             let status = i32::from_be_bytes(header.try_into()?);
             if status != 0 {
                 bail!("native RKP CSR rejected (status {status})");
@@ -232,12 +230,7 @@ mod android {
         unsafe {
             constructor(object.as_mut() as *mut Object as *mut c_void, 1);
         }
-        let mut session = Session {
-            object,
-            destructor,
-            send,
-            _library: library,
-        };
+        let mut session = Session { object, destructor, send, _library: library };
         let mut request = request.to_vec();
         let mut response = vec![0; super::super::BUFFER_SIZE];
         response[..4].copy_from_slice(&i32::MIN.to_le_bytes());

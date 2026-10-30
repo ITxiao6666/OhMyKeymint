@@ -34,10 +34,7 @@ fn activity_contract(sdk: u32) -> Option<ActivityContract> {
         37 => (15, ProcessParcelLayout::Structured),
         _ => return None,
     };
-    Some(ActivityContract {
-        transaction,
-        layout,
-    })
+    Some(ActivityContract { transaction, layout })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,9 +60,7 @@ fn read_process_identity(pid: u32) -> Result<ProcessIdentity> {
         .split_whitespace()
         .map(str::parse::<u32>)
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    let uids: [u32; 4] = uids
-        .try_into()
-        .map_err(|_| anyhow!("invalid process UID tuple"))?;
+    let uids: [u32; 4] = uids.try_into().map_err(|_| anyhow!("invalid process UID tuple"))?;
     Ok(ProcessIdentity { uids, start_time })
 }
 
@@ -75,9 +70,7 @@ fn parse_start_time(stat: &str, pid: u32) -> Result<u64> {
         bail!("process stat PID mismatch");
     }
     // comm is parenthesized and may itself contain spaces and parentheses.
-    let end_name = stat
-        .rfind(')')
-        .context("process stat has no comm terminator")?;
+    let end_name = stat.rfind(')').context("process stat has no comm terminator")?;
     let start_time = stat[end_name + 1..]
         .split_whitespace()
         .nth(19)
@@ -123,9 +116,7 @@ fn query_activity_packages(uid: u32, pid: u32) -> Result<Vec<String>> {
     if binder.descriptor() != ACTIVITY_DESCRIPTOR {
         bail!("ActivityManager descriptor mismatch");
     }
-    let proxy = binder
-        .as_proxy()
-        .context("ActivityManager Binder was unexpectedly local")?;
+    let proxy = binder.as_proxy().context("ActivityManager Binder was unexpectedly local")?;
     let data = proxy.prepare_transact(true)?;
     let mut reply = proxy
         .submit_transact(contract.transaction, &data, rsbinder::FLAG_CLEAR_BUF)?
@@ -169,9 +160,7 @@ fn read_process(parcel: &mut Parcel, layout: ProcessParcelLayout) -> Result<Runn
         if size < 4 {
             bail!("invalid structured process record size");
         }
-        let end = start
-            .checked_add(size as usize)
-            .context("process record size overflow")?;
+        let end = start.checked_add(size as usize).context("process record size overflow")?;
         if end > parcel.data_size() {
             bail!("truncated structured process record");
         }
@@ -205,11 +194,7 @@ fn read_process(parcel: &mut Parcel, layout: ProcessParcelLayout) -> Result<Runn
         }
         let _: i64 = parcel.read()?;
     }
-    Ok(RunningProcess {
-        pid,
-        owner_uid,
-        packages,
-    })
+    Ok(RunningProcess { pid, owner_uid, packages })
 }
 
 fn valid_package_name(package: &str) -> bool {
@@ -217,9 +202,7 @@ fn valid_package_name(package: &str) -> bool {
         && package.len() <= 255
         && package.split('.').all(|part| {
             !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                && part.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
         })
 }
 
@@ -254,11 +237,7 @@ fn read_matching_packages(
         if owner_uid / AID_USER_OFFSET != uid / AID_USER_OFFSET || is_isolated_uid(owner_uid) {
             bail!("isolated process owner identity mismatch");
         }
-        if process
-            .packages
-            .iter()
-            .any(|package| !valid_package_name(package))
-        {
+        if process.packages.iter().any(|package| !valid_package_name(package)) {
             bail!("ActivityManager returned an invalid process package");
         }
         matching = Some(process.packages);
@@ -273,9 +252,7 @@ fn read_matching_packages(
 }
 
 pub(super) fn execute_helper_request(request: &str) -> Result<String> {
-    let (uid, pid) = request
-        .split_once('\t')
-        .context("missing isolated caller identity")?;
+    let (uid, pid) = request.split_once('\t').context("missing isolated caller identity")?;
     let uid = uid.parse::<u32>()?;
     let pid = pid.parse::<u32>()?;
     let packages =
@@ -291,9 +268,8 @@ pub(super) fn parse_helper_response(response: &str) -> Result<Vec<String>> {
     if response == "NONE" {
         return Ok(Vec::new());
     }
-    let packages = response
-        .strip_prefix("OK\t")
-        .context("invalid process identity helper response")?;
+    let packages =
+        response.strip_prefix("OK\t").context("invalid process identity helper response")?;
     let packages: Vec<String> = packages.split('\t').map(str::to_owned).collect();
     if packages.len() > MAX_PACKAGES as usize
         || packages.iter().any(|package| !valid_package_name(package))

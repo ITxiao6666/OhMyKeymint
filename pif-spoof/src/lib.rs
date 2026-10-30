@@ -107,10 +107,7 @@ impl PifTarget {
         self,
         profile: &PifProfile,
     ) -> impl Iterator<Item = (&'static str, &str, BuildClass)> {
-        profile
-            .build_fields()
-            .into_iter()
-            .filter(move |_| self.spoof_build(profile))
+        profile.build_fields().into_iter().filter(move |_| self.spoof_build(profile))
     }
 }
 
@@ -167,9 +164,7 @@ impl ZygiskModule for PifSpoofModule {
         let loaded = match api.with_companion(read_profile_from_companion) {
             Ok(Ok(profile)) => profile,
             Ok(Err(error)) => {
-                log_android(&format!(
-                    "PIF companion returned an invalid profile: {error}"
-                ));
+                log_android(&format!("PIF companion returned an invalid profile: {error}"));
                 None
             }
             Err(error) => {
@@ -191,9 +186,7 @@ impl ZygiskModule for PifSpoofModule {
 
         if target.spoof_props(&profile) {
             initialize_property_spoof(&profile).unwrap_or_else(|error| {
-                log_android(&format!(
-                    "PIF property table initialization failed: {error}"
-                ));
+                log_android(&format!("PIF property table initialization failed: {error}"));
             });
             let mut private_properties = false;
             #[cfg(target_arch = "aarch64")]
@@ -248,11 +241,8 @@ impl ZygiskModule for PifSpoofModule {
         _args: &'a AppSpecializeArgs<'a>,
     ) {
         soter::activate();
-        let Some((profile, target)) = self
-            .profile
-            .lock()
-            .ok()
-            .and_then(|mut current| current.take())
+        let Some((profile, target)) =
+            self.profile.lock().ok().and_then(|mut current| current.take())
         else {
             return;
         };
@@ -469,9 +459,7 @@ fn install_property_hook(
 
     if let Err(error) = commit_result {
         if installed > 0 {
-            log_android(&format!(
-                "PIF native property hook partially committed: {error}"
-            ));
+            log_android(&format!("PIF native property hook partially committed: {error}"));
         }
         return Err(format!("PLT hook commit failed: {error}"));
     }
@@ -569,10 +557,7 @@ fn log_property_probe() {
         let property = unsafe { find(name.as_ptr()) };
         if property.is_null() {
             missing += 1;
-            log_android(&format!(
-                "PIF property probe {}: missing",
-                name.to_string_lossy()
-            ));
+            log_android(&format!("PIF property probe {}: missing", name.to_string_lossy()));
             continue;
         }
         let mut probe = PropertyProbe::default();
@@ -617,11 +602,7 @@ unsafe extern "C" fn property_probe_callback(
     if value.is_null() {
         return;
     }
-    context.value = Some(
-        unsafe { CStr::from_ptr(value) }
-            .to_string_lossy()
-            .into_owned(),
-    );
+    context.value = Some(unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned());
 }
 
 fn resolve_symbol_address(symbol: &CStr) -> Option<*mut c_void> {
@@ -658,10 +639,7 @@ struct MemoryMapping {
 
 impl MemoryMapping {
     fn contains(&self, address: usize, length: usize) -> bool {
-        address >= self.start
-            && address
-                .checked_add(length)
-                .is_some_and(|end| end <= self.end)
+        address >= self.start && address.checked_add(length).is_some_and(|end| end <= self.end)
     }
 
     fn readable(&self) -> bool {
@@ -703,7 +681,7 @@ fn decode_property_read_dispatch(
                 || registers[3] != RegisterValue::Argument(2)
             {
                 return Err(
-                    "property callback wrapper has an unexpected argument layout".to_string(),
+                    "property callback wrapper has an unexpected argument layout".to_string()
                 );
             }
             return Ok(PropertyReadDispatch {
@@ -772,9 +750,7 @@ fn decode_add_immediate(instruction: u32) -> Option<(usize, usize, usize)> {
     }
     let immediate = ((instruction >> 10) & 0x0fff) as usize;
     let shift = if instruction & (1 << 22) != 0 { 12 } else { 0 };
-    immediate
-        .checked_shl(shift)
-        .map(|immediate| (destination, source, immediate))
+    immediate.checked_shl(shift).map(|immediate| (destination, source, immediate))
 }
 
 fn decode_adr(instruction: u32, pc: usize) -> Option<(usize, usize)> {
@@ -886,9 +862,7 @@ fn mapping_containing(
     address: usize,
     length: usize,
 ) -> Option<&MemoryMapping> {
-    mappings
-        .iter()
-        .find(|mapping| mapping.contains(address, length))
+    mappings.iter().find(|mapping| mapping.contains(address, length))
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -910,14 +884,9 @@ fn resolve_property_read_dispatch(
         || target_mapping.writable()
         || target_mapping.device == 0
         || target_mapping.inode == 0
-        || !target_mapping
-            .path
-            .as_deref()
-            .is_some_and(|path| path.ends_with("/libc.so"))
+        || !target_mapping.path.as_deref().is_some_and(|path| path.ends_with("/libc.so"))
     {
-        return Err(
-            "property callback is not in a private read-only libc text mapping".to_string(),
-        );
+        return Err("property callback is not in a private read-only libc text mapping".to_string());
     }
 
     let instruction_count = ((target_mapping.end - target_address) / size_of::<u32>())
@@ -926,10 +895,7 @@ fn resolve_property_read_dispatch(
         unsafe { std::slice::from_raw_parts(target_address as *const u32, instruction_count) };
     let dispatch = decode_property_read_dispatch(instructions, target_address)?;
     if dispatch.wrapper_bytes < INLINE_PATCH_BYTES {
-        return Err(format!(
-            "property callback wrapper is only {} bytes",
-            dispatch.wrapper_bytes
-        ));
+        return Err(format!("property callback wrapper is only {} bytes", dispatch.wrapper_bytes));
     }
     if !dispatch.method.is_multiple_of(align_of::<u32>())
         || !dispatch.instance.is_multiple_of(align_of::<usize>())
@@ -953,7 +919,7 @@ fn resolve_property_read_dispatch(
         let landing = unsafe { ptr::read(dispatch.method as *const u32) };
         if !is_call_compatible_landing_pad(landing) {
             return Err(
-                "property callback method has no BTI-compatible call landing pad".to_string(),
+                "property callback method has no BTI-compatible call landing pad".to_string()
             );
         }
     }
@@ -970,14 +936,14 @@ fn resolve_property_read_dispatch(
         .ok_or_else(|| "property callback replacement is not mapped".to_string())?;
     if !replacement_mapping.executable() || replacement_mapping.writable() {
         return Err(
-            "property callback replacement is not in read-only executable memory".to_string(),
+            "property callback replacement is not in read-only executable memory".to_string()
         );
     }
     if replacement_mapping.bti {
         let landing = unsafe { ptr::read(replacement as *const u32) };
         if !is_call_compatible_landing_pad(landing) {
             return Err(
-                "property callback replacement has no BTI-compatible landing pad".to_string(),
+                "property callback replacement has no BTI-compatible landing pad".to_string()
             );
         }
     }
@@ -1001,14 +967,9 @@ fn patch_page_range(address: usize, length: usize, page_size: usize) -> Option<(
     }
     let page_start = address & !(page_size - 1);
     let end = address.checked_add(length)?;
-    let page_end = end
-        .checked_add(page_size - 1)?
-        .checked_div(page_size)?
-        .checked_mul(page_size)?;
-    page_end
-        .checked_sub(page_start)
-        .filter(|length| *length > 0)
-        .map(|length| (page_start, length))
+    let page_end =
+        end.checked_add(page_size - 1)?.checked_div(page_size)?.checked_mul(page_size)?;
+    page_end.checked_sub(page_start).filter(|length| *length > 0).map(|length| (page_start, length))
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -1025,9 +986,7 @@ fn patch_property_read_callback(
     let page_size = usize::try_from(page_size)
         .map_err(|_| "system page size does not fit usize".to_string())?;
     if !page_size.is_power_of_two() {
-        return Err(format!(
-            "system page size {page_size} is not a power of two"
-        ));
+        return Err(format!("system page size {page_size} is not a power of two"));
     }
 
     let target_address = target as usize;
@@ -1100,15 +1059,11 @@ fn ensure_single_threaded() -> Result<(), String> {
         count += 1;
         if count > 1 {
             return Err(
-                "inline property callback patch requires a single-threaded child".to_string(),
+                "inline property callback patch requires a single-threaded child".to_string()
             );
         }
     }
-    if count == 1 {
-        Ok(())
-    } else {
-        Err("process thread list was empty".to_string())
-    }
+    if count == 1 { Ok(()) } else { Err("process thread list was empty".to_string()) }
 }
 
 #[cfg(all(target_arch = "aarch64", test))]
@@ -1126,11 +1081,7 @@ fn change_memory_protection(
     protection: libc::c_int,
 ) -> std::io::Result<()> {
     let result = unsafe { libc::mprotect(start as *mut c_void, length, protection) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
+    if result == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -1188,11 +1139,7 @@ fn flush_instruction_cache(start: *const u8, length: usize) {
 }
 
 fn first_non_null(values: &[*const ()]) -> *const () {
-    values
-        .iter()
-        .copied()
-        .find(|value| !value.is_null())
-        .unwrap_or(ptr::null())
+    values.iter().copied().find(|value| !value.is_null()).unwrap_or(ptr::null())
 }
 
 fn read_hook_targets() -> Result<Vec<HookTarget>, String> {
@@ -1323,11 +1270,7 @@ fn forward_property_read(
 }
 
 unsafe extern "C" fn property_get_plt_hook(name: *const c_char, value: *mut c_char) -> libc::c_int {
-    forward_property_get(
-        ORIGINAL_PLT_PROPERTY_GET.load(Ordering::Acquire),
-        name,
-        value,
-    )
+    forward_property_get(ORIGINAL_PLT_PROPERTY_GET.load(Ordering::Acquire), name, value)
 }
 
 fn forward_property_get(
@@ -1428,10 +1371,7 @@ fn property_value_for_info(
     if property.is_null() {
         return None;
     }
-    let mut lookup = PropertyLookup {
-        values,
-        replacement: None,
-    };
+    let mut lookup = PropertyLookup { values, replacement: None };
     unsafe {
         read(
             property,
@@ -1452,20 +1392,14 @@ unsafe extern "C" fn property_lookup_callback(
         return;
     }
     let lookup = unsafe { &mut *cookie.cast::<PropertyLookup<'_>>() };
-    lookup.replacement = lookup
-        .values
-        .value_for(unsafe { CStr::from_ptr(name) }.to_bytes());
+    lookup.replacement = lookup.values.value_for(unsafe { CStr::from_ptr(name) }.to_bytes());
 }
 
 fn legacy_replacement_value(replacement: &CStr) -> &CStr {
     // These deprecated APIs only accept a PROP_VALUE_MAX-sized output buffer.
     // Match bionic's long-property representation instead of exposing the
     // original fingerprint or truncating a value that callbacks return in full.
-    if replacement.to_bytes().len() < PROPERTY_VALUE_MAX {
-        replacement
-    } else {
-        LONG_LEGACY_ERROR
-    }
+    if replacement.to_bytes().len() < PROPERTY_VALUE_MAX { replacement } else { LONG_LEGACY_ERROR }
 }
 
 fn property_value_for_name(name: *const c_char) -> Option<&'static CStr> {
@@ -1473,9 +1407,7 @@ fn property_value_for_name(name: *const c_char) -> Option<&'static CStr> {
         return None;
     }
     let name = unsafe { CStr::from_ptr(name) };
-    PROPERTY_SPOOF
-        .get()
-        .and_then(|values| values.value_for(name.to_bytes()))
+    PROPERTY_SPOOF.get().and_then(|values| values.value_for(name.to_bytes()))
 }
 
 unsafe extern "C" fn property_value_callback(
@@ -1537,10 +1469,7 @@ fn is_package_data_dir(path: &str, package: &str) -> bool {
         || path.starts_with("/data/user/")
         || path.starts_with("/data/user_de/")
         || path.starts_with("/mnt/expand/");
-    allowed_root
-        && path
-            .strip_suffix(package)
-            .is_some_and(|prefix| prefix.ends_with('/'))
+    allowed_root && path.strip_suffix(package).is_some_and(|prefix| prefix.ends_with('/'))
 }
 
 fn is_gms_data_dir(path: &str) -> bool {
@@ -1611,18 +1540,15 @@ fn companion(stream: &mut std::os::unix::net::UnixStream) {
         Vec::new()
     });
     let soter_enabled = pif_common::soter::read().unwrap_or_else(|error| {
-        soter::log(&format!(
-            "Soter Beta companion rejected configuration: {error}"
-        ));
+        soter::log(&format!("Soter Beta companion rejected configuration: {error}"));
         false
     });
     let mut frame = Vec::with_capacity(4 + payload.len() + 1);
     frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     frame.extend_from_slice(&payload);
     frame.push(u8::from(soter_enabled));
-    if let Err(error) = stream
-        .set_write_timeout(Some(IPC_TIMEOUT))
-        .and_then(|()| stream.write_all(&frame))
+    if let Err(error) =
+        stream.set_write_timeout(Some(IPC_TIMEOUT)).and_then(|()| stream.write_all(&frame))
     {
         log_android(&format!("PIF companion write failed: {error}"));
     }
@@ -1760,9 +1686,7 @@ fn apply_build_fields(
         // belongs to this best-effort integration, not to the target app.
         return match env.exception_clear() {
             Ok(()) => Err(error),
-            Err(clear_error) => Err(format!(
-                "{error}; cannot clear Java exception: {clear_error}"
-            )),
+            Err(clear_error) => Err(format!("{error}; cannot clear Java exception: {clear_error}")),
         };
     }
     Ok(())
@@ -1818,11 +1742,7 @@ mod tests {
             Some(GMS_PROCESS),
             Some(VENDING_PROCESS),
         ] {
-            for path in [
-                None,
-                Some(""),
-                Some("/data/data/com.tencent.soter.soterserver"),
-            ] {
+            for path in [None, Some(""), Some("/data/data/com.tencent.soter.soterserver")] {
                 assert!(!is_soter_target(process, path), "{process:?}, {path:?}");
             }
         }
@@ -1902,26 +1822,14 @@ mod tests {
     #[test]
     fn targets_gms_unstable_and_play_store_only() {
         for (process, directory, expected) in [
-            (
-                GMS_PROCESS,
-                "/data/user/0/com.google.android.gms",
-                PifTarget::Gms,
-            ),
+            (GMS_PROCESS, "/data/user/0/com.google.android.gms", PifTarget::Gms),
             (
                 "com.google.android.gms.unstable:background",
                 "/data/user/0/com.google.android.gms",
                 PifTarget::Gms,
             ),
-            (
-                VENDING_PROCESS,
-                "/data/user/0/com.android.vending",
-                PifTarget::PlayStore,
-            ),
-            (
-                VENDING_PROCESS,
-                "/data/data/com.android.vending",
-                PifTarget::PlayStore,
-            ),
+            (VENDING_PROCESS, "/data/user/0/com.android.vending", PifTarget::PlayStore),
+            (VENDING_PROCESS, "/data/data/com.android.vending", PifTarget::PlayStore),
             (
                 "com.android.vending:instant",
                 "/data/user/0/com.android.vending",
@@ -1933,18 +1841,9 @@ mod tests {
             }
         }
         for (process, directory) in [
-            (
-                "com.google.android.gms",
-                "/data/user/0/com.google.android.gms",
-            ),
-            (
-                "com.google.android.gms.unstable:",
-                "/data/user/0/com.google.android.gms",
-            ),
-            (
-                "com.android.vending.evil",
-                "/data/user/0/com.android.vending",
-            ),
+            ("com.google.android.gms", "/data/user/0/com.google.android.gms"),
+            ("com.google.android.gms.unstable:", "/data/user/0/com.google.android.gms"),
+            ("com.android.vending.evil", "/data/user/0/com.android.vending"),
             ("com.android.vending:", "/data/user/0/com.android.vending"),
             (VENDING_PROCESS, "/data/user/0/com.google.android.gms"),
             (GMS_PROCESS, "/data/user/0/com.android.vending"),
@@ -2029,18 +1928,9 @@ mod tests {
         assert_eq!(
             targets,
             vec![
-                HookTarget {
-                    device: libc::makedev(0xfe, 0x01),
-                    inode: 42,
-                },
-                HookTarget {
-                    device: libc::makedev(0xfe, 0x02),
-                    inode: 99,
-                },
-                HookTarget {
-                    device: libc::makedev(0xfe, 0x04),
-                    inode: 101,
-                },
+                HookTarget { device: libc::makedev(0xfe, 0x01), inode: 42 },
+                HookTarget { device: libc::makedev(0xfe, 0x02), inode: 99 },
+                HookTarget { device: libc::makedev(0xfe, 0x04), inode: 101 },
             ]
         );
     }
@@ -2049,41 +1939,17 @@ mod tests {
     fn maps_profile_values_to_bionic_properties() {
         let values = PropertyValues::from_profile(&test_profile()).unwrap();
         assert_eq!(
-            values
-                .value_for(b"ro.build.fingerprint")
-                .unwrap()
-                .to_bytes(),
+            values.value_for(b"ro.build.fingerprint").unwrap().to_bytes(),
             b"google/panther_beta/panther:14/AP2A.240905.003/1234567:user/release-keys"
         );
         assert_eq!(
-            values
-                .value_for(b"ro.vendor.build.security_patch")
-                .unwrap()
-                .to_bytes(),
+            values.value_for(b"ro.vendor.build.security_patch").unwrap().to_bytes(),
             b"2024-09-05"
         );
-        assert_eq!(
-            values
-                .value_for(b"ro.product.system.model")
-                .unwrap()
-                .to_bytes(),
-            b"Pixel 7"
-        );
-        assert_eq!(
-            values
-                .value_for(b"ro.product.first_api_level")
-                .unwrap()
-                .to_bytes(),
-            b"32"
-        );
-        assert_eq!(
-            values.value_for(b"ro.build.product").unwrap().to_bytes(),
-            b"panther"
-        );
-        assert_eq!(
-            values.value_for(b"ro.product.name").unwrap().to_bytes(),
-            b"panther_beta"
-        );
+        assert_eq!(values.value_for(b"ro.product.system.model").unwrap().to_bytes(), b"Pixel 7");
+        assert_eq!(values.value_for(b"ro.product.first_api_level").unwrap().to_bytes(), b"32");
+        assert_eq!(values.value_for(b"ro.build.product").unwrap().to_bytes(), b"panther");
+        assert_eq!(values.value_for(b"ro.product.name").unwrap().to_bytes(), b"panther_beta");
         assert!(values.value_for(b"ro.boot.verifiedbootstate").is_none());
         assert!(values.value_for(b"ro.vendor.api_level").is_none());
         assert!(values.value_for(b"ro.board.api_level").is_none());
@@ -2097,19 +1963,10 @@ mod tests {
             profile.device_initial_sdk_int = Some(sdk);
             let values = PropertyValues::from_profile(&profile).unwrap();
             assert_eq!(
-                values
-                    .value_for(b"ro.product.first_api_level")
-                    .unwrap()
-                    .to_bytes(),
+                values.value_for(b"ro.product.first_api_level").unwrap().to_bytes(),
                 sdk.to_string().as_bytes()
             );
-            assert_eq!(
-                values
-                    .value_for(b"ro.board.first_api_level")
-                    .unwrap()
-                    .to_bytes(),
-                b"32"
-            );
+            assert_eq!(values.value_for(b"ro.board.first_api_level").unwrap().to_bytes(), b"32");
             assert!(values.value_for(b"ro.vendor.api_level").is_none());
         }
     }
@@ -2166,11 +2023,8 @@ mod tests {
         let property = bytes.as_ptr().cast();
         for with_name in [false, true] {
             let mut output_name = [0xa5u8; 32 + 8];
-            let name_ptr = if with_name {
-                output_name[4..].as_mut_ptr().cast()
-            } else {
-                ptr::null_mut()
-            };
+            let name_ptr =
+                if with_name { output_name[4..].as_mut_ptr().cast() } else { ptr::null_mut() };
             let mut output = [0xa5u8; PROPERTY_VALUE_MAX + 8];
             let length = forward_property_read_legacy(
                 original,
@@ -2206,11 +2060,7 @@ mod tests {
         ];
         assert_eq!(
             decode_property_read_dispatch(&instructions, 0x7a660).unwrap(),
-            PropertyReadDispatch {
-                instance: 0xfca28,
-                method: 0x5ca40,
-                wrapper_bytes: 28,
-            }
+            PropertyReadDispatch { instance: 0xfca28, method: 0x5ca40, wrapper_bytes: 28 }
         );
     }
 
@@ -2233,11 +2083,7 @@ mod tests {
         ];
         assert_eq!(
             decode_property_read_dispatch(&instructions, base).unwrap(),
-            PropertyReadDispatch {
-                instance,
-                method,
-                wrapper_bytes: 32,
-            }
+            PropertyReadDispatch { instance, method, wrapper_bytes: 32 }
         );
     }
 
@@ -2289,24 +2135,15 @@ mod tests {
         assert!(!mappings[0].mte);
         assert!(mappings[1].writable());
         assert!(mappings[1].mte);
-        assert_eq!(
-            mapping_containing(&mappings, 0x3ff0, 0x10),
-            Some(&mappings[0])
-        );
+        assert_eq!(mapping_containing(&mappings, 0x3ff0, 0x10), Some(&mappings[0]));
         assert!(mapping_containing(&mappings, 0x3ff0, 0x11).is_none());
     }
 
     #[test]
     fn computes_4k_and_16k_patch_page_ranges() {
         assert_eq!(patch_page_range(0x1ff0, 24, 4096), Some((0x1000, 0x2000)));
-        assert_eq!(
-            patch_page_range(0x4ff0, 24, 16 * 1024),
-            Some((0x4000, 16 * 1024))
-        );
-        assert_eq!(
-            patch_page_range(0x7ff0, 24, 16 * 1024),
-            Some((0x4000, 32 * 1024))
-        );
+        assert_eq!(patch_page_range(0x4ff0, 24, 16 * 1024), Some((0x4000, 16 * 1024)));
+        assert_eq!(patch_page_range(0x7ff0, 24, 16 * 1024), Some((0x4000, 32 * 1024)));
         assert!(patch_page_range(usize::MAX - 4, 24, 4096).is_none());
         assert!(patch_page_range(0x1000, 24, 0).is_none());
         assert!(patch_page_range(0x1000, 24, 6000).is_none());
@@ -2329,9 +2166,8 @@ mod tests {
         initialize_property_spoof(&test_profile()).unwrap();
         let target = resolve_symbol_address(PROPERTY_READ_SYMBOL).unwrap();
         let before = parse_smaps_mappings(&fs::read_to_string("/proc/self/smaps").unwrap());
-        let before_target = mapping_containing(&before, target as usize, INLINE_PATCH_BYTES)
-            .unwrap()
-            .clone();
+        let before_target =
+            mapping_containing(&before, target as usize, INLINE_PATCH_BYTES).unwrap().clone();
         let before_rwx: Vec<(usize, usize)> = before
             .iter()
             .filter(|mapping| mapping.writable() && mapping.executable())
@@ -2365,10 +2201,7 @@ mod tests {
                 (&mut probe as *mut PropertyProbe).cast(),
             );
         }
-        assert_eq!(
-            probe.value.as_deref(),
-            Some(test_profile().fingerprint.as_str())
-        );
+        assert_eq!(probe.value.as_deref(), Some(test_profile().fingerprint.as_str()));
     }
 
     fn encode_adr(destination: u32, pc: usize, target: usize) -> u32 {

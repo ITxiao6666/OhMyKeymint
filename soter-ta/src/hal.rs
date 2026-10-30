@@ -185,11 +185,7 @@ impl Contract {
             1 | 3 | 4 | 8 if self == Self::Hidl => {
                 reply.i32(code);
                 let payload = data.into_boxed_slice();
-                let pointer = if payload.is_empty() {
-                    0
-                } else {
-                    payload.as_ptr() as usize
-                };
+                let pointer = if payload.is_empty() { 0 } else { payload.as_ptr() as usize };
                 let mut head = vec![0u8; 16].into_boxed_slice();
                 head[..8].copy_from_slice(&(pointer as u64).to_le_bytes());
                 head[8..12].copy_from_slice(&(payload.len() as u32).to_le_bytes());
@@ -322,22 +318,10 @@ mod tests {
         bytes.extend_from_slice(&10123u32.to_le_bytes());
         let at = bytes.len();
         let mut objects = Reply::ok();
-        Object {
-            flags: 0,
-            buffer: 0x1000,
-            length: 16,
-            parent: 0,
-            parent_offset: 0,
-        }
-        .write(&mut objects);
-        Object {
-            flags: 1,
-            buffer: 0x2000,
-            length: 4,
-            parent: 0,
-            parent_offset: 0,
-        }
-        .write(&mut objects);
+        Object { flags: 0, buffer: 0x1000, length: 16, parent: 0, parent_offset: 0 }
+            .write(&mut objects);
+        Object { flags: 1, buffer: 0x2000, length: 4, parent: 0, parent_offset: 0 }
+            .write(&mut objects);
         bytes.extend_from_slice(&objects.as_bytes()[4..]);
         let mut head = vec![0u8; 16];
         head[..8].copy_from_slice(&0x2000u64.to_le_bytes());
@@ -350,22 +334,14 @@ mod tests {
         assert_eq!(Contract::identify(&bytes), Some((Contract::Hidl, start)));
         assert_eq!(
             Contract::Hidl.resolve_request(9, &bytes, start, &[at, at + 40], read),
-            Ok(Some((
-                7,
-                Request::UidKey {
-                    uid: 10123,
-                    kname: "key".into()
-                }
-            )))
+            Ok(Some((7, Request::UidKey { uid: 10123, kname: "key".into() })))
         );
         assert!(Contract::Hidl
             .resolve_request(9, &bytes, start, &[at + 4, at + 40], read)
             .is_err());
         let mut bad = bytes.clone();
         bad[at + 64..at + 72].copy_from_slice(&1u64.to_le_bytes());
-        assert!(Contract::Hidl
-            .resolve_request(9, &bad, start, &[at, at + 40], read)
-            .is_err());
+        assert!(Contract::Hidl.resolve_request(9, &bad, start, &[at, at + 40], read).is_err());
         assert!(Contract::Hidl
             .resolve_request(9, &bytes, start, &[at, at + 40], |address, size| {
                 if address == 0x2000 {
@@ -393,11 +369,7 @@ mod tests {
                 parcel.i32(*uid as i32);
                 parcel.string16(kname);
             }
-            Request::InitSign {
-                uid,
-                kname,
-                challenge,
-            } => {
+            Request::InitSign { uid, kname, challenge } => {
                 parcel.i32(*uid as i32);
                 parcel.string16(kname);
                 parcel.string16(challenge);
@@ -412,34 +384,13 @@ mod tests {
     fn aidl_relay_resolves_interleaved_layouts_before_attk_filtering() {
         let calls = [
             (1, 1, Request::Uid(10123)),
-            (
-                3,
-                2,
-                Request::UidKey {
-                    uid: 10123,
-                    kname: "auth".into(),
-                },
-            ),
+            (3, 2, Request::UidKey { uid: 10123, kname: "auth".into() }),
             (4, 3, Request::Session(0x1234_5678_9abc_def0)),
             (5, 4, Request::Uid(10123)),
-            (
-                7,
-                5,
-                Request::UidKey {
-                    uid: 10123,
-                    kname: "auth".into(),
-                },
-            ),
+            (7, 5, Request::UidKey { uid: 10123, kname: "auth".into() }),
             (8, 6, Request::None),
             (9, 7, Request::Uid(10123)),
-            (
-                10,
-                8,
-                Request::UidKey {
-                    uid: 10123,
-                    kname: "auth".into(),
-                },
-            ),
+            (10, 8, Request::UidKey { uid: 10123, kname: "auth".into() }),
             (
                 11,
                 9,
@@ -450,14 +401,7 @@ mod tests {
                 },
             ),
             (12, 10, Request::Uid(10123)),
-            (
-                13,
-                11,
-                Request::UidKey {
-                    uid: 10123,
-                    kname: "auth".into(),
-                },
-            ),
+            (13, 11, Request::UidKey { uid: 10123, kname: "auth".into() }),
         ];
         for contract in [Contract::Qti, Contract::Trustonic] {
             for (standard, compact, request) in &calls {
@@ -472,11 +416,8 @@ mod tests {
                     );
                 }
             }
-            for (wire, request) in [
-                (2, Request::None),
-                (6, Request::Magic(0)),
-                (14, Request::None),
-            ] {
+            for (wire, request) in [(2, Request::None), (6, Request::Magic(0)), (14, Request::None)]
+            {
                 assert_eq!(
                     contract.resolve_request(wire, &arguments(&request), 0, &[], |_, _| None),
                     Ok(None)
@@ -496,48 +437,23 @@ mod tests {
     fn aidl_relay_rejects_malformed_requests_without_guessing_a_reply_method() {
         for contract in [Contract::Qti, Contract::Trustonic] {
             for wire in [0, 15, 0x00ff_ffff, 0x00ff_fffe] {
-                assert_eq!(
-                    contract.resolve_request(wire, &[], 0, &[], |_, _| None),
-                    Ok(None)
-                );
+                assert_eq!(contract.resolve_request(wire, &[], 0, &[], |_, _| None), Ok(None));
             }
-            let args = arguments(&Request::UidKey {
-                uid: 10123,
-                kname: "auth".into(),
-            });
+            let args = arguments(&Request::UidKey { uid: 10123, kname: "auth".into() });
             for len in 1..args.len() {
-                assert!(contract
-                    .resolve_request(2, &args[..len], 0, &[], |_, _| None)
-                    .is_err());
+                assert!(contract.resolve_request(2, &args[..len], 0, &[], |_, _| None).is_err());
             }
             let mut extra = arguments(&Request::Uid(10123));
             extra.extend_from_slice(&[0; 4]);
+            assert!(contract.resolve_request(1, &extra, 0, &[], |_, _| None).is_err());
+            assert!(contract.resolve_request(2, &args, 0, &[0], |_, _| None).is_err());
+            assert!(contract.resolve_request(6, &[], 1, &[], |_, _| None).is_err());
             assert!(contract
-                .resolve_request(1, &extra, 0, &[], |_, _| None)
+                .resolve_request(1, &vec![0; dispatch::MAX_REQUEST_BYTES + 4], 0, &[], |_, _| None)
                 .is_err());
-            assert!(contract
-                .resolve_request(2, &args, 0, &[0], |_, _| None)
-                .is_err());
-            assert!(contract
-                .resolve_request(6, &[], 1, &[], |_, _| None)
-                .is_err());
-            assert!(contract
-                .resolve_request(
-                    1,
-                    &vec![0; dispatch::MAX_REQUEST_BYTES + 4],
-                    0,
-                    &[],
-                    |_, _| None
-                )
-                .is_err());
-            let mut invalid = arguments(&Request::UidKey {
-                uid: 10123,
-                kname: "a".into(),
-            });
+            let mut invalid = arguments(&Request::UidKey { uid: 10123, kname: "a".into() });
             invalid[8..12].copy_from_slice(&[0, 0xd8, 0, 0]);
-            assert!(contract
-                .resolve_request(2, &invalid, 0, &[], |_, _| None)
-                .is_err());
+            assert!(contract.resolve_request(2, &invalid, 0, &[], |_, _| None).is_err());
         }
     }
 
@@ -547,23 +463,10 @@ mod tests {
             (
                 3,
                 Request::Session(42),
-                Outcome::Buffer {
-                    code: 0,
-                    data: vec![1, 2, 3],
-                    field: 3,
-                },
+                Outcome::Buffer { code: 0, data: vec![1, 2, 3], field: 3 },
                 4,
             ),
-            (
-                6,
-                Request::None,
-                Outcome::Buffer {
-                    code: 0,
-                    data: vec![5; 16],
-                    field: 16,
-                },
-                8,
-            ),
+            (6, Request::None, Outcome::Buffer { code: 0, data: vec![5; 16], field: 16 }, 8),
             (
                 9,
                 Request::InitSign {
@@ -571,10 +474,7 @@ mod tests {
                     kname: "key".into(),
                     challenge: "challenge".into(),
                 },
-                Outcome::Init {
-                    code: 0,
-                    session: 123,
-                },
+                Outcome::Init { code: 0, session: 123 },
                 11,
             ),
         ];
@@ -595,13 +495,7 @@ mod tests {
     #[test]
     fn aidl_init_has_no_extra_return_code() {
         for contract in [Contract::Qti, Contract::Trustonic] {
-            let reply = contract.reply(
-                11,
-                Outcome::Init {
-                    code: 0,
-                    session: 123,
-                },
-            );
+            let reply = contract.reply(11, Outcome::Init { code: 0, session: 123 });
             assert_eq!(reply.bytes.len(), 24);
             assert_eq!(u32_at(&reply.bytes, 4), Some(1));
             assert_eq!(u32_at(&reply.bytes, 8), Some(16));
@@ -621,20 +515,12 @@ mod tests {
         for data in [vec![], vec![1, 2, 3]] {
             let reply = Contract::Hidl.reply(
                 1,
-                Outcome::Buffer {
-                    code: 0,
-                    field: data.len() as i32,
-                    data: data.clone(),
-                },
+                Outcome::Buffer { code: 0, field: data.len() as i32, data: data.clone() },
             );
             assert_eq!(reply.bytes.len(), 92);
             assert_eq!(
                 reply.offsets.as_ref(),
-                if data.is_empty() {
-                    &[8][..]
-                } else {
-                    &[8, 48][..]
-                }
+                if data.is_empty() { &[8][..] } else { &[8, 48][..] }
             );
             let head = Object::read(&reply.bytes[8..48]).unwrap();
             let child = Object::read(&reply.bytes[48..88]).unwrap();

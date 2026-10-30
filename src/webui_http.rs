@@ -45,21 +45,14 @@ where
             .config()
             .timeout_global(Some(remaining))
             .build()
-            .header(
-                "User-Agent",
-                concat!("OhMyKeymint/", env!("CARGO_PKG_VERSION")),
-            )
+            .header("User-Agent", concat!("OhMyKeymint/", env!("CARGO_PKG_VERSION")))
             .header("Accept-Encoding", "identity")
             .call()
             .with_context(|| format!("failed to download the {}", policy.resource))?;
 
         if response.status().is_redirection() {
             if redirect_count == policy.max_redirects {
-                bail!(
-                    "{} exceeded the {} redirect limit",
-                    policy.resource,
-                    policy.max_redirects
-                );
+                bail!("{} exceeded the {} redirect limit", policy.resource, policy.max_redirects);
             }
             let location = response
                 .headers()
@@ -71,22 +64,14 @@ where
                 })?;
             let next_uri = resolve_redirect(&current_uri, location, policy.resource)?;
             if !is_allowed(&next_uri) {
-                bail!(
-                    "{} redirected outside {}",
-                    policy.resource,
-                    policy.redirect_allowlist
-                );
+                bail!("{} redirected outside {}", policy.resource, policy.redirect_allowlist);
             }
             current_uri = next_uri;
             continue;
         }
 
         if !response.status().is_success() {
-            bail!(
-                "{} returned HTTP status {}",
-                policy.resource,
-                response.status()
-            );
+            bail!("{} returned HTTP status {}", policy.resource, response.status());
         }
 
         let bytes = response
@@ -96,11 +81,7 @@ where
             .read_to_vec()
             .with_context(|| format!("failed to read the {} response", policy.resource))?;
         if bytes.len() > policy.max_bytes {
-            bail!(
-                "{} response exceeds the {} limit",
-                policy.resource,
-                policy.max_size_label
-            );
+            bail!("{} response exceeds the {} limit", policy.resource, policy.max_size_label);
         }
         return String::from_utf8(bytes)
             .with_context(|| format!("{} response is not UTF-8", policy.resource));
@@ -119,20 +100,15 @@ pub(crate) fn resolve_redirect(base: &Uri, location: &str, resource: &str) -> Re
     }
 
     if location.starts_with("//") {
-        let scheme = base
-            .scheme()
-            .ok_or_else(|| anyhow!("{resource} base URI has no scheme"))?;
+        let scheme = base.scheme().ok_or_else(|| anyhow!("{resource} base URI has no scheme"))?;
         return format!("{scheme}:{location}")
             .parse()
             .with_context(|| format!("{resource} redirect URI is invalid"));
     }
 
-    let scheme = base
-        .scheme()
-        .ok_or_else(|| anyhow!("{resource} base URI has no scheme"))?;
-    let authority = base
-        .authority()
-        .ok_or_else(|| anyhow!("{resource} base URI has no authority"))?;
+    let scheme = base.scheme().ok_or_else(|| anyhow!("{resource} base URI has no scheme"))?;
+    let authority =
+        base.authority().ok_or_else(|| anyhow!("{resource} base URI has no authority"))?;
     if location.starts_with('?') {
         return format!("{}://{}{}{}", scheme, authority, base.path(), location)
             .parse()
@@ -152,33 +128,18 @@ pub(crate) fn resolve_redirect(base: &Uri, location: &str, resource: &str) -> Re
     let absolute = if location.starts_with('/') {
         format!("{}://{}{}", scheme, authority, location)
     } else {
-        let base_directory = base
-            .path()
-            .rsplit_once('/')
-            .map(|(directory, _)| directory)
-            .unwrap_or("");
-        let separator = if base_directory.ends_with('/') {
-            ""
-        } else {
-            "/"
-        };
-        format!(
-            "{}://{}{}{}{}",
-            scheme, authority, base_directory, separator, location
-        )
+        let base_directory =
+            base.path().rsplit_once('/').map(|(directory, _)| directory).unwrap_or("");
+        let separator = if base_directory.ends_with('/') { "" } else { "/" };
+        format!("{}://{}{}{}{}", scheme, authority, base_directory, separator, location)
     };
 
-    absolute
-        .parse()
-        .with_context(|| format!("{resource} redirect URI is invalid"))
+    absolute.parse().with_context(|| format!("{resource} redirect URI is invalid"))
 }
 
 fn has_uri_scheme(value: &str) -> bool {
     let mut characters = value.chars();
-    if !characters
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-    {
+    if !characters.next().is_some_and(|first| first.is_ascii_alphabetic()) {
         return false;
     }
     for character in characters {
@@ -200,24 +161,13 @@ mod tests {
     fn redirect_resolution_handles_absolute_and_relative_forms() {
         let base: Uri = "https://example.com/path/file?old=1".parse().unwrap();
         for (location, expected) in [
-            (
-                "https://other.example/path/file",
-                "https://other.example/path/file",
-            ),
-            (
-                "//other.example/path/file",
-                "https://other.example/path/file",
-            ),
+            ("https://other.example/path/file", "https://other.example/path/file"),
+            ("//other.example/path/file", "https://other.example/path/file"),
             ("/other/file", "https://example.com/other/file"),
             ("?new=1", "https://example.com/path/file?new=1"),
             ("next", "https://example.com/path/next"),
         ] {
-            assert_eq!(
-                resolve_redirect(&base, location, "test")
-                    .unwrap()
-                    .to_string(),
-                expected
-            );
+            assert_eq!(resolve_redirect(&base, location, "test").unwrap().to_string(), expected);
         }
     }
 

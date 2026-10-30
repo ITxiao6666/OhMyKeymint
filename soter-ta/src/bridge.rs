@@ -119,21 +119,10 @@ impl Observations {
     fn publish(&self) {
         for event in self.events.iter().flatten() {
             match event {
-                Observation::Sdk {
-                    uid,
-                    wire_tx,
-                    oneway,
-                    eligible,
-                    selected,
-                } => {
+                Observation::Sdk { uid, wire_tx, oneway, eligible, selected } => {
                     log::info!(target: "omk_soter_remote", "event=soter path=native_remote stage=sdk uid={uid} wire_tx={wire_tx} oneway={oneway} eligible={eligible} selected={selected}");
                 }
-                Observation::Native {
-                    uid,
-                    wire_tx,
-                    contract,
-                    reason,
-                } => {
+                Observation::Native { uid, wire_tx, contract, reason } => {
                     let route = if matches!(reason, NativeReason::DecodeFailed) {
                         "error"
                     } else {
@@ -141,14 +130,7 @@ impl Observations {
                     };
                     log::info!(target: "omk_soter_remote", "event=soter path=native_remote stage=route uid={uid:?} hal={contract:?} wire_tx={wire_tx} route={route} reason={reason:?}");
                 }
-                Observation::HalReply {
-                    uid,
-                    wire_tx,
-                    tx,
-                    contract,
-                    code,
-                    elapsed_ms,
-                } => {
+                Observation::HalReply { uid, wire_tx, tx, contract, code, elapsed_ms } => {
                     log::info!(target: "omk_soter_remote", "event=soter path=native_remote stage=hal_reply uid={uid} hal={contract:?} wire_tx={wire_tx} tx={tx} result={code} elapsed_ms={elapsed_ms}");
                 }
             }
@@ -204,10 +186,7 @@ impl Client {
         log::info!(target: "omk_soter_remote",
             "event=soter path=native_remote stage=authorization state=ready selected_uids={}",
             selection.uids.len());
-        let authorization = Arc::new(Mutex::new(Authorization {
-            selection,
-            fresh: true,
-        }));
+        let authorization = Arc::new(Mutex::new(Authorization { selection, fresh: true }));
         let snapshot = Arc::downgrade(&authorization);
         let diagnostics = Arc::new(Diagnostics::default());
         let pending = Arc::clone(&diagnostics);
@@ -241,11 +220,7 @@ impl Client {
                     }
                 }
             })?;
-        Ok(Self {
-            authorization,
-            calls: Mutex::new(Some(calls)),
-            diagnostics,
-        })
+        Ok(Self { authorization, calls: Mutex::new(Some(calls)), diagnostics })
     }
 
     pub fn observe(&self, event: Observation) {
@@ -265,11 +240,8 @@ impl Client {
     pub fn forward(&self, uid: u32, tx: u32, request: Request) -> Outcome {
         let authorization = self.authorization.lock().unwrap_or_else(|e| e.into_inner());
         if !authorization.fresh || authorization.selection.uids.binary_search(&uid).is_err() {
-            let reason = if authorization.fresh {
-                "uid_not_selected"
-            } else {
-                "stale_authorization"
-            };
+            let reason =
+                if authorization.fresh { "uid_not_selected" } else { "stale_authorization" };
             log::warn!(target: "omk_soter_remote",
                 "event=soter path=native_remote stage=broker_call uid={uid} tx={tx} reason={reason} result={UNAVAILABLE}");
             return Outcome::Code(UNAVAILABLE);
@@ -315,10 +287,7 @@ fn query_selection(
     }
     let selection: Selection = read_frame(stream)?;
     if selection.uids.len() > pif_common::soter::MAX_APP_TARGETS
-        || selection
-            .uids
-            .iter()
-            .any(|uid| !(10000..20000).contains(&(uid % 100000)))
+        || selection.uids.iter().any(|uid| !(10000..20000).contains(&(uid % 100000)))
         || selection.uids.windows(2).any(|pair| pair[0] >= pair[1])
     {
         return Err(invalid("invalid SOTER UID selection"));
@@ -480,13 +449,8 @@ impl Sessions {
         call: Call,
         send: impl FnOnce(u32, u32, &Request) -> Result<Outcome, String>,
     ) -> Outcome {
-        self.entries
-            .retain(|_, entry| entry.opened.elapsed() < SESSION_TTL);
-        let Call {
-            uid,
-            tx,
-            mut request,
-        } = call;
+        self.entries.retain(|_, entry| entry.opened.elapsed() < SESSION_TTL);
+        let Call { uid, tx, mut request } = call;
         if !dispatch::handles(tx) || dispatch::ATTK_TRANSACTIONS.contains(&tx) {
             log::warn!(target: "omk_soter_remote",
                 "event=soter path=native_remote stage=session uid={uid} tx={tx} reason=unsupported_transaction result=-22");
@@ -552,17 +516,9 @@ impl Sessions {
             };
             self.entries.insert(
                 self.next,
-                Session {
-                    uid,
-                    remote: session,
-                    config: config.clone(),
-                    opened: Instant::now(),
-                },
+                Session { uid, remote: session, config: config.clone(), opened: Instant::now() },
             );
-            Outcome::Init {
-                code: 0,
-                session: self.next,
-            }
+            Outcome::Init { code: 0, session: self.next }
         } else {
             outcome
         }
@@ -575,11 +531,8 @@ mod tests {
 
     #[test]
     fn app_relay_stays_active_with_global_takeover_and_remote_relay_enabled() {
-        let config = remote::Config {
-            enabled: true,
-            app_enabled: true,
-            ..remote::Config::default()
-        };
+        let config =
+            remote::Config { enabled: true, app_enabled: true, ..remote::Config::default() };
         assert_eq!(active_config_reason(&config, false), "ready");
         assert_eq!(active_config_reason(&config, true), "tencent_beta_enabled");
     }
@@ -625,10 +578,7 @@ mod tests {
             let events: Observations = read_frame(&mut server).unwrap();
             assert!(matches!(
                 events.events[0],
-                Some(Observation::Native {
-                    reason: NativeReason::NoSdkScope,
-                    ..
-                })
+                Some(Observation::Native { reason: NativeReason::NoSdkScope, .. })
             ));
             write_frame(&mut server, &Selection { uids: vec![10123] }).unwrap();
             server.read_exact(&mut op).unwrap();
@@ -642,10 +592,7 @@ mod tests {
             contract: crate::hal::Contract::Qti,
             reason: NativeReason::NoSdkScope,
         });
-        assert_eq!(
-            query_selection(&mut client, Some(&events)).unwrap().uids,
-            vec![10123]
-        );
+        assert_eq!(query_selection(&mut client, Some(&events)).unwrap().uids, vec![10123]);
         assert!(query_selection(&mut client, Some(&Observations::default()))
             .unwrap()
             .uids
@@ -656,11 +603,7 @@ mod tests {
     #[test]
     fn frames_are_bounded_and_no_secret_or_local_reply_is_created() {
         assert!(read_frame::<Call>(&mut (MAX_FRAME as u32 + 1).to_be_bytes().as_slice()).is_err());
-        let call = Call {
-            uid: 10123,
-            tx: 5,
-            request: Request::Uid(0),
-        };
+        let call = Call { uid: 10123, tx: 5, request: Request::Uid(0) };
         let mut bytes = Vec::new();
         write_frame(&mut bytes, &call).unwrap();
         let decoded: Call = read_frame(&mut bytes.as_slice()).unwrap();
@@ -687,53 +630,31 @@ mod tests {
                     challenge: "challenge".into(),
                 },
             },
-            |_, _, _| {
-                Ok(Outcome::Init {
-                    code: 0,
-                    session: 999,
-                })
-            },
+            |_, _, _| Ok(Outcome::Init { code: 0, session: 999 }),
         );
-        let Outcome::Init { session, .. } = opened else {
-            panic!("init failed")
-        };
+        let Outcome::Init { session, .. } = opened else { panic!("init failed") };
         for uid in [10124, 1010123] {
             assert_eq!(
                 sessions.answer(
                     &config,
-                    Call {
-                        uid,
-                        tx: 4,
-                        request: Request::Session(session)
-                    },
+                    Call { uid, tx: 4, request: Request::Session(session) },
                     |_, _, _| panic!("foreign call")
                 ),
                 Outcome::Code(NO_SESSION)
             );
         }
-        let changed = remote::Config {
-            device_id: "changed".into(),
-            ..config.clone()
-        };
+        let changed = remote::Config { device_id: "changed".into(), ..config.clone() };
         assert_eq!(
             sessions.answer(
                 &changed,
-                Call {
-                    uid: 10123,
-                    tx: 4,
-                    request: Request::Session(session)
-                },
+                Call { uid: 10123, tx: 4, request: Request::Session(session) },
                 |_, _, _| panic!("wrong server")
             ),
             Outcome::Code(NO_SESSION)
         );
         let finish = sessions.answer(
             &config,
-            Call {
-                uid: 10123,
-                tx: 4,
-                request: Request::Session(session),
-            },
+            Call { uid: 10123, tx: 4, request: Request::Session(session) },
             |_, _, request| {
                 assert_eq!(*request, Request::Session(999));
                 Ok(Outcome::Code(0))

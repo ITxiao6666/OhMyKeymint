@@ -31,7 +31,7 @@ use crate::global::{get_timestamp_service, ASYNC_TASK, DB, ENFORCEMENTS, SUPER_K
 use crate::keymaster::async_task::AsyncTask;
 use crate::keymaster::authorization::Error as AuthzError;
 use crate::keymaster::boot_key::BootLevel;
-use crate::keymaster::db::{AuthTokenEntry, BootTime};
+use crate::keymaster::db::{AuthTokenEntry, BootTime, KeystoreDB};
 use crate::keymaster::error::{map_binder_status, Error, ErrorCode};
 use crate::keymaster::key_parameter::{KeyParameter, KeyParameterValue};
 use crate::keymaster::super_key::SuperEncryptionType;
@@ -48,11 +48,7 @@ use std::{
 };
 
 type ConfirmationTokenReceiver = Arc<Mutex<Option<Receiver<Vec<u8>>>>>;
-type FinishAuthTokens = (
-    Option<HardwareAuthToken>,
-    Option<TimeStampToken>,
-    Option<Vec<u8>>,
-);
+type FinishAuthTokens = (Option<HardwareAuthToken>, Option<TimeStampToken>, Option<Vec<u8>>);
 
 #[derive(Debug)]
 enum AuthRequestState {
@@ -71,10 +67,7 @@ struct AuthRequest {
 
 impl AuthRequest {
     fn op_auth() -> Arc<Self> {
-        Arc::new(Self {
-            state: AuthRequestState::OpAuth,
-            hat: Mutex::new(None),
-        })
+        Arc::new(Self { state: AuthRequestState::OpAuth, hat: Mutex::new(None) })
     }
 
     fn timestamp(
@@ -175,15 +168,11 @@ impl KeyUsageReservations {
         }
         let reserved = in_flight.entry(key_id).or_default();
         if *reserved >= remaining as u32 {
-            return Err(Error::Km(Ec::KEY_MAX_OPS_EXCEEDED)).context(ks_err!(
-                "All remaining key uses are reserved by active operations."
-            ));
+            return Err(Error::Km(Ec::KEY_MAX_OPS_EXCEEDED))
+                .context(ks_err!("All remaining key uses are reserved by active operations."));
         }
         *reserved += 1;
-        Ok(KeyUsageReservation {
-            key_id: Some(key_id),
-            in_flight: self.in_flight.clone(),
-        })
+        Ok(KeyUsageReservation { key_id: Some(key_id), in_flight: self.in_flight.clone() })
     }
 }
 
@@ -205,10 +194,7 @@ impl KeyUsageReservation {
     }
 
     pub(crate) fn commit<T>(&mut self, consume: impl FnOnce(i64) -> Result<T>) -> Result<T> {
-        let key_id = self
-            .key_id
-            .take()
-            .ok_or(Error::Km(Ec::INVALID_OPERATION_HANDLE))?;
+        let key_id = self.key_id.take().ok_or(Error::Km(Ec::INVALID_OPERATION_HANDLE))?;
         let mut in_flight = self.in_flight.lock().unwrap();
         // Keep the slot reserved until the durable update has committed. A
         // failed update releases the slot but still prevents finish output.
@@ -239,9 +225,7 @@ struct TokenReceiverMap {
 
 impl Default for TokenReceiverMap {
     fn default() -> Self {
-        Self {
-            map_and_cleanup_counter: Mutex::new((HashMap::new(), Self::CLEANUP_PERIOD + 1)),
-        }
+        Self { map_and_cleanup_counter: Mutex::new((HashMap::new(), Self::CLEANUP_PERIOD + 1)) }
     }
 }
 
@@ -302,15 +286,8 @@ impl TokenReceiver {
                     hat.authenticatorType, self.auth_type
                 );
             }
-            if !self
-                .sids
-                .iter()
-                .any(|&sid| hat.userId == sid.0 || hat.authenticatorId == sid.0)
-            {
-                error!(
-                    "event=auth_token_sid_mismatch required_sid_count={}",
-                    self.sids.len()
-                );
+            if !self.sids.iter().any(|&sid| hat.userId == sid.0 || hat.authenticatorId == sid.0) {
+                error!("event=auth_token_sid_mismatch required_sid_count={}", self.sids.len());
             }
 
             state_arc.add_auth_token(hat);
@@ -351,9 +328,7 @@ impl AuthInfo {
                 ENFORCEMENTS.register_op_auth_receiver(challenge, token_receiver);
 
                 self.state = DeferredAuthState::Waiting(auth_request);
-                Some(OperationChallenge {
-                    challenge: challenge.0,
-                })
+                Some(OperationChallenge { challenge: challenge.0 })
             }
             DeferredAuthState::TimeStampRequired(hat) => {
                 let hat = (*hat).clone();
@@ -395,8 +370,7 @@ impl AuthInfo {
                 }
             }
         }
-        self.get_auth_tokens()
-            .map(|(hat, tst)| (hat, tst, confirmation_token))
+        self.get_auth_tokens().map(|(hat, tst)| (hat, tst, confirmation_token))
     }
 
     /// This function is the authorization hook called after finish succeeded.
@@ -431,11 +405,7 @@ impl AuthInfo {
     /// [`DeferredAuthState::Token`] state for future use.
     fn get_auth_tokens(&mut self) -> Result<(Option<HardwareAuthToken>, Option<TimeStampToken>)> {
         let deferred_tokens = if let DeferredAuthState::Waiting(ref auth_request) = self.state {
-            Some(
-                auth_request
-                    .get_auth_tokens()
-                    .context("In AuthInfo::get_auth_tokens.")?,
-            )
+            Some(auth_request.get_auth_tokens().context("In AuthInfo::get_auth_tokens.")?)
         } else {
             None
         };
@@ -499,9 +469,7 @@ impl Enforcements {
             return Ok(None);
         }
         self.key_usage_reservations
-            .reserve(key_id, || {
-                DB.with(|db| db.borrow_mut().key_usage_count(key_id))
-            })
+            .reserve(key_id, || DB.with(|db| db.borrow_mut().key_usage_count(key_id)))
             .map(Some)
     }
 
@@ -583,9 +551,8 @@ impl Enforcements {
                 }
             }
             _ => {
-                return Err(Error::Km(Ec::UNSUPPORTED_PURPOSE)).context(ks_err!(
-                    "authorize_create: specified purpose is not supported."
-                ));
+                return Err(Error::Km(Ec::UNSUPPORTED_PURPOSE))
+                    .context(ks_err!("authorize_create: specified purpose is not supported."));
             }
         }
         // The following variables are to record information from key parameters to be used in
@@ -677,9 +644,8 @@ impl Enforcements {
 
         // if both NO_AUTH_REQUIRED and USER_SECURE_ID tags are present, return error
         if !user_sids.is_empty() && no_auth_required {
-            return Err(Error::Km(Ec::INVALID_KEY_BLOB)).context(ks_err!(
-                "key has both NO_AUTH_REQUIRED and USER_SECURE_ID tags."
-            ));
+            return Err(Error::Km(Ec::INVALID_KEY_BLOB))
+                .context(ks_err!("key has both NO_AUTH_REQUIRED and USER_SECURE_ID tags."));
         }
 
         // if either of auth_type or secure_id is present and the other is not present, return error
@@ -696,9 +662,8 @@ impl Enforcements {
             && !caller_nonce_allowed
             && op_params.iter().any(|kp| kp.tag == Tag::NONCE)
         {
-            return Err(Error::Km(Ec::CALLER_NONCE_PROHIBITED)).context(ks_err!(
-                "NONCE is present, although CALLER_NONCE is not present"
-            ));
+            return Err(Error::Km(Ec::CALLER_NONCE_PROHIBITED))
+                .context(ks_err!("NONCE is present, although CALLER_NONCE is not present"));
         }
 
         if unlocked_device_required {
@@ -729,10 +694,8 @@ impl Enforcements {
                 user_sids.len(),
             ))?;
             let now = BootTime::now();
-            let token_age = now
-                .checked_sub(&hat.time_received())
-                .ok_or_else(Error::sys)
-                .context(ks_err!(
+            let token_age =
+                now.checked_sub(&hat.time_received()).ok_or_else(Error::sys).context(ks_err!(
                     "Overflow while computing Auth token validity. Validity cannot be established."
                 ))?;
 
@@ -773,14 +736,7 @@ impl Enforcements {
         // Reserve only after other authorization checks pass. Hardware-only
         // limits remain the TA's responsibility.
         let key_usage_reservation = self.reserve_key_usage(key_id, key_params)?;
-        Ok((
-            hat,
-            AuthInfo {
-                state,
-                key_usage_reservation,
-                confirmation_token_receiver,
-            },
-        ))
+        Ok((hat, AuthInfo { state, key_usage_reservation, confirmation_token_receiver }))
     }
 
     fn find_auth_token<F>(p: F) -> Option<AuthTokenEntry>
@@ -857,7 +813,7 @@ impl Enforcements {
     /// Then present the auth token to the op auth map. If an operation is waiting for this
     /// auth token this fulfills the request and removes the receiver from the map.
     pub fn add_auth_token(&self, hat: HardwareAuthToken) {
-        DB.with(|db| db.borrow_mut().insert_auth_token(&hat));
+        KeystoreDB::insert_auth_token(&hat);
         self.op_auth_map.add_auth_token(hat);
     }
 
@@ -885,28 +841,20 @@ impl Enforcements {
             priority: u32,
             enc_type: SuperEncryptionType,
         }
-        let mut result = Candidate {
-            priority: 0,
-            enc_type: SuperEncryptionType::None,
-        };
+        let mut result = Candidate { priority: 0, enc_type: SuperEncryptionType::None };
         for kp in key_parameters {
             let t = match kp.key_parameter_value() {
                 KeyParameterValue::MaxBootLevel(level) => Candidate {
                     priority: 3,
                     enc_type: SuperEncryptionType::BootLevel(BootLevel(*level as usize)),
                 },
-                KeyParameterValue::UnlockedDeviceRequired if *domain == Domain::APP => Candidate {
-                    priority: 2,
-                    enc_type: SuperEncryptionType::UnlockedDeviceRequired,
-                },
-                KeyParameterValue::UserSecureID(_) if *domain == Domain::APP => Candidate {
-                    priority: 1,
-                    enc_type: SuperEncryptionType::CredentialEncrypted,
-                },
-                _ => Candidate {
-                    priority: 0,
-                    enc_type: SuperEncryptionType::None,
-                },
+                KeyParameterValue::UnlockedDeviceRequired if *domain == Domain::APP => {
+                    Candidate { priority: 2, enc_type: SuperEncryptionType::UnlockedDeviceRequired }
+                }
+                KeyParameterValue::UserSecureID(_) if *domain == Domain::APP => {
+                    Candidate { priority: 1, enc_type: SuperEncryptionType::CredentialEncrypted }
+                }
+                _ => Candidate { priority: 0, enc_type: SuperEncryptionType::None },
             };
             if t.priority > result.priority {
                 result = t;
@@ -1023,12 +971,7 @@ mod tests {
             .authorize_create(KeyPurpose::SIGN, Some(&(7, params)), &[], false)
             .unwrap();
         assert!(auth_info.key_usage_reservation.is_none());
-        assert!(enforcements
-            .key_usage_reservations
-            .in_flight
-            .lock()
-            .unwrap()
-            .is_empty());
+        assert!(enforcements.key_usage_reservations.in_flight.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1036,10 +979,7 @@ mod tests {
         let reservations = KeyUsageReservations::default();
         let first = reservations.reserve(7, || Ok(2)).unwrap();
         let second = reservations.reserve(7, || Ok(2)).unwrap();
-        assert_eq!(
-            error_code(reservations.reserve(7, || Ok(2))),
-            Ec::KEY_MAX_OPS_EXCEEDED
-        );
+        assert_eq!(error_code(reservations.reserve(7, || Ok(2))), Ec::KEY_MAX_OPS_EXCEEDED);
         drop(first);
         let replacement = reservations.reserve(7, || Ok(2)).unwrap();
         drop(second);
@@ -1061,20 +1001,14 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        assert_eq!(
-            error_code(reservations.reserve(7, read_count)),
-            Ec::KEY_MAX_OPS_EXCEEDED
-        );
+        assert_eq!(error_code(reservations.reserve(7, read_count)), Ec::KEY_MAX_OPS_EXCEEDED);
         second
             .commit(|_| {
                 remaining.fetch_sub(1, Ordering::SeqCst);
                 Ok(())
             })
             .unwrap();
-        assert_eq!(
-            error_code(reservations.reserve(7, read_count)),
-            Ec::INVALID_KEY_BLOB
-        );
+        assert_eq!(error_code(reservations.reserve(7, read_count)), Ec::INVALID_KEY_BLOB);
         assert!(reservations.in_flight.lock().unwrap().is_empty());
         assert_eq!(
             error_code::<()>(second.commit(|_| panic!("must not consume twice"))),
@@ -1119,10 +1053,7 @@ mod tests {
             .collect();
         barrier.wait();
         barrier.wait();
-        let slots: Vec<_> = threads
-            .into_iter()
-            .map(|thread| thread.join().unwrap())
-            .collect();
+        let slots: Vec<_> = threads.into_iter().map(|thread| thread.join().unwrap()).collect();
         assert_eq!(slots.iter().filter(|slot| slot.is_ok()).count(), 1);
         assert_eq!(slots.iter().filter(|slot| slot.is_err()).count(), 1);
         drop(slots);
@@ -1140,10 +1071,7 @@ mod tests {
         auth_info.release_usage_reservation();
         let replacement = reservations.reserve(7, || Ok(1)).unwrap();
         auth_info.release_usage_reservation();
-        assert_eq!(
-            error_code(reservations.reserve(7, || Ok(1))),
-            Ec::KEY_MAX_OPS_EXCEEDED
-        );
+        assert_eq!(error_code(reservations.reserve(7, || Ok(1))), Ec::KEY_MAX_OPS_EXCEEDED);
         drop(auth_info);
         drop(replacement);
         assert!(reservations.in_flight.lock().unwrap().is_empty());

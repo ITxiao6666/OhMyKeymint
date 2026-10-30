@@ -64,10 +64,7 @@ impl SecurityPatchDefaults {
 
     fn validate(&self) -> Result<()> {
         if self.version != SNAPSHOT_VERSION {
-            bail!(
-                "unsupported security-patch defaults version {}",
-                self.version
-            );
+            bail!("unsupported security-patch defaults version {}", self.version);
         }
         validate_fingerprint(&self.build_fingerprint)?;
         validate_properties(&self.properties(), "saved default")
@@ -102,10 +99,7 @@ impl OperationLock {
             .parent()
             .ok_or_else(|| anyhow!("security-patch defaults path has no parent"))?;
         let file = File::open(parent).with_context(|| {
-            format!(
-                "failed to open security-patch state directory {}",
-                parent.display()
-            )
+            format!("failed to open security-patch state directory {}", parent.display())
         })?;
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
             return Err(std::io::Error::last_os_error())
@@ -163,9 +157,7 @@ fn is_official_security_bulletin_uri(uri: &Uri) -> bool {
 /// The WebUI invokes this entry point in a short-lived `keymint` process so
 /// devices do not need to provide curl, wget, or a particular root-shell PATH.
 pub fn download_android_security_bulletin(url: &str) -> Result<String> {
-    let requested_uri: Uri = url
-        .parse()
-        .context("Android Security Bulletin URL is invalid")?;
+    let requested_uri: Uri = url.parse().context("Android Security Bulletin URL is invalid")?;
     if !is_official_security_bulletin_uri(&requested_uri) {
         bail!("Android Security Bulletin URL is not an allowed Google page");
     }
@@ -195,11 +187,7 @@ pub fn apply_webui_security_patch(value: &str) -> Result<String> {
 
     apply_webui_security_patch_with(
         value,
-        PatchOperation {
-            config_file: &config_file,
-            state_path,
-            fingerprint: &fingerprint,
-        },
+        PatchOperation { config_file: &config_file, state_path, fingerprint: &fingerprint },
         resetprop::read_security_patch_properties,
         read_build_security_patch_properties,
         resetprop::direct_write_and_verify_security_patch_properties,
@@ -261,10 +249,7 @@ where
     let desired = if value == "auto" {
         snapshot.properties()
     } else {
-        SecurityPatchProperties {
-            system: effective_value.clone(),
-            vendor: effective_value.clone(),
-        }
+        SecurityPatchProperties { system: effective_value.clone(), vendor: effective_value.clone() }
     };
     write_properties(&before, &desired).with_context(|| {
         if value == "auto" {
@@ -326,10 +311,7 @@ where
         snapshot = SecurityPatchDefaults::new(fingerprint, &defaults)?;
         persist_snapshot(state_path, &snapshot)?;
     }
-    let desired = SecurityPatchProperties {
-        system: date.clone(),
-        vendor: date,
-    };
+    let desired = SecurityPatchProperties { system: date.clone(), vendor: date };
     let before = read_runtime().context("failed to read startup security-patch properties")?;
     write_properties(&before, &desired).context("failed to write startup security-patch properties")
 }
@@ -368,18 +350,12 @@ fn load_snapshot(path: &Path) -> Result<Option<SecurityPatchDefaults>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
             return Err(error).with_context(|| {
-                format!(
-                    "failed to inspect security-patch defaults {}",
-                    path.display()
-                )
+                format!("failed to inspect security-patch defaults {}", path.display())
             })
         }
     };
     if !metadata.file_type().is_file() {
-        bail!(
-            "security-patch defaults path is not a regular file: {}",
-            path.display()
-        );
+        bail!("security-patch defaults path is not a regular file: {}", path.display());
     }
     if metadata.len() > MAX_SNAPSHOT_BYTES {
         bail!("security-patch defaults file is too large");
@@ -412,16 +388,12 @@ fn remove_snapshot(path: &Path) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => {
             return Err(error).with_context(|| {
-                format!(
-                    "failed to remove security-patch defaults {}",
-                    path.display()
-                )
+                format!("failed to remove security-patch defaults {}", path.display())
             })
         }
     }
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("security-patch defaults path has no parent"))?;
+    let parent =
+        path.parent().ok_or_else(|| anyhow!("security-patch defaults path has no parent"))?;
     File::open(parent)
         .and_then(|directory| directory.sync_all())
         .context("failed to sync security-patch state directory after removal")
@@ -535,10 +507,7 @@ mod tests {
     const DEFAULT_VENDOR: &str = "2025-05-05";
 
     fn properties(system: &str, vendor: &str) -> SecurityPatchProperties {
-        SecurityPatchProperties {
-            system: system.to_string(),
-            vendor: vendor.to_string(),
-        }
+        SecurityPatchProperties { system: system.to_string(), vendor: vendor.to_string() }
     }
 
     fn synchronized_config(date: &str) -> ConfigFile {
@@ -577,9 +546,8 @@ mod tests {
 
     #[test]
     fn bulletin_redirect_resolution_handles_supported_reference_forms() {
-        let base: Uri = "https://source.android.com/docs/security/bulletin/asb-overview"
-            .parse()
-            .unwrap();
+        let base: Uri =
+            "https://source.android.com/docs/security/bulletin/asb-overview".parse().unwrap();
         let cases = [
             (
                 "https://source.android.google.cn/docs/security/bulletin/asb-overview?hl=zh-cn",
@@ -614,9 +582,8 @@ mod tests {
 
     #[test]
     fn bulletin_redirect_resolution_rejects_empty_or_unsafe_references() {
-        let base: Uri = "https://source.android.com/docs/security/bulletin/asb-overview"
-            .parse()
-            .unwrap();
+        let base: Uri =
+            "https://source.android.com/docs/security/bulletin/asb-overview".parse().unwrap();
 
         for location in [
             "",
@@ -674,10 +641,7 @@ mod tests {
             vec!["2026-01-05".to_string(), "2026-02-05".to_string()]
         );
         let snapshot = load_snapshot(&path).unwrap().unwrap();
-        assert_eq!(
-            snapshot.properties(),
-            properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)
-        );
+        assert_eq!(snapshot.properties(), properties(DEFAULT_SYSTEM, DEFAULT_VENDOR));
     }
 
     #[test]
@@ -690,9 +654,7 @@ mod tests {
         let configs = [ConfigFile::default(), synchronized_config("2026-07-01")];
 
         for ((published, expected), config) in
-            [("2026-07-05", "2026-07-01"), ("2026-08-05", "2026-08-01")]
-                .into_iter()
-                .zip(&configs)
+            [("2026-07-05", "2026-07-01"), ("2026-08-05", "2026-08-01")].into_iter().zip(&configs)
         {
             let applied = apply_webui_security_patch_with(
                 published,
@@ -722,10 +684,7 @@ mod tests {
             *config_values.borrow(),
             vec!["2026-07-01".to_string(), "2026-08-01".to_string()]
         );
-        assert_eq!(
-            load_snapshot(&path).unwrap().unwrap().properties(),
-            defaults
-        );
+        assert_eq!(load_snapshot(&path).unwrap().unwrap().properties(), defaults);
     }
 
     #[test]
@@ -738,14 +697,8 @@ mod tests {
                 &properties(system_default, vendor_default),
             )
             .unwrap();
-            assert_eq!(
-                synchronized_security_patch_date("2026-08-05", &defaults),
-                "2026-08-05"
-            );
-            assert_eq!(
-                synchronized_security_patch_date("2026-08-01", &defaults),
-                "2026-08-01"
-            );
+            assert_eq!(synchronized_security_patch_date("2026-08-05", &defaults), "2026-08-05");
+            assert_eq!(synchronized_security_patch_date("2026-08-01", &defaults), "2026-08-01");
         }
     }
 
@@ -796,10 +749,7 @@ mod tests {
         assert_eq!(*configured.borrow(), Some("2026-08-01".to_string()));
         assert_eq!(*current.borrow(), properties("2026-08-01", "2026-08-01"));
         let snapshot = load_snapshot(&path).unwrap().unwrap();
-        assert_eq!(
-            snapshot.build_fingerprint,
-            "brand/product/device:17/new/release-keys"
-        );
+        assert_eq!(snapshot.build_fingerprint, "brand/product/device:17/new/release-keys");
         assert_eq!(snapshot.properties(), new_defaults);
     }
 
@@ -809,21 +759,14 @@ mod tests {
         let path = temp.path().join("security_patch_defaults.toml");
         let fingerprint = "brand/product/device:17/id/release-keys";
         let defaults = properties("2025-06-01", "2025-06-05");
-        persist_snapshot(
-            &path,
-            &SecurityPatchDefaults::new(fingerprint, &defaults).unwrap(),
-        )
-        .unwrap();
+        persist_snapshot(&path, &SecurityPatchDefaults::new(fingerprint, &defaults).unwrap())
+            .unwrap();
         let current = RefCell::new(defaults.clone());
         let writes = RefCell::new(Vec::new());
 
         let error = apply_webui_security_patch_with(
             "2026-08-05",
-            PatchOperation {
-                config_file: &ConfigFile::default(),
-                state_path: &path,
-                fingerprint,
-            },
+            PatchOperation { config_file: &ConfigFile::default(), state_path: &path, fingerprint },
             || Ok(current.borrow().clone()),
             || panic!("matching snapshot should be reused"),
             |before, desired| {
@@ -843,10 +786,7 @@ mod tests {
         assert_eq!(*current.borrow(), defaults);
         assert_eq!(
             *writes.borrow(),
-            vec![
-                properties("2026-08-01", "2026-08-01"),
-                properties("2025-06-01", "2025-06-05"),
-            ]
+            vec![properties("2026-08-01", "2026-08-01"), properties("2025-06-01", "2025-06-05"),]
         );
         assert!(path.exists());
     }
@@ -887,10 +827,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(applied, "auto");
-        assert_eq!(
-            *current.borrow(),
-            properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)
-        );
+        assert_eq!(*current.borrow(), properties(DEFAULT_SYSTEM, DEFAULT_VENDOR));
         assert_eq!(*config_values.borrow(), vec!["auto".to_string()]);
         assert!(!path.exists());
     }
@@ -993,10 +930,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(*default_reads.borrow(), 1);
-        assert_eq!(
-            *current.borrow(),
-            properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)
-        );
+        assert_eq!(*current.borrow(), properties(DEFAULT_SYSTEM, DEFAULT_VENDOR));
         assert!(!path.exists());
     }
 
@@ -1066,14 +1000,8 @@ mod tests {
         .unwrap();
 
         let snapshot = load_snapshot(&path).unwrap().unwrap();
-        assert_eq!(
-            snapshot.properties(),
-            properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)
-        );
-        assert_eq!(
-            snapshot.build_fingerprint,
-            "brand/product/device:17/new/release-keys"
-        );
+        assert_eq!(snapshot.properties(), properties(DEFAULT_SYSTEM, DEFAULT_VENDOR));
+        assert_eq!(snapshot.build_fingerprint, "brand/product/device:17/new/release-keys");
     }
 
     #[test]
@@ -1198,14 +1126,8 @@ mod tests {
         .unwrap();
 
         let snapshot = load_snapshot(&path).unwrap().unwrap();
-        assert_eq!(
-            snapshot.properties(),
-            properties(DEFAULT_SYSTEM, DEFAULT_VENDOR)
-        );
-        assert_eq!(
-            snapshot.build_fingerprint,
-            "brand/product/device:17/new/release-keys"
-        );
+        assert_eq!(snapshot.properties(), properties(DEFAULT_SYSTEM, DEFAULT_VENDOR));
+        assert_eq!(snapshot.build_fingerprint, "brand/product/device:17/new/release-keys");
         assert_eq!(*current.borrow(), properties("2026-02-05", "2026-02-05"));
     }
 

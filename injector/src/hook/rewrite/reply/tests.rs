@@ -1,9 +1,11 @@
+pub(in crate::hook::rewrite) use super::dispatch::tests::handle_synthetic_br_transaction;
 use std::cell::Cell;
 use std::mem::size_of;
 
 use rsbinder::{ExceptionCode, Status, StatusCode};
 
 use super::*;
+use crate::android::system::keystore2::Domain::Domain;
 use crate::hook::rewrite::tests::*;
 
 #[test]
@@ -14,10 +16,8 @@ fn generation_delay_precedes_key_publication_and_preserves_metadata() {
         tag: Tag::ATTESTATION_CHALLENGE,
         value: KeyParameterValue::Blob(vec![7]),
     }];
-    let plain = vec![KeyParameter {
-        tag: Tag::APPLICATION_DATA,
-        value: KeyParameterValue::Blob(vec![7]),
-    }];
+    let plain =
+        vec![KeyParameter { tag: Tag::APPLICATION_DATA, value: KeyParameterValue::Blob(vec![7]) }];
     for (params, delay, expected) in [
         (&challenge, 25, Some(Duration::from_millis(25))),
         (&challenge, 0, None),
@@ -155,14 +155,8 @@ fn plain_omk_error_becomes_system_error_reply() {
     let parsed = unsafe { parcel::parse_reply_status(data, data_size, offsets, offsets_size) }
         .expect("status reply should parse");
 
-    assert_eq!(
-        parsed.exception_code(),
-        rsbinder::ExceptionCode::ServiceSpecific
-    );
-    assert_eq!(
-        parsed.service_specific_error(),
-        ResponseCode::SYSTEM_ERROR.0
-    );
+    assert_eq!(parsed.exception_code(), rsbinder::ExceptionCode::ServiceSpecific);
+    assert_eq!(parsed.service_specific_error(), ResponseCode::SYSTEM_ERROR.0);
 }
 
 #[test]
@@ -175,19 +169,14 @@ fn contextual_omk_status_error_keeps_service_specific_code() {
     let parsed = unsafe { parcel::parse_reply_status(data, data_size, offsets, offsets_size) }
         .expect("status reply should parse");
 
-    assert_eq!(
-        parsed.exception_code(),
-        rsbinder::ExceptionCode::ServiceSpecific
-    );
-    assert_eq!(
-        parsed.service_specific_error(),
-        ResponseCode::PERMISSION_DENIED.0
-    );
+    assert_eq!(parsed.exception_code(), rsbinder::ExceptionCode::ServiceSpecific);
+    assert_eq!(parsed.service_specific_error(), ResponseCode::PERMISSION_DENIED.0);
 }
 
 #[test]
-fn unavailable_omk_errors_preserve_system_reply() {
-    for status in [
+fn unavailable_omk_errors_return_system_error_without_fallback() {
+    let caller = CallerInfo { uid: 1000, sid: String::new(), pid: 2000 };
+    for code in [
         StatusCode::DeadObject,
         StatusCode::RpcError,
         StatusCode::NotEnoughData,
@@ -196,81 +185,21 @@ fn unavailable_omk_errors_preserve_system_reply() {
         StatusCode::Errno(libc::ECONNREFUSED),
         StatusCode::Errno(libc::EPIPE),
     ] {
-        let error = anyhow::Error::new(Status::from(status));
-        assert!(
-            build_omk_error_reply_or_preserve_system(&error)
-                .expect("unavailable OMK errors should classify cleanly")
-                .is_none(),
-            "{status:?} after retry means OMK is unavailable, not authoritative"
-        );
-    }
-
-    for (message, unavailable) in [
-        ("failed to connect to omk service", true),
-        ("failed to connect to omk_maintenance service", true),
-        ("failed to connect to omk_authorization service", true),
-        ("failed to connect to omk service: permission denied", false),
-        (
-            "failed to connect to omk_maintenance service: permission denied",
-            false,
-        ),
-        (
-            "failed to connect to omk_authorization service: permission denied",
-            false,
-        ),
-    ] {
-        assert_eq!(
-            omk_unavailable_error(&anyhow::anyhow!(message)),
-            unavailable,
-            "OMK connection marker classification mismatch for {message}"
-        );
-    }
-
-    for marker in [
-        "failed to connect to omk service",
-        "failed to connect to omk_maintenance service",
-        "failed to connect to omk_authorization service",
-    ] {
-        let error = anyhow::Error::new(StatusCode::PermissionDenied).context(marker);
-        assert!(
-            !omk_unavailable_error(&error),
-            "typed permission error must override connection marker {marker}"
-        );
-    }
-    let stale = anyhow::Error::new(StatusCode::DeadObject)
-        .context("failed to connect to omk_authorization service");
-    assert!(omk_unavailable_error(&stale));
-
-    let missing_service = anyhow::Error::new(StatusCode::NameNotFound);
-    assert!(
-        build_omk_error_reply_or_preserve_system(&missing_service)
-            .expect("missing RPC service should classify cleanly")
-            .is_none(),
-        "missing OMK RPC service means OMK is unavailable"
-    );
-
-    for status in [
-        StatusCode::DeadObject,
-        StatusCode::RpcError,
-        StatusCode::NotEnoughData,
-    ] {
         for error in [
-            anyhow::Error::new(Status::from(status)).context("wrapped status"),
-            anyhow::Error::new(status).context("wrapped status code"),
+            anyhow::Error::new(Status::from(code)).context("wrapped status"),
+            anyhow::Error::new(code).context("wrapped status code"),
         ] {
-            assert!(build_omk_error_reply_or_preserve_system(&error)
-                .expect("wrapped unavailable errors should classify cleanly")
-                .is_none());
+            let mut reply = omk_error_reply_for_method("test", &caller, &error)
+                .unwrap()
+                .expect("selected OMK failure must replace System success");
+            let (data, size, offsets, offsets_size) = raw_parts(&mut reply);
+            // SAFETY: reply owns the data and offsets buffers throughout status parsing.
+            let actual =
+                unsafe { parcel::parse_reply_status(data, size, offsets, offsets_size) }.unwrap();
+            assert_eq!(actual.exception_code(), ExceptionCode::ServiceSpecific);
+            assert_eq!(actual.service_specific_error(), ResponseCode::SYSTEM_ERROR.0);
         }
     }
-
-    let local = anyhow::anyhow!("plain OMK failure");
-    assert!(
-        build_omk_error_reply_or_preserve_system(&local)
-            .expect("plain OMK errors should classify cleanly")
-            .is_some(),
-        "non-connection OMK errors must be returned instead of preserving system"
-    );
 }
 
 #[test]
@@ -278,46 +207,29 @@ fn reachable_non_stale_omk_status_code_errors_become_system_error_reply() {
     // AOSP keystore2 maps a bare transport StatusCode through
     // map_binder_status_code -> Error::BinderTransaction -> SYSTEM_ERROR,
     // surfaced as a service-specific parcel, never a raw transport status.
-    for status in [
-        StatusCode::TimedOut,
-        StatusCode::PermissionDenied,
-        StatusCode::UnknownTransaction,
-    ] {
+    for status in
+        [StatusCode::TimedOut, StatusCode::PermissionDenied, StatusCode::UnknownTransaction]
+    {
         let error = anyhow::Error::new(status);
-        let mut reply = build_omk_error_reply_or_preserve_system(&error)
-            .expect("reachable OMK errors should classify cleanly")
-            .expect("non-stale OMK errors must replace system reply");
+        let mut reply = build_omk_error_reply(&error)
+            .expect("reachable OMK errors must produce a status reply");
         let (data, data_size, offsets, offsets_size) = raw_parts(&mut reply);
         let parsed = unsafe { parcel::parse_reply_status(data, data_size, offsets, offsets_size) }
             .expect("status reply should parse");
-        assert_eq!(
-            parsed.exception_code(),
-            rsbinder::ExceptionCode::ServiceSpecific
-        );
-        assert_eq!(
-            parsed.service_specific_error(),
-            ResponseCode::SYSTEM_ERROR.0
-        );
+        assert_eq!(parsed.exception_code(), rsbinder::ExceptionCode::ServiceSpecific);
+        assert_eq!(parsed.service_specific_error(), ResponseCode::SYSTEM_ERROR.0);
     }
 }
 
 #[test]
 fn reachable_omk_status_error_becomes_authoritative_reply() {
     let status = Status::new_service_specific_error(ResponseCode::PERMISSION_DENIED.0, None);
-    let reply = build_omk_status_reply_or_preserve_system(&status)
-        .expect("service-specific status should build")
-        .expect("reachable OMK status should replace system");
+    let reply = build_omk_status_reply(&status).expect("service-specific status should build");
     let mut reply = reply;
     let (data, data_size, offsets, offsets_size) = raw_parts(&mut reply);
     let parsed = unsafe { parcel::parse_reply_status(data, data_size, offsets, offsets_size) }
         .expect("status reply should parse");
 
-    assert_eq!(
-        parsed.exception_code(),
-        rsbinder::ExceptionCode::ServiceSpecific
-    );
-    assert_eq!(
-        parsed.service_specific_error(),
-        ResponseCode::PERMISSION_DENIED.0
-    );
+    assert_eq!(parsed.exception_code(), rsbinder::ExceptionCode::ServiceSpecific);
+    assert_eq!(parsed.service_specific_error(), ResponseCode::PERMISSION_DENIED.0);
 }

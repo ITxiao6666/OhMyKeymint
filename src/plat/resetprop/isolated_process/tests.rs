@@ -1,10 +1,7 @@
 use super::*;
 
 fn identity(uid: u32, start_time: u64) -> ProcessIdentity {
-    ProcessIdentity {
-        uids: [uid; 4],
-        start_time,
-    }
+    ProcessIdentity { uids: [uid; 4], start_time }
 }
 
 #[test]
@@ -34,11 +31,7 @@ fn lookup_requires_live_original_uid_and_stable_process() {
             42,
             |_| {
                 calls += 1;
-                Ok(if calls == 1 {
-                    identity(99001, 17)
-                } else {
-                    after.clone()
-                })
+                Ok(if calls == 1 { identity(99001, 17) } else { after.clone() })
             },
             |_, _| Ok(vec!["com.example.owner".into()])
         )
@@ -94,9 +87,7 @@ fn write_record(
         parcel.write(&package.map(str::to_owned)).unwrap();
     }
     if layout != ProcessParcelLayout::Legacy {
-        parcel
-            .write(&vec!["com.dependencies.must.not.be.used".to_owned()])
-            .unwrap();
+        parcel.write(&vec!["com.dependencies.must.not.be.used".to_owned()]).unwrap();
     }
     for field in 101..107 {
         parcel.write(&field).unwrap();
@@ -138,11 +129,9 @@ fn all_android_layouts_use_pid_and_packages_not_owner_uid_or_dependencies() {
     ] {
         let packages = read_matching_packages(&mut list(layout, 10371), layout, 99001, 42).unwrap();
         assert_eq!(packages, ["com.example.owner"]);
-        assert!(
-            read_matching_packages(&mut list(layout, 10371), layout, 99001, 43)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(read_matching_packages(&mut list(layout, 10371), layout, 99001, 43)
+            .unwrap()
+            .is_empty());
         for owner in [110371, 99002, -1] {
             assert!(read_matching_packages(&mut list(layout, owner), layout, 99001, 42).is_err());
         }
@@ -164,13 +153,7 @@ fn null_package_names_preserve_later_process_matches_and_valid_packages() {
             layout,
             42,
             10371,
-            &[
-                None,
-                Some("com.example.shared"),
-                None,
-                Some("com.example.owner"),
-                None,
-            ],
+            &[None, Some("com.example.shared"), None, Some("com.example.owner"), None],
         );
         parcel.set_data_position(0);
         assert_eq!(
@@ -179,9 +162,7 @@ fn null_package_names_preserve_later_process_matches_and_valid_packages() {
         );
 
         parcel.set_data_position(0);
-        assert!(read_matching_packages(&mut parcel, layout, 99001, 41)
-            .unwrap()
-            .is_empty());
+        assert!(read_matching_packages(&mut parcel, layout, 99001, 41).unwrap().is_empty());
         parcel.set_data_position(0);
         assert!(read_matching_packages(&mut parcel, layout, 199001, 42).is_err());
     }
@@ -204,20 +185,8 @@ fn ambiguous_or_malformed_process_lists_are_not_accepted() {
     let layout = ProcessParcelLayout::WithDependencies;
     let mut duplicate = Parcel::new();
     duplicate.write(&2i32).unwrap();
-    write_record(
-        &mut duplicate,
-        layout,
-        42,
-        10371,
-        &[Some("com.example.first")],
-    );
-    write_record(
-        &mut duplicate,
-        layout,
-        42,
-        10372,
-        &[Some("com.example.second")],
-    );
+    write_record(&mut duplicate, layout, 42, 10371, &[Some("com.example.first")]);
+    write_record(&mut duplicate, layout, 42, 10372, &[Some("com.example.second")]);
     duplicate.set_data_position(0);
     assert!(read_matching_packages(&mut duplicate, layout, 99001, 42).is_err());
     let mut trailing = list(layout, 10371);
@@ -230,13 +199,8 @@ fn ambiguous_or_malformed_process_lists_are_not_accepted() {
         invalid_size.write(&value).unwrap();
     }
     invalid_size.set_data_position(0);
-    assert!(read_matching_packages(
-        &mut invalid_size,
-        ProcessParcelLayout::Structured,
-        99001,
-        42
-    )
-    .is_err());
+    assert!(read_matching_packages(&mut invalid_size, ProcessParcelLayout::Structured, 99001, 42)
+        .is_err());
 }
 
 #[test]
@@ -246,12 +210,7 @@ fn helper_protocol_rejects_error_empty_and_invalid_package_responses() {
         parse_helper_response("OK\tcom.example.owner\tcom.example.shared").unwrap(),
         ["com.example.owner", "com.example.shared"]
     );
-    for response in [
-        "ERR\tdenied",
-        "OK\t",
-        "OK\tcom.example\nmalicious",
-        "OK\tcom..example",
-    ] {
+    for response in ["ERR\tdenied", "OK\t", "OK\tcom.example\nmalicious", "OK\tcom..example"] {
         assert!(parse_helper_response(response).is_err());
     }
 }
@@ -261,8 +220,5 @@ fn unknown_android_versions_do_not_guess_transaction_numbers() {
     assert!(activity_contract(30).is_none());
     assert!(activity_contract(38).is_none());
     assert_eq!(activity_contract(32).unwrap().transaction, 76);
-    assert_eq!(
-        activity_contract(37).unwrap().layout,
-        ProcessParcelLayout::Structured
-    );
+    assert_eq!(activity_contract(37).unwrap().layout, ProcessParcelLayout::Structured);
 }

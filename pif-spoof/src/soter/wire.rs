@@ -6,8 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use openssl::{pkey::Private, rsa::Rsa};
 use pif_common::soter_blob as blob;
-use rsa::{RsaPrivateKey, RsaPublicKey, pkcs8::DecodePrivateKey};
 
 use super::{BAD_VALUE, DESCRIPTOR, MAX_REQUEST_BYTES, UNKNOWN_TRANSACTION};
 
@@ -60,7 +60,7 @@ Uz4xpoYU8cPObY7JmDznKvc=
 ";
 
 struct Fixture {
-    private: RsaPrivateKey,
+    private: Rsa<Private>,
     public_pem: String,
 }
 
@@ -68,14 +68,9 @@ fn fixture() -> Option<&'static Fixture> {
     static FIXTURE: OnceLock<Option<Fixture>> = OnceLock::new();
     FIXTURE
         .get_or_init(|| {
-            let mut private = RsaPrivateKey::from_pkcs8_pem(TEST_PRIVATE_KEY).ok()?;
-            private.validate().ok()?;
-            private.precompute().ok()?;
-            let public_pem = blob::public_key_pem(&RsaPublicKey::from(&private))?;
-            Some(Fixture {
-                private,
-                public_pem,
-            })
+            let private = blob::private_key_from_pem(TEST_PRIVATE_KEY)?;
+            let public_pem = blob::public_key_pem(&private)?;
+            Some(Fixture { private, public_pem })
         })
         .as_ref()
 }
@@ -164,10 +159,9 @@ pub(super) fn parse_request(code: u32, bytes: &[u8]) -> Result<Request, i32> {
     let mut reader = arguments(bytes).ok_or(BAD_VALUE)?;
     let request = match code {
         1..=3 | 7 => Request::Uid(reader.uid().ok_or(BAD_VALUE)?),
-        4..=6 | 8 => Request::Key(
-            reader.uid().ok_or(BAD_VALUE)?,
-            reader.string().ok_or(BAD_VALUE)?,
-        ),
+        4..=6 | 8 => {
+            Request::Key(reader.uid().ok_or(BAD_VALUE)?, reader.string().ok_or(BAD_VALUE)?)
+        }
         9 => Request::Init(
             reader.uid().ok_or(BAD_VALUE)?,
             reader.string().ok_or(BAD_VALUE)?,
@@ -230,9 +224,7 @@ impl SoftwareState {
     }
 
     fn has_auth(&self, uid: u32, key: &str) -> bool {
-        self.uids
-            .get(&uid)
-            .is_some_and(|state| state.ask && state.keys.contains(key))
+        self.uids.get(&uid).is_some_and(|state| state.ask && state.keys.contains(key))
     }
 
     fn key_code(&mut self, code: u32, uid: u32, key: Option<String>) -> i32 {
@@ -249,8 +241,7 @@ impl SoftwareState {
             state.keys.insert(key);
             0
         } else if state.keys.remove(&key) {
-            self.sessions
-                .retain(|_, session| session.uid != uid || session.key != key);
+            self.sessions.retain(|_, session| session.uid != uid || session.key != key);
             0
         } else {
             NO_AUTH_KEY
@@ -293,8 +284,7 @@ impl SoftwareState {
         if !self.has_auth(uid, &key) {
             return (NO_AUTH_KEY, 0);
         }
-        self.sessions
-            .retain(|_, session| session.opened.elapsed() < SESSION_LIFETIME);
+        self.sessions.retain(|_, session| session.opened.elapsed() < SESSION_LIFETIME);
         if self.sessions.len() >= MAX_SESSIONS {
             return (UNAVAILABLE, 0);
         }
@@ -302,14 +292,7 @@ impl SoftwareState {
             return (UNAVAILABLE, 0);
         };
         self.next_session = id;
-        self.sessions.insert(
-            id,
-            Session {
-                uid,
-                key,
-                opened: Instant::now(),
-            },
-        );
+        self.sessions.insert(id, Session { uid, key, opened: Instant::now() });
         (0, id)
     }
 
@@ -360,9 +343,9 @@ impl SoftwareState {
                     None => output.int32(NO_KEY),
                 }
             }
-            (8, Request::Key(uid, key)) => output.int32(i32::from(
-                key.as_deref().is_some_and(|key| self.has_auth(uid, key)),
-            )),
+            (8, Request::Key(uid, key)) => {
+                output.int32(i32::from(key.as_deref().is_some_and(|key| self.has_auth(uid, key))))
+            }
             (9, Request::Init(uid, key, challenge)) => {
                 let (code, session) = self.init(uid, key, challenge);
                 output.int32(1)?;

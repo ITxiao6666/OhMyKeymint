@@ -58,10 +58,7 @@ fn read_state(path: &Path) -> Result<State> {
             bail!("invalid Android user in automatic app selection state");
         }
         for package in packages.iter().flatten() {
-            if !matches!(
-                config::parse_scoop_target(package),
-                Some(ScoopTarget::Package(_))
-            ) {
+            if !matches!(config::parse_scoop_target(package), Some(ScoopTarget::Package(_))) {
                 bail!("invalid package in automatic app selection state");
             }
         }
@@ -79,9 +76,7 @@ fn write_state(path: &Path, state: &State) -> Result<()> {
 }
 
 pub(crate) fn status() -> Result<Status> {
-    Ok(Status {
-        enabled: read_state(Path::new(STATE_PATH))?.enabled,
-    })
+    Ok(Status { enabled: read_state(Path::new(STATE_PATH))?.enabled })
 }
 
 pub(crate) fn set_enabled(enabled: bool) -> Result<Status> {
@@ -110,20 +105,14 @@ pub(crate) fn set_enabled(enabled: bool) -> Result<Status> {
 /// not forget its baseline or cause its existing apps to be added on recovery.
 fn reconcile(state: &mut State, snapshot: Snapshot) -> Vec<String> {
     let mut added = Vec::new();
-    state
-        .users
-        .retain(|user, _| snapshot.users.contains_key(user));
+    state.users.retain(|user, _| snapshot.users.contains_key(user));
     for (user, current) in snapshot.users {
         let Some(current) = current else {
             state.users.entry(user).or_insert(None);
             continue;
         };
         if let Some(Some(previous)) = state.users.get(&user) {
-            added.extend(
-                current
-                    .difference(previous)
-                    .map(|package| format!("{package}@{user}")),
-            );
+            added.extend(current.difference(previous).map(|package| format!("{package}@{user}")));
         }
         state.users.insert(user, Some(current));
     }
@@ -147,11 +136,8 @@ fn poll() -> Result<()> {
     let previous = serde_json::to_vec(&state)?;
     let added = reconcile(&mut state, snapshot);
     if !added.is_empty() {
-        config::update_scoop_for_webui(ScoopDelta {
-            added,
-            removed: Vec::new(),
-        })
-        .map_err(|error| anyhow!(error))?;
+        config::update_scoop_for_webui(ScoopDelta { added, removed: Vec::new() })
+            .map_err(|error| anyhow!(error))?;
     }
     if serde_json::to_vec(&state)? != previous {
         // Persist only after the config update succeeded, so failed writes can
@@ -189,10 +175,7 @@ fn parse_packages(output: &str) -> Result<BTreeSet<String>> {
                 .trim()
                 .strip_prefix("package:")
                 .ok_or_else(|| anyhow!("unexpected PackageManager output"))?;
-            if !matches!(
-                config::parse_scoop_target(name),
-                Some(ScoopTarget::Package(_))
-            ) {
+            if !matches!(config::parse_scoop_target(name), Some(ScoopTarget::Package(_))) {
                 bail!("invalid installed package name");
             }
             Ok(name.to_owned())
@@ -205,14 +188,8 @@ fn discover() -> Result<Snapshot> {
     let users = parse_users(&output)?;
     let mut snapshot = Snapshot::default();
     for user in users {
-        let output = run_command(&[
-            "package",
-            "list",
-            "packages",
-            "-3",
-            "--user",
-            &user.to_string(),
-        ]);
+        let output =
+            run_command(&["package", "list", "packages", "-3", "--user", &user.to_string()]);
         let packages = output.and_then(|output| parse_packages(&output)).ok();
         snapshot.users.insert(user, packages);
     }
@@ -232,10 +209,7 @@ fn run_command(args: &[&str]) -> Result<String> {
         .stderr(Stdio::null())
         .spawn()?;
     let result = (|| {
-        let mut stdout = child
-            .stdout
-            .take()
-            .context("missing package manager stdout")?;
+        let mut stdout = child.stdout.take().context("missing package manager stdout")?;
         let fd = stdout.as_raw_fd();
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
         if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
@@ -264,9 +238,7 @@ fn run_command(args: &[&str]) -> Result<String> {
                     bail!("package manager query failed: {status}");
                 }
                 // Drain the final bytes emitted between the last read and exit.
-                stdout
-                    .take((MAX_BYTES - output.len() + 1) as u64)
-                    .read_to_end(&mut output)?;
+                stdout.take((MAX_BYTES - output.len() + 1) as u64).read_to_end(&mut output)?;
                 if output.len() > MAX_BYTES {
                     bail!("package manager output is too large");
                 }
@@ -339,13 +311,9 @@ mod tests {
 
     #[test]
     fn only_new_installs_are_selected_and_updates_do_not_readd() {
-        let mut state = State {
-            enabled: true,
-            users: BTreeMap::from([(0, packages(&["com.old"]))]),
-        };
-        let scan = || Snapshot {
-            users: BTreeMap::from([(0, packages(&["com.old", "com.new"]))]),
-        };
+        let mut state =
+            State { enabled: true, users: BTreeMap::from([(0, packages(&["com.old"]))]) };
+        let scan = || Snapshot { users: BTreeMap::from([(0, packages(&["com.old", "com.new"]))]) };
         assert_eq!(reconcile(&mut state, scan()), ["com.new@0"]);
         assert!(reconcile(&mut state, scan()).is_empty());
     }
@@ -356,9 +324,8 @@ mod tests {
             enabled: true,
             users: BTreeMap::from([(0, packages(&["com.old"])), (10, None)]),
         };
-        let first = Snapshot {
-            users: BTreeMap::from([(0, None), (10, packages(&["com.profile"]))]),
-        };
+        let first =
+            Snapshot { users: BTreeMap::from([(0, None), (10, packages(&["com.profile"]))]) };
         assert!(reconcile(&mut state, first).is_empty());
         assert_eq!(state.users[&0], packages(&["com.old"]));
         let second = Snapshot {
@@ -372,23 +339,14 @@ mod tests {
 
     #[test]
     fn uninstall_then_reinstall_is_a_new_install() {
-        let mut state = State {
-            enabled: true,
-            users: BTreeMap::from([(0, packages(&["com.app"]))]),
-        };
-        assert!(reconcile(
-            &mut state,
-            Snapshot {
-                users: BTreeMap::from([(0, packages(&[]))])
-            }
-        )
-        .is_empty());
+        let mut state =
+            State { enabled: true, users: BTreeMap::from([(0, packages(&["com.app"]))]) };
+        assert!(reconcile(&mut state, Snapshot { users: BTreeMap::from([(0, packages(&[]))]) })
+            .is_empty());
         assert_eq!(
             reconcile(
                 &mut state,
-                Snapshot {
-                    users: BTreeMap::from([(0, packages(&["com.app"]))])
-                }
+                Snapshot { users: BTreeMap::from([(0, packages(&["com.app"]))]) }
             ),
             ["com.app@0"]
         );
@@ -403,12 +361,7 @@ mod tests {
         assert!(parse_users("Error: service unavailable").is_err());
         assert!(parse_packages("Error: permission denied").is_err());
         assert!(parse_packages("package:com.app@0").is_err());
-        assert_eq!(
-            parse_packages("package:com.app\npackage:com.app\n")
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_eq!(parse_packages("package:com.app\npackage:com.app\n").unwrap().len(), 1);
         assert!(parse_packages("").unwrap().is_empty());
     }
 }

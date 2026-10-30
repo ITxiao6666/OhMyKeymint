@@ -77,16 +77,13 @@ fn test_encrypted_keyblob_requires_the_original_verified_boot_key() {
     };
     let original_rot_bytes = original_rot.clone().into_vec().unwrap();
     let hidden = kmr_common::tag::hidden(&[], &original_rot_bytes).unwrap();
-    let changed_rot = keyblob::RootOfTrustInfo {
-        verified_boot_key: vec![0x34; 32],
-        ..original_rot
-    };
+    let changed_rot =
+        keyblob::RootOfTrustInfo { verified_boot_key: vec![0x34; 32], ..original_rot };
     let changed_hidden = kmr_common::tag::hidden(&[], &changed_rot.into_vec().unwrap()).unwrap();
 
-    for security_level in [
-        keymint::SecurityLevel::TrustedEnvironment,
-        keymint::SecurityLevel::Strongbox,
-    ] {
+    for security_level in
+        [keymint::SecurityLevel::TrustedEnvironment, keymint::SecurityLevel::Strongbox]
+    {
         let plaintext_keyblob = keyblob::PlaintextKeyBlob {
             characteristics: vec![keymint::KeyCharacteristics {
                 security_level,
@@ -163,11 +160,7 @@ fn test_serialize_authenticated_legacy_keyblob() {
             ),
             "0000000000000000", // hmac
         ),
-        KeyBlob {
-            key_material: vec![0xbb, 0xbb],
-            hw_enforced: vec![],
-            sw_enforced: vec![],
-        },
+        KeyBlob { key_material: vec![0xbb, 0xbb], hw_enforced: vec![], sw_enforced: vec![] },
     )];
     for (hex_data, want) in tests {
         let mut data = hex::decode(hex_data).unwrap();

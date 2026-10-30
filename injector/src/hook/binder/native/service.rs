@@ -21,16 +21,8 @@ const REGISTERED_SERVICES: [(&str, &CStr, &OnceLock<RegisteredServiceTarget>); 3
         c"android.system.keystore2.IKeystoreService/default",
         &SERVICE_TARGET,
     ),
-    (
-        KEYSTORE_MAINTENANCE_INTERFACE,
-        c"android.security.maintenance",
-        &MAINTENANCE_TARGET,
-    ),
-    (
-        KEYSTORE_AUTHORIZATION_INTERFACE,
-        c"android.security.authorization",
-        &AUTHORIZATION_TARGET,
-    ),
+    (KEYSTORE_MAINTENANCE_INTERFACE, c"android.security.maintenance", &MAINTENANCE_TARGET),
+    (KEYSTORE_AUTHORIZATION_INTERFACE, c"android.security.authorization", &AUTHORIZATION_TARGET),
 ];
 
 pub(crate) fn registered_service_target(interface: &str) -> Option<LocalBinderTarget> {
@@ -59,10 +51,7 @@ pub(crate) fn start_registered_service_target_worker() -> Result<()> {
                     if let Some(ready_tx) = ready_tx.take() {
                         let _ = ready_tx.send(());
                     }
-                    if REGISTERED_SERVICES
-                        .iter()
-                        .all(|(_, _, cache)| cache.get().is_some())
-                    {
+                    if REGISTERED_SERVICES.iter().all(|(_, _, cache)| cache.get().is_some()) {
                         break;
                     }
                     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -71,10 +60,7 @@ pub(crate) fn start_registered_service_target_worker() -> Result<()> {
             .map_err(|error| error.to_string())?;
         ready_rx.recv().map_err(|error| error.to_string())
     });
-    result
-        .as_ref()
-        .map_err(|error| anyhow!(error.clone()))
-        .copied()
+    result.as_ref().map_err(|error| anyhow!(error.clone())).copied()
 }
 
 fn load_registered_service_target(
@@ -90,10 +76,7 @@ fn load_registered_service_target(
         if binder.is_null() {
             return Ok(None);
         }
-        let binder = RawBinder {
-            binder: binder as usize,
-            dec_strong: api.binder_dec_strong,
-        };
+        let binder = RawBinder { binder: binder as usize, dec_strong: api.binder_dec_strong };
         let carrier = native_binder_carrier(api, &binder)?;
         let object =
             unsafe { std::ptr::read_unaligned(carrier.as_ptr() as *const flat_binder_object) };
@@ -102,10 +85,7 @@ fn load_registered_service_target(
         }
         let target = unsafe { parse_local_binder_target_from_parcel_bytes(&carrier) }
             .ok_or_else(|| anyhow!("registered service {name:?} is not a local Binder"))?;
-        Ok(Some(RegisteredServiceTarget {
-            _binder: binder,
-            target,
-        }))
+        Ok(Some(RegisteredServiceTarget { _binder: binder, target }))
     })
 }
 

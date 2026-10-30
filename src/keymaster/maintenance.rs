@@ -30,17 +30,11 @@ pub struct MaintenanceManager;
 
 impl MaintenanceManager {
     pub fn new_native_binder() -> Result<Strong<dyn IKeystoreMaintenance>> {
-        Ok(BnKeystoreMaintenance::new_binder_with_features(
-            Self,
-            crate::consts::sid_features(),
-        ))
+        Ok(BnKeystoreMaintenance::new_binder_with_features(Self, crate::consts::sid_features()))
     }
 
     pub fn new_omk_binder() -> Result<Strong<dyn IOhMyMaintenanceService>> {
-        Ok(BnOhMyMaintenanceService::new_binder_with_features(
-            Self,
-            crate::consts::sid_features(),
-        ))
+        Ok(BnOhMyMaintenanceService::new_binder_with_features(Self, crate::consts::sid_features()))
     }
 
     fn on_user_added(&self, ctx: Option<&CallerInfo>, user_id: i32) -> Result<()> {
@@ -142,9 +136,8 @@ impl MaintenanceManager {
         match source.domain {
             Domain::SELINUX | Domain::KEY_ID | Domain::APP => (),
             _ => {
-                return Err(KsError::Rc(ResponseCode::INVALID_ARGUMENT)).context(err!(
-                    "Source domain must be one of APP, SELINUX, or KEY_ID."
-                ));
+                return Err(KsError::Rc(ResponseCode::INVALID_ARGUMENT))
+                    .context(err!("Source domain must be one of APP, SELINUX, or KEY_ID."));
             }
         };
 
@@ -196,9 +189,8 @@ impl MaintenanceManager {
                 &destination,
                 caller_uid,
                 |descriptor| {
-                    check_key_permission(KeyPerm::Rebind, descriptor, None, ctx).context(err!(
-                        "caller missing rebind permission for migration destination"
-                    ))
+                    check_key_permission(KeyPerm::Rebind, descriptor, None, ctx)
+                        .context(err!("caller missing rebind permission for migration destination"))
                 },
             )
         })
@@ -220,22 +212,14 @@ impl MaintenanceManager {
         check_forwarded_context(ctx, "getAppUidsAffectedBySid")?;
         check_manage_users_permission(ctx).context(err!("caller missing MANAGE_USERS"))?;
         let user_id = checked_user_id(user_id)?;
-        DB.with(|db| {
-            db.borrow_mut()
-                .get_app_uids_affected_by_sid(user_id, SecureUserId(sid))
-        })
-        .map(|uids| uids.into_iter().map(|uid| uid.0).collect())
-        .context(err!("querying app UIDs affected by SID"))
+        DB.with(|db| db.borrow_mut().get_app_uids_affected_by_sid(user_id, SecureUserId(sid)))
+            .map(|uids| uids.into_iter().map(|uid| uid.0).collect())
+            .context(err!("querying app UIDs affected by SID"))
     }
 
     fn remove_user_state(&self, user_id: AndroidUserId) -> Result<()> {
-        DB.with(|db| {
-            SUPER_KEY
-                .write()
-                .unwrap()
-                .remove_user(&mut db.borrow_mut(), user_id)
-        })
-        .context(err!("removing user {user_id:?} keys"))
+        DB.with(|db| SUPER_KEY.write().unwrap().remove_user(&mut db.borrow_mut(), user_id))
+            .context(err!("removing user {user_id:?} keys"))
     }
 }
 
@@ -289,7 +273,7 @@ pub(crate) fn replay_early_boot_ended() -> Result<()> {
 
 fn call_keymint_wrappers<F>(label: &'static str, mut call: F) -> Result<()>
 where
-    F: FnMut(&KeyMintWrapper) -> rsbinder::status::Result<()>,
+    F: FnMut(&KeyMintWrapper) -> rsbinder::BinderResult<()>,
 {
     let tee = get_keymint_wrapper(SecurityLevel::TRUSTED_ENVIRONMENT)
         .context(err!("opening mandatory TEE KeyMint for {label}"))?;
@@ -318,10 +302,9 @@ impl Interface for MaintenanceManager {}
 
 #[allow(non_snake_case)]
 impl IKeystoreMaintenance for MaintenanceManager {
-    fn onUserAdded(&self, user_id: i32) -> rsbinder::status::Result<()> {
+    fn onUserAdded(&self, user_id: i32) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IKeystoreMaintenance::onUserAdded");
-        self.on_user_added(None, user_id)
-            .map_err(into_logged_binder)
+        self.on_user_added(None, user_id).map_err(into_logged_binder)
     }
 
     fn initUserSuperKeys(
@@ -329,31 +312,28 @@ impl IKeystoreMaintenance for MaintenanceManager {
         user_id: i32,
         password: &[u8],
         allow_existing: bool,
-    ) -> rsbinder::status::Result<()> {
+    ) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IKeystoreMaintenance::initUserSuperKeys");
         self.init_user_super_keys(None, user_id, password, allow_existing)
             .map_err(into_logged_binder)
     }
 
-    fn onUserRemoved(&self, user_id: i32) -> rsbinder::status::Result<()> {
+    fn onUserRemoved(&self, user_id: i32) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IKeystoreMaintenance::onUserRemoved");
-        self.on_user_removed(None, user_id)
-            .map_err(into_logged_binder)
+        self.on_user_removed(None, user_id).map_err(into_logged_binder)
     }
 
-    fn onUserLskfRemoved(&self, user_id: i32) -> rsbinder::status::Result<()> {
+    fn onUserLskfRemoved(&self, user_id: i32) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IKeystoreMaintenance::onUserLskfRemoved");
-        self.on_user_lskf_removed(None, user_id)
-            .map_err(into_logged_binder)
+        self.on_user_lskf_removed(None, user_id).map_err(into_logged_binder)
     }
 
-    fn clearNamespace(&self, domain: Domain, nspace: i64) -> rsbinder::status::Result<()> {
+    fn clearNamespace(&self, domain: Domain, nspace: i64) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IKeystoreMaintenance::clearNamespace");
-        self.clear_namespace(None, domain, nspace)
-            .map_err(into_logged_binder)
+        self.clear_namespace(None, domain, nspace).map_err(into_logged_binder)
     }
 
-    fn earlyBootEnded(&self) -> rsbinder::status::Result<()> {
+    fn earlyBootEnded(&self) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IKeystoreMaintenance::earlyBootEnded");
         self.early_boot_ended(None).map_err(into_logged_binder)
     }
@@ -362,36 +342,27 @@ impl IKeystoreMaintenance for MaintenanceManager {
         &self,
         source: &KeyDescriptor,
         destination: &KeyDescriptor,
-    ) -> rsbinder::status::Result<()> {
+    ) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IKeystoreMaintenance::migrateKeyNamespace");
-        self.migrate_key_namespace(None, source, destination)
-            .map_err(into_logged_binder)
+        self.migrate_key_namespace(None, source, destination).map_err(into_logged_binder)
     }
 
-    fn deleteAllKeys(&self) -> rsbinder::status::Result<()> {
+    fn deleteAllKeys(&self) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IKeystoreMaintenance::deleteAllKeys");
         self.delete_all_keys(None).map_err(into_logged_binder)
     }
 
-    fn getAppUidsAffectedBySid(
-        &self,
-        user_id: i32,
-        sid: i64,
-    ) -> rsbinder::status::Result<Vec<i64>> {
+    fn getAppUidsAffectedBySid(&self, user_id: i32, sid: i64) -> rsbinder::BinderResult<Vec<i64>> {
         let _wp = wd::watch("IKeystoreMaintenance::getAppUidsAffectedBySid");
-        self.get_app_uids_affected_by_sid(None, user_id, sid)
-            .map_err(into_logged_binder)
+        self.get_app_uids_affected_by_sid(None, user_id, sid).map_err(into_logged_binder)
     }
 }
 
 #[allow(non_snake_case)]
 impl IOhMyMaintenanceService for MaintenanceManager {
-    fn onUserAdded(&self, ctx: Option<&CallerInfo>, user_id: i32) -> rsbinder::status::Result<()> {
+    fn onUserAdded(&self, ctx: Option<&CallerInfo>, user_id: i32) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IOhMyMaintenanceService::onUserAdded");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::onUserAdded",
-        )?);
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::onUserAdded")?);
         self.on_user_added(ctx, user_id).map_err(into_logged_binder)
     }
 
@@ -401,42 +372,27 @@ impl IOhMyMaintenanceService for MaintenanceManager {
         user_id: i32,
         password: &[u8],
         allow_existing: bool,
-    ) -> rsbinder::status::Result<()> {
+    ) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IOhMyMaintenanceService::initUserSuperKeys");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::initUserSuperKeys",
-        )?);
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::initUserSuperKeys")?);
         self.init_user_super_keys(ctx, user_id, password, allow_existing)
             .map_err(into_logged_binder)
     }
 
-    fn onUserRemoved(
-        &self,
-        ctx: Option<&CallerInfo>,
-        user_id: i32,
-    ) -> rsbinder::status::Result<()> {
+    fn onUserRemoved(&self, ctx: Option<&CallerInfo>, user_id: i32) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IOhMyMaintenanceService::onUserRemoved");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::onUserRemoved",
-        )?);
-        self.on_user_removed(ctx, user_id)
-            .map_err(into_logged_binder)
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::onUserRemoved")?);
+        self.on_user_removed(ctx, user_id).map_err(into_logged_binder)
     }
 
     fn onUserLskfRemoved(
         &self,
         ctx: Option<&CallerInfo>,
         user_id: i32,
-    ) -> rsbinder::status::Result<()> {
+    ) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IOhMyMaintenanceService::onUserLskfRemoved");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::onUserLskfRemoved",
-        )?);
-        self.on_user_lskf_removed(ctx, user_id)
-            .map_err(into_logged_binder)
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::onUserLskfRemoved")?);
+        self.on_user_lskf_removed(ctx, user_id).map_err(into_logged_binder)
     }
 
     fn clearNamespace(
@@ -444,22 +400,15 @@ impl IOhMyMaintenanceService for MaintenanceManager {
         ctx: Option<&CallerInfo>,
         domain: Domain,
         nspace: i64,
-    ) -> rsbinder::status::Result<()> {
+    ) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IOhMyMaintenanceService::clearNamespace");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::clearNamespace",
-        )?);
-        self.clear_namespace(ctx, domain, nspace)
-            .map_err(into_logged_binder)
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::clearNamespace")?);
+        self.clear_namespace(ctx, domain, nspace).map_err(into_logged_binder)
     }
 
-    fn earlyBootEnded(&self, ctx: Option<&CallerInfo>) -> rsbinder::status::Result<()> {
+    fn earlyBootEnded(&self, ctx: Option<&CallerInfo>) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IOhMyMaintenanceService::earlyBootEnded");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::earlyBootEnded",
-        )?);
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::earlyBootEnded")?);
         self.early_boot_ended(ctx).map_err(into_logged_binder)
     }
 
@@ -468,22 +417,15 @@ impl IOhMyMaintenanceService for MaintenanceManager {
         ctx: Option<&CallerInfo>,
         source: &KeyDescriptor,
         destination: &KeyDescriptor,
-    ) -> rsbinder::status::Result<()> {
+    ) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IOhMyMaintenanceService::migrateKeyNamespace");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::migrateKeyNamespace",
-        )?);
-        self.migrate_key_namespace(ctx, source, destination)
-            .map_err(into_logged_binder)
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::migrateKeyNamespace")?);
+        self.migrate_key_namespace(ctx, source, destination).map_err(into_logged_binder)
     }
 
-    fn deleteAllKeys(&self, ctx: Option<&CallerInfo>) -> rsbinder::status::Result<()> {
+    fn deleteAllKeys(&self, ctx: Option<&CallerInfo>) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IOhMyMaintenanceService::deleteAllKeys");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::deleteAllKeys",
-        )?);
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::deleteAllKeys")?);
         self.delete_all_keys(ctx).map_err(into_logged_binder)
     }
 
@@ -492,14 +434,10 @@ impl IOhMyMaintenanceService for MaintenanceManager {
         ctx: Option<&CallerInfo>,
         user_id: i32,
         sid: i64,
-    ) -> rsbinder::status::Result<Vec<i64>> {
+    ) -> rsbinder::BinderResult<Vec<i64>> {
         let _wp = wd::watch("IOhMyMaintenanceService::getAppUidsAffectedBySid");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::getAppUidsAffectedBySid",
-        )?);
-        self.get_app_uids_affected_by_sid(ctx, user_id, sid)
-            .map_err(into_logged_binder)
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::getAppUidsAffectedBySid")?);
+        self.get_app_uids_affected_by_sid(ctx, user_id, sid).map_err(into_logged_binder)
     }
 
     fn onUserPasswordChanged(
@@ -507,13 +445,9 @@ impl IOhMyMaintenanceService for MaintenanceManager {
         ctx: Option<&CallerInfo>,
         user_id: i32,
         password: Option<&[u8]>,
-    ) -> rsbinder::status::Result<()> {
+    ) -> rsbinder::BinderResult<()> {
         let _wp = wd::watch("IOhMyMaintenanceService::onUserPasswordChanged");
-        let ctx = Some(require_omk_ctx(
-            ctx,
-            "IOhMyMaintenanceService::onUserPasswordChanged",
-        )?);
-        self.on_user_password_changed(ctx, user_id, password)
-            .map_err(into_logged_binder)
+        let ctx = Some(require_omk_ctx(ctx, "IOhMyMaintenanceService::onUserPasswordChanged")?);
+        self.on_user_password_changed(ctx, user_id, password).map_err(into_logged_binder)
     }
 }

@@ -9,30 +9,12 @@ pub struct AppUid(pub i64);
 /// by invoking the system call since Rust does not support getting monotonic time instance
 /// as an integer.
 pub fn get_current_time_in_milliseconds() -> i64 {
-    let mut current_time = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
+    let mut current_time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: The pointer is valid because it comes from a reference, and clock_gettime doesn't
     // retain it beyond the call.
     unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut current_time) };
     current_time.tv_sec * 1000 + (current_time.tv_nsec / 1_000_000)
 }
-
-pub trait ParcelExt {
-    fn data(&self) -> &[u8];
-}
-
-impl ParcelExt for rsbinder::Parcel {
-    fn data(&self) -> &[u8] {
-        unsafe {
-            let data = self.as_ptr();
-            let parcel_size = self.data_size();
-            std::slice::from_raw_parts(data, parcel_size)
-        }
-    }
-}
-
 pub(crate) fn refresh_soter_host() -> Result<()> {
     stop_processes_matching(|name| name == b"com.tencent.soter.soterserver")
         .context("Soter settings were saved, but SoterServer could not be refreshed; restart the service before using the new mode")
@@ -76,20 +58,14 @@ fn stop_processes_in(
         if let Err(error) = stop(pid) {
             // A matching process can exit between the /proc scan and kill.
             if error.raw_os_error() != Some(libc::ESRCH) {
-                failures.push(format!(
-                    "{} (pid {pid}): {error}",
-                    String::from_utf8_lossy(name)
-                ));
+                failures.push(format!("{} (pid {pid}): {error}", String::from_utf8_lossy(name)));
             }
         }
     }
     if failures.is_empty() {
         Ok(())
     } else {
-        bail!(
-            "failed to stop matching process(es): {}",
-            failures.join("; ")
-        );
+        bail!("failed to stop matching process(es): {}", failures.join("; "));
     }
 }
 

@@ -39,9 +39,9 @@ not identical:
 
 - A valid `injector.toml` is applied to new requests without a reboot.
 - A valid `config.toml` is read automatically. The four patch-level fields,
-  biometric compatibility switch, and three TA delay ranges can take full
-  effect without restarting keymint. The field reference below states when a
-  restart is required.
+  biometric compatibility switch, keybox-retirement switch, and three TA delay
+  ranges can take full effect without restarting keymint. The field reference
+  below states when a restart is required.
 - A malformed file saved while its component is running is rejected and the
   last valid in-memory configuration remains active.
 - A malformed `config.toml` present when keymint starts prevents keymint from
@@ -736,7 +736,10 @@ not a device key or a secret. Its matching public key is derived from that
 fixture. The fixed test CPU ID is the 16-byte ASCII value `OMK-SOFT-TEST-01`,
 represented as `4f4d4b2d534f46542d544553542d3031` in exported JSON. Key exports
 use the shared length-prefixed JSON codec and an RSA-PSS/SHA-256 signature with
-a 20-byte salt. Signatures are generated over each exported JSON body, including
+a 20-byte salt and SHA-256 MGF1, using BoringSSL through its Rust interface.
+The software TA generates RSA-2048 keys with exponent 65537 and stores unencrypted
+PKCS#8 private PEM and SPKI public PEM; loading preserves the existing key identity.
+Signatures are generated over each exported JSON body, including
 the requested UID, a positive monotonically increasing per-UID counter, and
 the auth-key alias where applicable. Exports identify this implementation with
 `software_test: true` and `key_source: "public_test_fixture"`.
@@ -808,12 +811,12 @@ The values under `[crypto]` below are deliberately non-working redaction
 placeholders. A real active file contains unique generated hexadecimal values.
 Never paste the placeholder values into a device and never replace the values
 already present in a working file. The `[trust]` and `[device]` values are also
-examples; keep the values from the active file unless you intend to change the
-reported identity.
+examples; keep the values from the active file unless the reported identity
+needs to change.
 
 ```toml
-# Configuration format. Keep this at 2.
-version = 2
+# Configuration format. Keep this at 3.
+version = 3
 
 [main]
 # The supported service connection. Keep this value unchanged.
@@ -827,6 +830,8 @@ force_skip_system_biometric_hat_verification = false
 ta_operation_delay_ms = [9, 21]
 ta_generation_delay_ms = [6, 16]
 ta_control_delay_ms = [1, 4]
+# Retire dedicated ATTEST_KEY entries bound to a previous keybox identity.
+retire_stale_keybox_bound_keys = true
 
 [crypto]
 # Redacted placeholders only. Keep the generated 64-character values.
@@ -873,18 +878,9 @@ imei2 = ""
 #### `version`
 
 This identifies the configuration format. The supported value is the integer
-`2`. It is not an Android version or an OMK release number. Do not increment it;
+`3`. It is not an Android version or an OMK release number. Do not increment it;
 the current file should keep this value unchanged. Live reload rejects other
 values and keeps the last valid runtime configuration.
-
-At keymint startup, a missing `version` is treated as `0`. Versions `0` and `1`
-are migrated in place to `2` before the service starts, and `os_version` is set
-to `"auto"` so later Android upgrades are detected on the next keymint start.
-Startup also removes the obsolete `trust_record`. For version `0`, missing
-patch-level fields inherit the configured `security_patch`. Other configured
-and unknown values are preserved. Migration is not performed during live
-reload, so restart keymint to migrate an older file. An unsupported future
-version is never overwritten.
 
 ### `[main]`
 
@@ -974,6 +970,19 @@ adds a 12 ms wait before the RPC and a separately sampled 9-21 ms wait before
 the TA `begin` call. Set both injector delays to `0` if only the TA ranges are
 wanted. Changing software timing does not provide hardware security, constrain
 total calls to a hardware timing interval, or guarantee a detector result.
+
+#### `retire_stale_keybox_bound_keys`
+
+When `true`, changing the active `keybox.xml` retires dedicated `ATTEST_KEY`
+entries bound to the previous keybox identity. The default is `true`. Ordinary
+application signing keys, including passkey credentials, are retained.
+
+Set it to `false` only when dedicated attestation keys must remain stored across
+keybox changes. This does not replace their existing certificate identity with
+the new keybox identity.
+
+The value is read when keybox-bound retirement runs, so a saved change applies
+to the next keybox reload or keymint restart.
 
 ### `[crypto]`
 
@@ -1192,20 +1201,26 @@ changing any of them can make existing keys unreadable. `"random"` changes the
 key on every startup and is unsuitable for retaining such keys. Pinning a
 current value does not recover blobs created with a different, unknown value.
 
+When the first automatic resolution must generate a random fallback, OMK also
+pins that generated value in `config.toml` as an exact hexadecimal value. The
+public snapshot remains available if the setting is later returned to `"auto"`.
+
 #### `vb_hash`
 
 This controls the 32-byte verified-boot hash:
 
 - `"auto"` first reads `ro.boot.vbmeta.digest`, then tries the original System
-  attestation hash, and uses a random fallback only if neither source is
-  available;
+  attestation hash, and if neither source is available, generates a value, saves
+  it to `config.toml` as an exact hex value, and reuses that value on later
+  keymint starts;
 - `"random"` generates a new value whenever keymint starts; or
 - a 64-character hexadecimal string pins an exact value.
 
 Restart keymint after a normal change, and reboot the whole device when
 returning from `"random"` to `"auto"`. This field is not stored in the public-key
-snapshot: auto mode resolves the current hash on each startup. It is included
-in attestation but not in the Root of Trust input used for KeyBlob encryption.
+snapshot: automatic source discovery runs at startup until a fallback is pinned
+as an exact value in `config.toml`. It is included in attestation but not in the
+Root of Trust input used for KeyBlob encryption.
 
 #### `verified_boot_state`
 
@@ -1424,11 +1439,9 @@ rejects one of the packages in the group. Adding or removing a package does not
 move or convert keys between System and OMK; an app may lose access to keys it
 created through the other route.
 
-There is one narrow granted-key exception. An app outside `scoop`, or one whose
-package name cannot be resolved, can still use a key-access grant that OMK
-confirms belongs to an OMK key. This keeps a key deliberately shared by another
-app usable without giving the receiving app general OMK access. Android-blocked
-and deny-listed callers do not receive this exception.
+Key descriptors, including `KEY_ID` and `GRANT`, do not change the selected
+backend. A caller must pass the filter and enable the relevant intercept route
+to use OMK, including when using a key shared by another app.
 
 ### `[main]`
 
@@ -1516,10 +1529,6 @@ With the filter enabled, OMK evaluates a caller in this order:
 This order matters for packages that share an Android identity: a deny rule
 wins over a matching entry in `scoop`.
 
-After this normal filter decision, the narrow OMK-owned grant exception
-described under `scoop` can preserve access for an unknown or out-of-scope app.
-It does not override the Android-package block or `deny_packages`.
-
 #### `enabled`
 
 `true` enforces `scoop`, the deny list, the Android-package block, and the
@@ -1593,9 +1602,11 @@ ownership is queried and checked for each unresolved isolated caller request.
 This attribution has no key-descriptor or backend-origin dependency and does
 not override deny lists or per-method interception settings.
 
-The OMK-owned grant exception is separate from ordinary package routing. A
-request carrying a confirmed OMK grant may return to OMK even when the
-receiving app is outside `scoop`, so the granted key remains usable.
+An operation selected for OMK returns its OMK business result or an
+AOSP-compatible error. A confirmed missing, disconnected, or dead OMK backend
+may preserve an available original System reply. Other transport, parcel, or
+injector failures do not fall back to a successful System result. There are no
+request retries; a later independent request may establish a new connection.
 
 Keep all switches `true` for normal use. Mixing System and OMK operations for
 the same app can cause missing-key errors, inconsistent lists, or failed
@@ -1670,8 +1681,8 @@ not add them; use `scoop`, `[filter]`, and `[intercept]` instead.
 
 Every valid documented field change is loaded for new requests without a
 device reboot. For `scoop`, `[main].enabled`, `[filter]`, or `[intercept]`
-changes, restart the injector and reopen the affected app when you need a clean
-boundary after a route change. A syntax error, an unknown field, or an
+changes, restart the injector and reopen the affected app when a clean boundary
+is needed after a route change. A syntax error, an unknown field, or an
 unsupported future `version` leaves the last valid runtime configuration
 active; if present at injector startup, it leaves OMK request routing disabled
 until the file is corrected.

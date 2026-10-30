@@ -30,9 +30,7 @@ pub(super) fn validate_keys_to_sign(keys_to_sign: &[Value]) -> Result<()> {
 
         let algorithm = required_int(entries, 3, &label)?;
         if algorithm != ALG_ES256 {
-            return Err(anyhow!(
-                "{label} algorithm must be {ALG_ES256}, got {algorithm}"
-            ));
+            return Err(anyhow!("{label} algorithm must be {ALG_ES256}, got {algorithm}"));
         }
 
         let curve = required_int(entries, -1, &label)?;

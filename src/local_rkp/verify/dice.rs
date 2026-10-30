@@ -31,9 +31,7 @@ const DICE_SECURITY_VERSION: i128 = -70_005;
 const DICE_MODE: i128 = -4_670_551;
 
 pub(super) fn extract_uds_key(dice_chain: &[Value]) -> Result<CosePublicKeyInfo> {
-    let uds_key = dice_chain
-        .first()
-        .ok_or_else(|| anyhow!("DICE chain is empty"))?;
+    let uds_key = dice_chain.first().ok_or_else(|| anyhow!("DICE chain is empty"))?;
     parse_cose_public_key(as_map(uds_key, "UDS COSE key")?, "UDS COSE key")
 }
 
@@ -92,9 +90,7 @@ pub(super) fn validate_uds_certs(value: &Value) -> Result<()> {
         for (index, cert) in certs.iter().enumerate() {
             let cert = as_bytes(cert, &format!("UDS cert `{signer_name}` entry {index}"))?;
             if cert.is_empty() {
-                return Err(anyhow!(
-                    "UDS cert `{signer_name}` entry {index} must not be empty"
-                ));
+                return Err(anyhow!("UDS cert `{signer_name}` entry {index} must not be empty"));
             }
         }
     }
@@ -134,9 +130,7 @@ fn parse_dice_entry_payload(value: &Value, label: &str) -> Result<(CosePublicKey
     for (field, field_label) in OPTIONAL_DICE_BYTE_FIELDS {
         if let Some(value) = map_get(payload_entries, field) {
             if as_bytes(value, &format!("{label} {field_label}"))?.is_empty() {
-                return Err(anyhow!(
-                    "{label} {field_label} must not be empty when present"
-                ));
+                return Err(anyhow!("{label} {field_label} must not be empty when present"));
             }
         }
     }
@@ -159,12 +153,8 @@ fn parse_dice_entry_payload(value: &Value, label: &str) -> Result<(CosePublicKey
         }
     }
 
-    let subject_key_bytes = required_int_bytes(
-        payload_entries,
-        DICE_SUBJECT_PUB_KEY,
-        label,
-        "subject public key",
-    )?;
+    let subject_key_bytes =
+        required_int_bytes(payload_entries, DICE_SUBJECT_PUB_KEY, label, "subject public key")?;
     let subject_key = decode(subject_key_bytes)?;
     parse_cose_public_key(
         as_map(&subject_key, "DICE chain subject COSE key")?,

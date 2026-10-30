@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 jni = "0.21"
 libc = { version = "0.2", default-features = false }
-pif-common = { path = "../pif-common", features = ["soter-crypto"] }
-rsa = "0.9"
+pif-common = { path = "../pif-common", version = "0.1.0", features = ["soter-crypto"] }
+openssl = { version = "0.10.81", features = ["unstable_boringssl", "bindgen"] }
 serde_json = "1.0.151"
-zygisk-api = { path = "../third_party/zygisk-api" }
+zygisk-api = { path = "../third_party/zygisk-api", version = "0.0.2" }

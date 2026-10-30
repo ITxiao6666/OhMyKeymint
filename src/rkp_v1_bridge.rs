@@ -81,9 +81,8 @@ fn validate_request(bytes: &[u8]) -> Result<()> {
     let mut offset = 0usize;
     let mut lengths = [0usize; 4];
     for length in &mut lengths {
-        let header_end = offset
-            .checked_add(4)
-            .ok_or_else(|| anyhow!("invalid RKP V1 request length"))?;
+        let header_end =
+            offset.checked_add(4).ok_or_else(|| anyhow!("invalid RKP V1 request length"))?;
         let header = bytes
             .get(offset..header_end)
             .ok_or_else(|| anyhow!("truncated RKP V1 request header"))?;
@@ -153,8 +152,7 @@ pub(crate) fn write_private_file(path: &Path, bytes: &[u8], mode: u32) -> Result
         .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
         .open(path)
         .with_context(|| format!("create temporary RKP V1 file {}", path.display()))?;
-    file.write_all(bytes)
-        .with_context(|| format!("write temporary RKP V1 file {}", path.display()))
+    file.write_all(bytes).with_context(|| format!("write temporary RKP V1 file {}", path.display()))
 }
 
 #[cfg(all(target_os = "android", target_arch = "aarch64"))]
@@ -188,10 +186,7 @@ pub(crate) fn wait_bounded(child: &mut Child) -> Result<std::process::ExitStatus
         if started.elapsed() >= TIMEOUT {
             let _ = child.kill();
             let _ = child.wait();
-            bail!(
-                "Android RKP V1 bridge timed out after {} seconds",
-                TIMEOUT.as_secs()
-            );
+            bail!("Android RKP V1 bridge timed out after {} seconds", TIMEOUT.as_secs());
         }
         thread::sleep(POLL_INTERVAL);
     }
@@ -209,9 +204,7 @@ pub(crate) fn read_bounded_reply(path: &Path) -> Result<Vec<u8>> {
         bail!("Android RKP V1 reply must be a regular file under its size limit");
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(MAX_REPLY as u64 + 1)
-        .read_to_end(&mut bytes)
-        .context("read Android RKP V1 reply")?;
+    file.take(MAX_REPLY as u64 + 1).read_to_end(&mut bytes).context("read Android RKP V1 reply")?;
     if bytes.len() > MAX_REPLY {
         bail!("Android RKP V1 reply exceeded its size limit while reading");
     }
@@ -288,10 +281,7 @@ impl ExchangeDir {
         // SAFETY: mkdtemp returned a pointer into the still-live NUL-terminated buffer.
         let path_bytes = unsafe { CStr::from_ptr(created) }.to_bytes().to_vec();
         let path = PathBuf::from(OsString::from_vec(path_bytes));
-        let mut exchange = Self {
-            path,
-            cleaned: false,
-        };
+        let mut exchange = Self { path, cleaned: false };
         let setup = (|| -> Result<()> {
             let metadata = fs::symlink_metadata(&exchange.path)?;
             if !metadata.is_dir() || metadata.uid() != 0 {
@@ -353,10 +343,7 @@ mod tests {
     fn rejects_truncated_oversized_and_trailing_request_data() {
         for invalid in [
             vec![0, 0, 0],
-            request([b"challenge", b"maced", b"p256", b""])
-                .into_iter()
-                .chain([0])
-                .collect(),
+            request([b"challenge", b"maced", b"p256", b""]).into_iter().chain([0]).collect(),
             request([b"challenge", b"", b"p256", b""]),
             request([b"", b"maced", b"p256", b""]),
         ] {

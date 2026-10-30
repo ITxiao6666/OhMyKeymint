@@ -61,10 +61,7 @@ fn lookup_level_zero_km_and_strategy() -> Result<Option<(SecurityLevel, DenyLate
     let property_val = if let Ok(p) = property_val {
         p
     } else {
-        info!(
-            "{} not set, inferring from installed KM instances",
-            PROPERTY_NAME
-        );
+        info!("{} not set, inferring from installed KM instances", PROPERTY_NAME);
         return Ok(None);
     };
     let (level, strategy) = if let Some(c) = property_val.split_once(':') {
@@ -85,10 +82,7 @@ fn lookup_level_zero_km_and_strategy() -> Result<Option<(SecurityLevel, DenyLate
         "EARLY_BOOT_ONLY" => DenyLaterStrategy::EarlyBootOnly,
         "MAX_USES_PER_BOOT" => DenyLaterStrategy::MaxUsesPerBoot,
         _ => {
-            error!(
-                "Unknown DenyLaterStrategy in {}: {:?}",
-                PROPERTY_NAME, strategy
-            );
+            error!("Unknown DenyLaterStrategy in {}: {:?}", PROPERTY_NAME, strategy);
             return Ok(None);
         }
     };
@@ -104,10 +98,7 @@ fn get_level_zero_key_km_and_strategy() -> Result<(KeyMintDevice, DenyLaterStrat
         let tee = KeyMintDevice::get(SecurityLevel::TRUSTED_ENVIRONMENT)
             .context(err!("Get TEE instance failed."))?;
         if tee.version() >= KeyMintDevice::KEY_MASTER_V4_1 {
-            Ok((
-                SecurityLevel::TRUSTED_ENVIRONMENT,
-                DenyLaterStrategy::EarlyBootOnly,
-            ))
+            Ok((SecurityLevel::TRUSTED_ENVIRONMENT, DenyLaterStrategy::EarlyBootOnly))
         } else {
             match KeyMintDevice::get_or_none(SecurityLevel::STRONGBOX)
                 .context(err!("Get Strongbox instance failed."))?
@@ -115,18 +106,12 @@ fn get_level_zero_key_km_and_strategy() -> Result<(KeyMintDevice, DenyLaterStrat
                 Some(strongbox) if strongbox.version() >= KeyMintDevice::KEY_MASTER_V4_1 => {
                     Ok((SecurityLevel::STRONGBOX, DenyLaterStrategy::EarlyBootOnly))
                 }
-                _ => Ok((
-                    SecurityLevel::TRUSTED_ENVIRONMENT,
-                    DenyLaterStrategy::MaxUsesPerBoot,
-                )),
+                _ => Ok((SecurityLevel::TRUSTED_ENVIRONMENT, DenyLaterStrategy::MaxUsesPerBoot)),
             }
         }
     })?;
 
-    Ok((
-        KeyMintDevice::get(level).context(err!("Get KM instance failed."))?,
-        strategy,
-    ))
+    Ok((KeyMintDevice::get(level).context(err!("Get KM instance failed."))?, strategy))
 }
 
 /// This is not thread safe; caller must hold a lock before calling.
@@ -174,10 +159,7 @@ pub fn get_level_zero_key(db: &mut KeymasterDb) -> Result<ZVec> {
                         return false;
                     }
                     if !kc.authorizations.iter().any(|a| a == &required_param) {
-                        error!(
-                            "In get_level_zero_key: required param absent {:?}",
-                            required_param
-                        );
+                        error!("In get_level_zero_key: required param absent {:?}", required_param);
                         return false;
                     }
                     true
@@ -231,10 +213,7 @@ impl BootLevelKeyCache {
     pub fn new(level_zero_key: ZVec) -> Self {
         let mut cache: VecDeque<ZVec> = VecDeque::new();
         cache.push_back(level_zero_key);
-        Self {
-            current: BootLevel(0),
-            cache,
-        }
+        Self { current: BootLevel(0), cache }
     }
 
     /// Report whether the key for the given level can be inferred.
@@ -283,8 +262,7 @@ impl BootLevelKeyCache {
 
         // We `get` the new boot level for the side effect of advancing the cache to a point
         // where the new boot level is present.
-        self.get_hkdf_key(new_boot_level)
-            .context(err!("Advancing cache"))?;
+        self.get_hkdf_key(new_boot_level).context(err!("Advancing cache"))?;
 
         // Then we split the queue at the index of the new boot level and discard the front,
         // keeping only the keys with the current boot level or higher.
@@ -323,8 +301,66 @@ impl BootLevelKeyCache {
     }
 }
 
+/// Boot-level keys produced by the accidental KDF used by older OMK builds.
+pub(crate) struct LegacyBootLevelKeyCache {
+    current: BootLevel,
+    cache: VecDeque<ZVec>,
+}
+
+impl LegacyBootLevelKeyCache {
+    pub(crate) fn new(level_zero_key: ZVec) -> Self {
+        let mut cache = VecDeque::new();
+        cache.push_back(level_zero_key);
+        Self { current: BootLevel(0), cache }
+    }
+
+    fn level_accessible(&self, boot_level: BootLevel) -> bool {
+        boot_level >= self.current && !self.cache.is_empty()
+    }
+
+    fn get_hkdf_key(&mut self, boot_level: BootLevel) -> Result<Option<&ZVec>> {
+        if !self.level_accessible(boot_level) {
+            return Ok(None);
+        }
+        let first_not_cached = self.current.0 + self.cache.len();
+        for _level in first_not_cached..=boot_level.0 {
+            let highest_key = self.cache.back().unwrap();
+            let next_key = omk_legacy_kdf_expand(
+                BootLevelKeyCache::HKDF_KEY_SIZE,
+                highest_key,
+                BootLevelKeyCache::HKDF_ADVANCE,
+            )
+            .context(err!("Advancing legacy key one step"))?;
+            self.cache.push_back(next_key);
+        }
+        Ok(Some(self.cache.get(boot_level.0 - self.current.0).unwrap()))
+    }
+
+    pub(crate) fn advance_boot_level(&mut self, new_boot_level: BootLevel) -> Result<()> {
+        if !self.level_accessible(new_boot_level) {
+            return Ok(());
+        }
+        self.get_hkdf_key(new_boot_level).context(err!("Advancing legacy cache"))?;
+        self.cache = self.cache.split_off(new_boot_level.0 - self.current.0);
+        self.current = new_boot_level;
+        Ok(())
+    }
+
+    pub(crate) fn finish(&mut self) {
+        self.cache.clear();
+    }
+
+    pub(crate) fn aes_key(&mut self, boot_level: BootLevel) -> Result<Option<ZVec>> {
+        self.get_hkdf_key(boot_level)
+            .context(err!("Looking up legacy KDF key"))?
+            .map(|key| omk_legacy_kdf_expand(AES_256_KEY_LENGTH, key, BootLevelKeyCache::HKDF_AES))
+            .transpose()
+            .context(err!("Calling legacy KDF expand"))
+    }
+}
+
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]
@@ -369,73 +405,6 @@ mod test {
         assert_eq!(None, blkc.aes_key(BootLevel(10))?);
         Ok(())
     }
-}
-
-/// Boot-level keys produced by the accidental KDF used by older OMK builds.
-pub(crate) struct LegacyBootLevelKeyCache {
-    current: BootLevel,
-    cache: VecDeque<ZVec>,
-}
-
-impl LegacyBootLevelKeyCache {
-    pub(crate) fn new(level_zero_key: ZVec) -> Self {
-        let mut cache = VecDeque::new();
-        cache.push_back(level_zero_key);
-        Self {
-            current: BootLevel(0),
-            cache,
-        }
-    }
-
-    fn level_accessible(&self, boot_level: BootLevel) -> bool {
-        boot_level >= self.current && !self.cache.is_empty()
-    }
-
-    fn get_hkdf_key(&mut self, boot_level: BootLevel) -> Result<Option<&ZVec>> {
-        if !self.level_accessible(boot_level) {
-            return Ok(None);
-        }
-        let first_not_cached = self.current.0 + self.cache.len();
-        for _level in first_not_cached..=boot_level.0 {
-            let highest_key = self.cache.back().unwrap();
-            let next_key = omk_legacy_kdf_expand(
-                BootLevelKeyCache::HKDF_KEY_SIZE,
-                highest_key,
-                BootLevelKeyCache::HKDF_ADVANCE,
-            )
-            .context(err!("Advancing legacy key one step"))?;
-            self.cache.push_back(next_key);
-        }
-        Ok(Some(self.cache.get(boot_level.0 - self.current.0).unwrap()))
-    }
-
-    pub(crate) fn advance_boot_level(&mut self, new_boot_level: BootLevel) -> Result<()> {
-        if !self.level_accessible(new_boot_level) {
-            return Ok(());
-        }
-        self.get_hkdf_key(new_boot_level)
-            .context(err!("Advancing legacy cache"))?;
-        self.cache = self.cache.split_off(new_boot_level.0 - self.current.0);
-        self.current = new_boot_level;
-        Ok(())
-    }
-
-    pub(crate) fn finish(&mut self) {
-        self.cache.clear();
-    }
-
-    pub(crate) fn aes_key(&mut self, boot_level: BootLevel) -> Result<Option<ZVec>> {
-        self.get_hkdf_key(boot_level)
-            .context(err!("Looking up legacy KDF key"))?
-            .map(|key| omk_legacy_kdf_expand(AES_256_KEY_LENGTH, key, BootLevelKeyCache::HKDF_AES))
-            .transpose()
-            .context(err!("Calling legacy KDF expand"))
-    }
-}
-
-#[cfg(test)]
-mod omk_test {
-    use super::*;
 
     #[test]
     fn legacy_cache_is_independent() -> Result<()> {

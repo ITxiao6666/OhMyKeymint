@@ -11,20 +11,14 @@ fn registered(counter: &Arc<()>) -> RegisteredServiceTarget {
             binder: Arc::into_raw(counter.clone()) as usize,
             dec_strong: release_test_binder,
         },
-        target: LocalBinderTarget {
-            ptr: 0x4100,
-            cookie: 0x4200,
-        },
+        target: LocalBinderTarget { ptr: 0x4100, cookie: 0x4200 },
     }
 }
 
 #[test]
 fn missing_and_failed_service_identity_queries_remain_retryable() {
     let cache = OnceLock::new();
-    assert_eq!(
-        resolve_registered_service_target(&cache, || Ok(None)).unwrap(),
-        None
-    );
+    assert_eq!(resolve_registered_service_target(&cache, || Ok(None)).unwrap(), None);
     assert!(resolve_registered_service_target(&cache, || Err(anyhow!("unavailable"))).is_err());
     assert!(cache.get().is_none());
     let counter = Arc::new(());
@@ -57,10 +51,7 @@ fn registered_service_identities_become_ready_independently() {
         resolve_registered_service_target(&service_cache, || Ok(Some(service))).unwrap(),
         Some(target)
     );
-    assert_eq!(
-        resolve_registered_service_target(&maintenance_cache, || Ok(None)).unwrap(),
-        None
-    );
+    assert_eq!(resolve_registered_service_target(&maintenance_cache, || Ok(None)).unwrap(), None);
     assert_eq!(
         resolve_registered_service_target(&service_cache, || panic!(
             "another unregistered interface must not invalidate service identity"

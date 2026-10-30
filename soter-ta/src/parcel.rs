@@ -132,9 +132,7 @@ impl Reply {
     }
 
     fn with_header(code: i32) -> Self {
-        let mut reply = Self {
-            bytes: Vec::with_capacity(64),
-        };
+        let mut reply = Self { bytes: Vec::with_capacity(64) };
         reply.i32(code);
         reply
     }
@@ -218,9 +216,6 @@ mod tests {
         ] {
             assert!(Args::new(malformed).read_string16().is_none());
         }
-        assert_eq!(
-            Args::new(&[0, 0, 0, 0, 0, 0, 0, 0]).read_string16(),
-            Some(String::new())
-        );
+        assert_eq!(Args::new(&[0, 0, 0, 0, 0, 0, 0, 0]).read_string16(), Some(String::new()));
     }
 }

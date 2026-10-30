@@ -7,12 +7,9 @@ use crate::hook::binder::{
 };
 
 fn base_reply(code: rsbinder::TransactionCode) -> SyntheticReply {
-    let target = LocalBinderTarget {
-        ptr: 0x4100,
-        cookie: 0x5100,
-    };
+    let target = LocalBinderTarget { ptr: 0x4100, cookie: 0x5100 };
     let empty = rsbinder::Parcel::new();
-    let tr = transaction_for_parcel(target, code, &empty);
+    let (tr, _data) = transaction_for_parcel(target, code, empty);
     unsafe { synthetic_base_transaction_reply(Some(SyntheticTargetKind::Operation), target, &tr) }
         .expect("base transaction handling should not fail")
         .expect("base transaction should produce a reply")
@@ -38,17 +35,14 @@ fn transaction_for_raw_parts(
 }
 
 fn dump_transaction_data(argc: i32, args: &[String]) -> Vec<u8> {
-    let mut tail = rsbinder::Parcel::new();
-    tail.write(&argc).unwrap();
+    let mut tail = rsbinder::to_bytes(&argc).unwrap();
     for arg in args {
-        tail.write(arg).unwrap();
+        tail.extend_from_slice(&rsbinder::to_bytes(arg).unwrap());
     }
 
-    let mut data = vec![0u8; size_of::<flat_binder_object>() + tail.data_size()];
+    let mut data = vec![0u8; size_of::<flat_binder_object>() + tail.len()];
     let object = flat_binder_object {
-        hdr: binder_object_header {
-            type_: BINDER_TYPE_FD,
-        },
+        hdr: binder_object_header { type_: BINDER_TYPE_FD },
         flags: 0,
         handle_or_ptr: flat_binder_object_handle_or_ptr { handle: 0 },
         cookie: 0,
@@ -58,17 +52,14 @@ fn dump_transaction_data(argc: i32, args: &[String]) -> Vec<u8> {
         std::ptr::copy_nonoverlapping(
             tail.as_ptr(),
             data.as_mut_ptr().add(size_of::<flat_binder_object>()),
-            tail.data_size(),
+            tail.len(),
         );
     }
     data
 }
 
 fn dump_reply(data: &mut [u8], offsets: &mut [usize]) -> SyntheticReply {
-    let target = LocalBinderTarget {
-        ptr: 0x4100,
-        cookie: 0x5100,
-    };
+    let target = LocalBinderTarget { ptr: 0x4100, cookie: 0x5100 };
     let tr = transaction_for_raw_parts(target, rsbinder::DUMP_TRANSACTION, data, offsets);
     unsafe { synthetic_base_transaction_reply(Some(SyntheticTargetKind::Operation), target, &tr) }
         .expect("dump handling should not fail")
@@ -82,17 +73,10 @@ fn synthetic_ping_returns_empty_parcel_without_interface_token() {
 
 #[test]
 fn synthetic_debug_pid_uses_process_identity_without_interface_token() {
-    let target = LocalBinderTarget {
-        ptr: 0x4100,
-        cookie: 0x5100,
-    };
+    let target = LocalBinderTarget { ptr: 0x4100, cookie: 0x5100 };
     let empty = rsbinder::Parcel::new();
-    let mut tr = transaction_for_parcel(target, rsbinder::DEBUG_PID_TRANSACTION, &empty);
-    tr.sender_pid = if synthetic_debug_pid() == 2000 {
-        2001
-    } else {
-        2000
-    };
+    let (mut tr, _data) = transaction_for_parcel(target, rsbinder::DEBUG_PID_TRANSACTION, empty);
+    tr.sender_pid = if synthetic_debug_pid() == 2000 { 2001 } else { 2000 };
 
     let reply = unsafe {
         synthetic_base_transaction_reply(Some(SyntheticTargetKind::Operation), target, &tr)
@@ -128,12 +112,9 @@ fn unknown_base_transaction_returns_unknown_transaction() {
 
 #[test]
 fn dump_without_fd_returns_bad_type() {
-    let target = LocalBinderTarget {
-        ptr: 0x4100,
-        cookie: 0x5100,
-    };
+    let target = LocalBinderTarget { ptr: 0x4100, cookie: 0x5100 };
     let empty = rsbinder::Parcel::new();
-    let tr = transaction_for_parcel(target, rsbinder::DUMP_TRANSACTION, &empty);
+    let (tr, _) = transaction_for_parcel(target, rsbinder::DUMP_TRANSACTION, empty);
     let reply = unsafe {
         synthetic_base_transaction_reply(Some(SyntheticTargetKind::Operation), target, &tr)
     }
@@ -196,9 +177,7 @@ fn dump_ignores_trailing_binder_objects() {
     let object_offset = data.len();
     data.resize(object_offset + size_of::<flat_binder_object>(), 0);
     let object = flat_binder_object {
-        hdr: binder_object_header {
-            type_: BINDER_TYPE_BINDER,
-        },
+        hdr: binder_object_header { type_: BINDER_TYPE_BINDER },
         flags: 0,
         handle_or_ptr: flat_binder_object_handle_or_ptr { binder: 0 },
         cookie: 0,

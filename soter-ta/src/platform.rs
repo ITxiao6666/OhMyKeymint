@@ -37,10 +37,7 @@ struct Hooks {
 
 impl Hooks {
     fn current(self) -> Option<Platform> {
-        let snapshot = Platform {
-            boot_ms: ask(self.boot_ms),
-            bio_mark: ask(self.bio_mark),
-        };
+        let snapshot = Platform { boot_ms: ask(self.boot_ms), bio_mark: ask(self.bio_mark) };
         // An installed biometric probe means the gate is enabled. Failure to
         // obtain its evidence must not look like an intentionally absent gate.
         if self.bio_mark.is_some() && (snapshot.boot_ms.is_none() || snapshot.bio_mark.is_none()) {
@@ -51,10 +48,7 @@ impl Hooks {
     }
 }
 
-static HOOKS: Mutex<Hooks> = Mutex::new(Hooks {
-    boot_ms: None,
-    bio_mark: None,
-});
+static HOOKS: Mutex<Hooks> = Mutex::new(Hooks { boot_ms: None, bio_mark: None });
 
 /// Install the daemon's hooks; `None` leaves that fact unverifiable.
 pub fn install(boot_ms: Option<Probe>, bio_mark: Option<Probe>) {
@@ -97,31 +91,12 @@ mod tests {
 
     #[test]
     fn enabled_gate_refuses_missing_evidence_but_explicit_off_is_preserved() {
-        assert!(Hooks {
-            boot_ms: None,
-            bio_mark: None
-        }
-        .current()
-        .is_some());
-        assert!(Hooks {
-            boot_ms: Some(available),
-            bio_mark: Some(available)
-        }
-        .current()
-        .is_some());
+        assert!(Hooks { boot_ms: None, bio_mark: None }.current().is_some());
+        assert!(Hooks { boot_ms: Some(available), bio_mark: Some(available) }.current().is_some());
         for hooks in [
-            Hooks {
-                boot_ms: Some(available),
-                bio_mark: Some(unavailable),
-            },
-            Hooks {
-                boot_ms: Some(unavailable),
-                bio_mark: Some(available),
-            },
-            Hooks {
-                boot_ms: None,
-                bio_mark: Some(available),
-            },
+            Hooks { boot_ms: Some(available), bio_mark: Some(unavailable) },
+            Hooks { boot_ms: Some(unavailable), bio_mark: Some(available) },
+            Hooks { boot_ms: None, bio_mark: Some(available) },
         ] {
             assert!(hooks.current().is_none());
         }

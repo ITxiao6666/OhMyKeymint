@@ -4,10 +4,7 @@ use super::*;
 fn synthetic_operation_missing_args_keep_not_enough_data_status() {
     let _guard = route_state_test_guard();
 
-    let target = LocalBinderTarget {
-        ptr: 0x1234,
-        cookie: 0x5678,
-    };
+    let target = LocalBinderTarget { ptr: 0x1234, cookie: 0x5678 };
     let aborts = Arc::new(AtomicUsize::new(0));
     let backend = BnKeystoreOperation::new_binder(TestOperationBackend {
         update_output: vec![5, 6, 7],
@@ -19,7 +16,7 @@ fn synthetic_operation_missing_args_keep_not_enough_data_status() {
         OperationTargetInfo {
             route: RouteTarget::Omk,
             aad_allowed: true,
-            backend: Some(backend),
+            backend: Some(Arc::new(backend)),
             finalized: false,
             call_gate: Arc::new(Mutex::new(())),
         },
@@ -30,25 +27,16 @@ fn synthetic_operation_missing_args_keep_not_enough_data_status() {
             "updateAad",
             crate::android::system::keystore2::IKeystoreOperation::transactions::r#updateAad,
         ),
-        (
-            "update",
-            crate::android::system::keystore2::IKeystoreOperation::transactions::r#update,
-        ),
-        (
-            "finish",
-            crate::android::system::keystore2::IKeystoreOperation::transactions::r#finish,
-        ),
+        ("update", crate::android::system::keystore2::IKeystoreOperation::transactions::r#update),
+        ("finish", crate::android::system::keystore2::IKeystoreOperation::transactions::r#finish),
     ] {
         let request = request_parcel(identify::KEYSTORE_OPERATION_INTERFACE);
-        let tr = transaction_for_parcel(target, code, &request);
+        let (tr, _data) = transaction_for_parcel(target, code, request);
         let info = SyntheticTargetInfo {
             kind: SyntheticTargetKind::Operation,
-            caller: Some(CallerInfo {
-                uid: 10002,
-                sid: String::new(),
-                pid: 2000,
-            }),
+            caller: Some(CallerInfo { uid: 10002, sid: String::new(), pid: 2000 }),
             native_generation: None,
+            operation: None,
         };
 
         let reply = unsafe {
@@ -68,10 +56,7 @@ fn synthetic_operation_missing_args_keep_not_enough_data_status() {
 fn synthetic_operation_trailing_abort_finalizes_operation() {
     let _guard = route_state_test_guard();
 
-    let target = LocalBinderTarget {
-        ptr: 0x1334,
-        cookie: 0x5778,
-    };
+    let target = LocalBinderTarget { ptr: 0x1334, cookie: 0x5778 };
     let aborts = Arc::new(AtomicUsize::new(0));
     let backend = BnKeystoreOperation::new_binder(TestOperationBackend {
         update_output: vec![5, 6, 7],
@@ -83,7 +68,7 @@ fn synthetic_operation_trailing_abort_finalizes_operation() {
         OperationTargetInfo {
             route: RouteTarget::Omk,
             aad_allowed: true,
-            backend: Some(backend),
+            backend: Some(Arc::new(backend)),
             finalized: false,
             call_gate: Arc::new(Mutex::new(())),
         },
@@ -91,19 +76,16 @@ fn synthetic_operation_trailing_abort_finalizes_operation() {
 
     let mut request = request_parcel(identify::KEYSTORE_OPERATION_INTERFACE);
     request.write(&0x4f4d4bi32).unwrap();
-    let tr = transaction_for_parcel(
+    let (tr, _data) = transaction_for_parcel(
         target,
         crate::android::system::keystore2::IKeystoreOperation::transactions::r#abort,
-        &request,
+        request,
     );
     let info = SyntheticTargetInfo {
         kind: SyntheticTargetKind::Operation,
-        caller: Some(CallerInfo {
-            uid: 10002,
-            sid: String::new(),
-            pid: 2000,
-        }),
+        caller: Some(CallerInfo { uid: 10002, sid: String::new(), pid: 2000 }),
         native_generation: None,
+        operation: None,
     };
 
     let reply =
@@ -121,10 +103,7 @@ fn synthetic_operation_trailing_abort_finalizes_operation() {
 fn synthetic_operation_bad_interface_marker_rejects_abort() {
     let _guard = route_state_test_guard();
 
-    let target = LocalBinderTarget {
-        ptr: 0x1335,
-        cookie: 0x5779,
-    };
+    let target = LocalBinderTarget { ptr: 0x1335, cookie: 0x5779 };
     let aborts = Arc::new(AtomicUsize::new(0));
     let backend = BnKeystoreOperation::new_binder(TestOperationBackend {
         update_output: vec![5, 6, 7],
@@ -136,26 +115,23 @@ fn synthetic_operation_bad_interface_marker_rejects_abort() {
         OperationTargetInfo {
             route: RouteTarget::Omk,
             aad_allowed: true,
-            backend: Some(backend),
+            backend: Some(Arc::new(backend)),
             finalized: false,
             call_gate: Arc::new(Mutex::new(())),
         },
     );
 
     let request = request_parcel_with_marker(identify::KEYSTORE_OPERATION_INTERFACE, 0);
-    let tr = transaction_for_parcel(
+    let (tr, _data) = transaction_for_parcel(
         target,
         crate::android::system::keystore2::IKeystoreOperation::transactions::r#abort,
-        &request,
+        request,
     );
     let info = SyntheticTargetInfo {
         kind: SyntheticTargetKind::Operation,
-        caller: Some(CallerInfo {
-            uid: 10002,
-            sid: String::new(),
-            pid: 2000,
-        }),
+        caller: Some(CallerInfo { uid: 10002, sid: String::new(), pid: 2000 }),
         native_generation: None,
+        operation: None,
     };
 
     let reply =
@@ -189,16 +165,9 @@ fn synthetic_operation_dispatch_uses_registered_caller_identity() {
             "finish",
             crate::android::system::keystore2::IKeystoreOperation::transactions::r#finish,
         ),
-        (
-            3,
-            "abort",
-            crate::android::system::keystore2::IKeystoreOperation::transactions::r#abort,
-        ),
+        (3, "abort", crate::android::system::keystore2::IKeystoreOperation::transactions::r#abort),
     ] {
-        let target = LocalBinderTarget {
-            ptr: 0x1434 + index,
-            cookie: 0x5878 + index,
-        };
+        let target = LocalBinderTarget { ptr: 0x1434 + index, cookie: 0x5878 + index };
         let aborts = Arc::new(AtomicUsize::new(0));
         let backend = BnKeystoreOperation::new_binder(TestOperationBackend {
             update_output: vec![5, 6, 7],
@@ -210,7 +179,7 @@ fn synthetic_operation_dispatch_uses_registered_caller_identity() {
             OperationTargetInfo {
                 route: RouteTarget::Omk,
                 aad_allowed: true,
-                backend: Some(backend),
+                backend: Some(Arc::new(backend)),
                 finalized: false,
                 call_gate: Arc::new(Mutex::new(())),
             },
@@ -226,17 +195,14 @@ fn synthetic_operation_dispatch_uses_registered_caller_identity() {
             "abort" => {}
             _ => unreachable!("covered operation test method"),
         }
-        let mut tr = transaction_for_parcel(target, code, &request);
+        let (mut tr, _data) = transaction_for_parcel(target, code, request);
         tr.sender_euid = 99999;
         tr.sender_pid = 3456;
         let info = SyntheticTargetInfo {
             kind: SyntheticTargetKind::Operation,
-            caller: Some(CallerInfo {
-                uid: 10002,
-                sid: String::new(),
-                pid: 2000,
-            }),
+            caller: Some(CallerInfo { uid: 10002, sid: String::new(), pid: 2000 }),
             native_generation: None,
+            operation: None,
         };
 
         let reply = unsafe {
@@ -259,10 +225,7 @@ fn synthetic_operation_dispatch_uses_registered_caller_identity() {
 fn tracked_operation_pending_call_uses_transaction_caller_identity() {
     let _guard = route_state_test_guard();
 
-    let target = LocalBinderTarget {
-        ptr: 0x1534,
-        cookie: 0x5978,
-    };
+    let target = LocalBinderTarget { ptr: 0x1534, cookie: 0x5978 };
     remember_operation_target(
         target,
         OperationTargetInfo {
@@ -276,10 +239,10 @@ fn tracked_operation_pending_call_uses_transaction_caller_identity() {
 
     let mut request = request_parcel(identify::KEYSTORE_OPERATION_INTERFACE);
     request.write(&vec![1u8]).unwrap();
-    let mut tr = transaction_for_parcel(
+    let (mut tr, _data) = transaction_for_parcel(
         target,
         crate::android::system::keystore2::IKeystoreOperation::transactions::r#update,
-        &request,
+        request,
     );
     tr.sender_euid = 99999;
     tr.sender_pid = 3456;
@@ -292,36 +255,27 @@ fn tracked_operation_pending_call_uses_transaction_caller_identity() {
     };
     assert_eq!(pending.target, target);
     assert_eq!(pending.caller.uid, 99999);
-    assert!(matches!(
-        pending.request,
-        ParsedOperationRequest::Update { .. }
-    ));
+    assert!(matches!(pending.request, ParsedOperationRequest::Update { .. }));
 }
 
 #[test]
 fn synthetic_unexpected_null_parse_errors_are_status_replies() {
     let _guard = route_state_test_guard();
 
-    let operation_target = LocalBinderTarget {
-        ptr: 0x2237,
-        cookie: 0x6681,
-    };
+    let operation_target = LocalBinderTarget { ptr: 0x2237, cookie: 0x6681 };
     let operation_info = SyntheticTargetInfo {
         kind: SyntheticTargetKind::Operation,
-        caller: Some(CallerInfo {
-            uid: 10002,
-            sid: String::new(),
-            pid: 2000,
-        }),
+        caller: Some(CallerInfo { uid: 10002, sid: String::new(), pid: 2000 }),
         native_generation: None,
+        operation: None,
     };
     for length in [-1i32, -2i32] {
         let mut invalid_input_request = request_parcel(identify::KEYSTORE_OPERATION_INTERFACE);
         invalid_input_request.write(&length).unwrap();
-        let invalid_input_tr = transaction_for_parcel(
+        let (invalid_input_tr, _invalid_input_data) = transaction_for_parcel(
             operation_target,
             crate::android::system::keystore2::IKeystoreOperation::transactions::r#update,
-            &invalid_input_request,
+            invalid_input_request,
         );
         let reply = unsafe {
             build_synthetic_br_transaction_reply(
@@ -336,16 +290,13 @@ fn synthetic_unexpected_null_parse_errors_are_status_replies() {
         assert_synthetic_exception_reply(reply, ExceptionCode::NullPointer);
     }
 
-    let security_level_target = LocalBinderTarget {
-        ptr: 0x2238,
-        cookie: 0x6682,
-    };
+    let security_level_target = LocalBinderTarget { ptr: 0x2238, cookie: 0x6682 };
     let mut invalid_key_request = request_parcel(identify::KEYSTORE_SECURITY_LEVEL_INTERFACE);
     invalid_key_request.write(&2i32).unwrap();
-    let invalid_key_tr = transaction_for_parcel(
+    let (invalid_key_tr, _invalid_key_data) = transaction_for_parcel(
         security_level_target,
         crate::android::system::keystore2::IKeystoreSecurityLevel::transactions::r#deleteKey,
-        &invalid_key_request,
+        invalid_key_request,
     );
     let reply = unsafe {
         build_synthetic_br_transaction_reply(
@@ -355,6 +306,7 @@ fn synthetic_unexpected_null_parse_errors_are_status_replies() {
                 kind: SyntheticTargetKind::SecurityLevel,
                 caller: None,
                 native_generation: None,
+                operation: None,
             },
             None,
             "BR_TRANSACTION",
@@ -368,24 +320,18 @@ fn synthetic_unexpected_null_parse_errors_are_status_replies() {
 fn synthetic_operation_unexpected_interface_returns_bad_type_status() {
     let _guard = route_state_test_guard();
 
-    let target = LocalBinderTarget {
-        ptr: 0x3234,
-        cookie: 0x7678,
-    };
+    let target = LocalBinderTarget { ptr: 0x3234, cookie: 0x7678 };
     let request = request_parcel(identify::KEYSTORE_SERVICE_INTERFACE);
-    let tr = transaction_for_parcel(
+    let (tr, _data) = transaction_for_parcel(
         target,
         crate::android::system::keystore2::IKeystoreOperation::transactions::r#abort,
-        &request,
+        request,
     );
     let info = SyntheticTargetInfo {
         kind: SyntheticTargetKind::Operation,
-        caller: Some(CallerInfo {
-            uid: 10002,
-            sid: String::new(),
-            pid: 2000,
-        }),
+        caller: Some(CallerInfo { uid: 10002, sid: String::new(), pid: 2000 }),
         native_generation: None,
+        operation: None,
     };
 
     let reply =
@@ -396,11 +342,8 @@ fn synthetic_operation_unexpected_interface_returns_bad_type_status() {
 
 #[test]
 fn synthetic_transaction_caller_uses_registered_sid_when_secctx_is_absent() {
-    let fallback = CallerInfo {
-        uid: 10002,
-        sid: "u:r:untrusted_app:s0:c123,c456".into(),
-        pid: 2000,
-    };
+    let fallback =
+        CallerInfo { uid: 10002, sid: "u:r:untrusted_app:s0:c123,c456".into(), pid: 2000 };
     let mut tr: binder_transaction_data = unsafe { std::mem::zeroed() };
     tr.sender_euid = 10002;
     tr.sender_pid = 3456;
@@ -420,10 +363,7 @@ fn synthetic_transaction_caller_uses_registered_sid_when_secctx_is_absent() {
     tr.sender_euid = -1;
     tr.sender_pid = 0;
     let caller = synthetic_transaction_caller(Some(&fallback), &tr, None);
-    assert_eq!(
-        (caller.uid, caller.pid, caller.sid),
-        (10002, 2000, fallback.sid)
-    );
+    assert_eq!((caller.uid, caller.pid, caller.sid), (10002, 2000, fallback.sid));
 
     tr.sender_pid = -1;
     let caller = synthetic_transaction_caller(None, &tr, None);

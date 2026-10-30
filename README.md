@@ -23,7 +23,9 @@ Zygisk 相关功能需另行安装并启用 Zygisk Next。
 - 运行状态诊断、主题与语言设置。
 
 Keybox 至少需要一个完整的 RSA 或 EC 条目，私钥必须与证书链匹配。
-详细配置位于 `/data/misc/keystore/omk/`，请勿公开密钥
+仅含 EC 条目时，RSA 密钥的认证证书也使用该 EC 私钥和证书链签名。
+详细配置位于 `/data/misc/keystore/omk/`，请勿公开密钥。
+
 ## 注意事项
 
 - 软件实现不能替代真实 TEE 或生物认证，不保证通过检测或支付认证。
@@ -44,10 +46,10 @@ touch /data/adb/omk/restart.all
 
 ## 许可与致谢
 
-使用前须同时同意 [AGPL-3.0-or-later](LICENSE.md) 和 [Oh My Keymint License](LICENSE-2)。
-本软件按原样提供，不作任何担保。
+使用前须阅读并同时遵守 [General License Agreement v4 或后续版本](LICENSE.md) 和 [Oh My Keymint License](LICENSE-2)。
+本软件按原样提供，不作任何担保。独立标明的第三方部分仍遵循各自原有许可。
 
-Copyright (C) 2025 James Clef <qwq233@qwq2333.top>
+Copyright (C) 2025, 2026 James Clef <qwq233@qwq2333.top>
 
 部分代码来自 [AOSP](https://source.android.com/)，采用 [Apache-2.0](template/AOSP.Apache-license-2.0.txt)。
 

@@ -39,34 +39,26 @@ pub fn clear() -> Result<String> {
     }
 
     let mut report = Report::default();
-    clear_storage_root(
-        Path::new("/data/user"),
-        Some(Path::new("/data/data")),
-        &mut report,
-    );
+    clear_storage_root(Path::new("/data/user"), Some(Path::new("/data/data")), &mut report);
     clear_storage_root(Path::new("/data/user_de"), None, &mut report);
 
     // These commands intentionally run after cache cleanup, including a partial
     // cleanup failure. They never invoke pm clear or remove application data.
     for name in PROCESSES {
         match kill_command(name).output() {
-            Ok(output) if output.status.success() => report.processes.push(ProcessResult {
-                name,
-                status: "stopped",
-            }),
+            Ok(output) if output.status.success() => {
+                report.processes.push(ProcessResult { name, status: "stopped" })
+            }
             Ok(_) if crate::process_pid(&[name], None).is_none() => {
-                report.processes.push(ProcessResult {
-                    name,
-                    status: "not_running",
-                });
+                report.processes.push(ProcessResult { name, status: "not_running" });
             }
             Ok(output) => report.errors.push(format!(
                 "killall failed for {name}: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             )),
-            Err(error) => report
-                .errors
-                .push(format!("could not execute killall for {name}: {error}")),
+            Err(error) => {
+                report.errors.push(format!("could not execute killall for {name}: {error}"))
+            }
         }
     }
 
@@ -123,10 +115,7 @@ fn clear_storage_root(root: &Path, user_zero_alias: Option<&Path>, report: &mut 
             let Some(user_name) = user.to_str() else {
                 continue;
             };
-            if !user_name
-                .parse::<u32>()
-                .is_ok_and(|id| id.to_string() == user_name)
-            {
+            if !user_name.parse::<u32>().is_ok_and(|id| id.to_string() == user_name) {
                 continue;
             }
             let opened_user = directory_at(&storage, &user).or_else(|error| {
@@ -144,10 +133,9 @@ fn clear_storage_root(root: &Path, user_zero_alias: Option<&Path>, report: &mut 
                 Ok(directory) => directory,
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                 Err(error) => {
-                    report.errors.push(format!(
-                        "cannot open {} user {user_name}: {error}",
-                        root.display()
-                    ));
+                    report
+                        .errors
+                        .push(format!("cannot open {} user {user_name}: {error}", root.display()));
                     continue;
                 }
             };
@@ -195,10 +183,7 @@ fn clear_package(parent: &File, root: &Path, user: &str, package: &str, report: 
         Ok(())
     })();
     if let Err(error) = result {
-        report.errors.push(format!(
-            "{} user {user} {package}: {error:#}",
-            root.display()
-        ));
+        report.errors.push(format!("{} user {user} {package}: {error:#}", root.display()));
     }
 }
 
@@ -263,20 +248,14 @@ mod tests {
                 let base = root.join(user).join(package);
                 for cache in CACHES {
                     assert_eq!(fs::read_dir(base.join(cache)).unwrap().count(), 0);
-                    assert_eq!(
-                        fs::metadata(base.join(cache)).unwrap().mode() & 0o777,
-                        0o700
-                    );
+                    assert_eq!(fs::metadata(base.join(cache)).unwrap().mode() & 0o777, 0o700);
                 }
                 for data in ["databases", "shared_prefs", "files", "no_backup"] {
                     assert_eq!(fs::read(base.join(data).join("keep")).unwrap(), b"data");
                 }
             }
         }
-        assert_eq!(
-            fs::read(root.join("0/com.example.other/cache/keep")).unwrap(),
-            b"other"
-        );
+        assert_eq!(fs::read(root.join("0/com.example.other/cache/keep")).unwrap(), b"other");
     }
 
     #[test]
@@ -313,12 +292,7 @@ mod tests {
         clear_storage_root(&root, Some(&alias), &mut report);
         assert_eq!(report.cleared_cache_dirs, 1);
         assert_eq!(report.errors.len(), 1);
-        assert_eq!(
-            fs::read_dir(alias.join(PACKAGES[0]).join("cache"))
-                .unwrap()
-                .count(),
-            0
-        );
+        assert_eq!(fs::read_dir(alias.join(PACKAGES[0]).join("cache")).unwrap().count(), 0);
     }
 
     #[test]

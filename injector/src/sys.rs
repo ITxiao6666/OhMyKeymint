@@ -1,5 +1,3 @@
-use std::ffi::c_void;
-
 use anyhow::{anyhow, bail, Context, Result};
 use libc::iovec;
 use log::{debug, error, trace, warn};
@@ -8,6 +6,10 @@ use nix::{
     sys::wait::{WaitPidFlag, WaitStatus},
     unistd::Pid,
 };
+use std::ffi::c_void;
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(any(
     target_arch = "aarch64",
@@ -51,11 +53,8 @@ pub fn wait_pid(pid: Pid, target: Signal) -> Result<()> {
                     pid,
                     sig.as_str()
                 );
-                let deliver_sig = if sig == Signal::SIGTRAP || sig == Signal::SIGSTOP {
-                    0
-                } else {
-                    sig as i32
-                };
+                let deliver_sig =
+                    if sig == Signal::SIGTRAP || sig == Signal::SIGSTOP { 0 } else { sig as i32 };
                 unsafe {
                     libc::ptrace(libc::PTRACE_CONT, pid.as_raw(), 0, deliver_sig);
                 }
@@ -78,19 +77,11 @@ pub fn get_regs(pid: Pid) -> Result<Regs> {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
         let result = unsafe {
-            libc::ptrace(
-                libc::PTRACE_GETREGS,
-                pid.as_raw(),
-                0,
-                &mut regs as *mut _ as *mut c_void,
-            )
+            libc::ptrace(libc::PTRACE_GETREGS, pid.as_raw(), 0, &mut regs as *mut _ as *mut c_void)
         };
 
         if result == -1 {
-            bail!(
-                "ptrace(PTRACE_GETREGS) failed: {}",
-                std::io::Error::last_os_error()
-            );
+            bail!("ptrace(PTRACE_GETREGS) failed: {}", std::io::Error::last_os_error());
         }
     }
 
@@ -111,10 +102,7 @@ pub fn get_regs(pid: Pid) -> Result<Regs> {
         };
 
         if result == -1 {
-            bail!(
-                "ptrace(PTRACE_GETREGS) failed: {}",
-                std::io::Error::last_os_error()
-            );
+            bail!("ptrace(PTRACE_GETREGS) failed: {}", std::io::Error::last_os_error());
         }
     }
 
@@ -125,19 +113,11 @@ pub fn set_regs(pid: Pid, regs: &Regs) -> Result<()> {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
         let result = unsafe {
-            libc::ptrace(
-                libc::PTRACE_SETREGS,
-                pid.as_raw(),
-                0,
-                regs as *const _ as *mut c_void,
-            )
+            libc::ptrace(libc::PTRACE_SETREGS, pid.as_raw(), 0, regs as *const _ as *mut c_void)
         };
 
         if result == -1 {
-            bail!(
-                "ptrace(PTRACE_SETREGS) failed: {}",
-                std::io::Error::last_os_error()
-            );
+            bail!("ptrace(PTRACE_SETREGS) failed: {}", std::io::Error::last_os_error());
         }
     }
 
@@ -158,10 +138,7 @@ pub fn set_regs(pid: Pid, regs: &Regs) -> Result<()> {
         };
 
         if result == -1 {
-            bail!(
-                "ptrace(PTRACE_SETREGS) failed: {}",
-                std::io::Error::last_os_error()
-            );
+            bail!("ptrace(PTRACE_SETREGS) failed: {}", std::io::Error::last_os_error());
         }
     }
 
@@ -172,15 +149,9 @@ pub fn read_process_exact(pid: Pid, remote_addr: usize, buf: &mut [u8]) -> Resul
     if buf.is_empty() {
         return Ok(());
     }
-    let local = iovec {
-        iov_base: buf.as_mut_ptr() as *mut c_void,
-        iov_len: buf.len(),
-    };
+    let local = iovec { iov_base: buf.as_mut_ptr() as *mut c_void, iov_len: buf.len() };
 
-    let remote = iovec {
-        iov_base: remote_addr as *mut c_void,
-        iov_len: buf.len(),
-    };
+    let remote = iovec { iov_base: remote_addr as *mut c_void, iov_len: buf.len() };
 
     let result = unsafe {
         libc::process_vm_readv(
@@ -194,16 +165,9 @@ pub fn read_process_exact(pid: Pid, remote_addr: usize, buf: &mut [u8]) -> Resul
     };
 
     if result == -1 {
-        bail!(
-            "process_vm_readv failed: {}",
-            std::io::Error::last_os_error()
-        );
+        bail!("process_vm_readv failed: {}", std::io::Error::last_os_error());
     } else if result != buf.len() as isize {
-        bail!(
-            "process_vm_readv read incomplete data: {}/{} bytes",
-            result,
-            buf.len()
-        )
+        bail!("process_vm_readv read incomplete data: {}/{} bytes", result, buf.len())
     } else {
         Ok(())
     }
@@ -255,11 +219,7 @@ pub fn write_process_exact(pid: Pid, remote_addr: usize, data: &[u8]) -> Result<
             .checked_add(result as usize)
             .ok_or_else(|| anyhow!("process_vm_writev byte count overflow"))?;
         if written > data.len() {
-            bail!(
-                "process_vm_writev wrote too much data: {}/{} bytes",
-                written,
-                data.len()
-            );
+            bail!("process_vm_writev wrote too much data: {}/{} bytes", written, data.len());
         }
     }
     Ok(())
@@ -321,11 +281,7 @@ pub fn setup_remote_call(
         }
 
         if args.len() > 6 {
-            let padding = if (args.len() - 6) % 2 == 1 {
-                std::mem::size_of::<usize>()
-            } else {
-                0
-            };
+            let padding = if (args.len() - 6) % 2 == 1 { std::mem::size_of::<usize>() } else { 0 };
             sp = sp
                 .checked_sub(padding)
                 .ok_or_else(|| anyhow!("Stack overflow when reserving x86_64 call padding"))?;
@@ -419,10 +375,7 @@ pub fn setup_remote_call(
 
     set_regs(pid, regs)?;
     if unsafe { libc::ptrace(libc::PTRACE_CONT, pid.as_raw(), 0, 0) } != 0 {
-        bail!(
-            "ptrace(PTRACE_CONT) failed: {}",
-            std::io::Error::last_os_error()
-        );
+        bail!("ptrace(PTRACE_CONT) failed: {}", std::io::Error::last_os_error());
     }
 
     Ok(())
@@ -533,10 +486,7 @@ pub fn remote_pre_call(
         return Err(error);
     }
 
-    Ok(RemoteCallSession {
-        original_regs,
-        return_addr,
-    })
+    Ok(RemoteCallSession { original_regs, return_addr })
 }
 
 pub fn remote_post_call(pid: Pid, session: RemoteCallSession) -> Result<usize> {
@@ -579,6 +529,3 @@ pub fn remote_call(
     let session = remote_pre_call(pid, func_addr, return_addr, args)?;
     remote_post_call(pid, session)
 }
-
-#[cfg(test)]
-mod tests;

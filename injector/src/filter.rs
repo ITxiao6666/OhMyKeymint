@@ -1,6 +1,8 @@
+use crate::config::{parse_scoop_target, FilterConfig, ScoopTarget};
 use kmr_common::consts::{AID_APP_START, AID_USER_OFFSET};
 
-use crate::config::{parse_scoop_target, FilterConfig, ScoopTarget};
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Clone)]
 pub enum PackageResolution {
@@ -70,15 +72,10 @@ pub fn evaluate(
     };
 
     let reason = if config.block_android_package
-        && packages
-            .iter()
-            .any(|pkg| pkg == "android" || pkg.starts_with("android."))
+        && packages.iter().any(|pkg| pkg == "android" || pkg.starts_with("android."))
     {
         FilterReason::RejectedAndroidPackage
-    } else if packages
-        .iter()
-        .any(|pkg| config.deny_packages.contains(pkg))
-    {
+    } else if packages.iter().any(|pkg| config.deny_packages.contains(pkg)) {
         FilterReason::RejectedByDenylist
     } else if !scoop.iter().any(|target| match parse_scoop_target(target) {
         Some(ScoopTarget::Package(package)) => packages.iter().any(|pkg| pkg == package),
@@ -93,12 +90,5 @@ pub fn evaluate(
         FilterReason::Allowed
     };
 
-    FilterDecision {
-        allowed: reason == FilterReason::Allowed,
-        reason,
-        packages,
-    }
+    FilterDecision { allowed: reason == FilterReason::Allowed, reason, packages }
 }
-
-#[cfg(test)]
-mod tests;

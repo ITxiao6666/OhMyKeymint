@@ -439,6 +439,19 @@ patch-level settings cannot extend a certificate's lifetime or remove a
 revocation. Use a currently valid, complete keybox and do not alter certificate
 dates.
 
+### What is retired when I change the keybox?
+
+By default, OMK retires dedicated `ATTEST_KEY` entries bound to the previous
+keybox identity. Ordinary application keys, including passkey credentials, are
+retained. Set
+[`main.retire_stale_keybox_bound_keys`](CONFIGURATION.md#retire_stale_keybox_bound_keys)
+to `false` only when those dedicated attestation keys must remain stored.
+
+An app or remote service can still reject a changed attestation identity and
+require sign-in or device registration again. Keeping a key stored does not
+guarantee that the app or service will accept it. Do not delete the OMK data
+directory to troubleshoot a keybox change.
+
 ### Should I delete `/data/misc/keystore/omk/data/`?
 
 Not during a normal update, keybox change, or first troubleshooting attempt.
@@ -589,6 +602,16 @@ The app may require the lock-screen PIN or password instead of a fingerprint,
 or the authorization may have expired before the operation started. A log such
 as `KEY_USER_NOT_AUTHENTICATED` does not always mean OMK is broken.
 
+After System accepts an authentication or maintenance update, the injector
+forwards it to OMK once before returning the System reply. Auth tokens use a
+separate RPC session from key operations and lifecycle updates. Business RPC
+sessions use up to four connections; auth-token and lifecycle sessions each use
+one. Failed updates are discarded without retries or a global recovery gate.
+A mirror failure returns an OMK error for a caller allowed by the filter and
+preserves the System reply for other callers. A stalled synchronous RPC can still
+wait without a separate timeout. Authentication and lock-state checks apply when
+the operation runs.
+
 Authenticate in the way the app requests and retry promptly. Keep
 `force_skip_system_biometric_hat_verification` at `false` unless a maintainer
 is diagnosing a confirmed device-specific compatibility problem.
@@ -674,10 +697,10 @@ If a maintainer needs information above, share it with proper measures.
 
 ### Is commercial use allowed?
 
-No. Both the [GNU AGPL version 3 or later](../LICENSE.md) and the
-[Oh My Keymint License](../LICENSE-2) apply together. The additional license
-prohibits commercial use and contains other conditions. Read both before using
-or distributing OMK.
+Commercial use is governed by the [General License Agreement](../LICENSE.md),
+including its applicable authorization requirements. The
+[Oh My Keymint License](../LICENSE-2) also applies. Read both before using or
+distributing OMK; separately identified third-party parts retain their own licenses.
 
 ### Where should I ask for help?
 

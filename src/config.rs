@@ -24,7 +24,8 @@ static CONFIG_FILE_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 const CONFIG_PATH: &str = "/data/misc/keystore/omk/config.toml";
 const CONFIG_VERSION_V1: u32 = 1;
-const CURRENT_CONFIG_VERSION: u32 = 2;
+const CONFIG_VERSION_V2: u32 = 2;
+const CURRENT_CONFIG_VERSION: u32 = 3;
 
 const REPLACE_SAVE_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const REPLACE_SAVE_RETRY_LIMIT: usize = 10;
@@ -50,9 +51,7 @@ fn random_32(rng: &mut impl Rng) -> [u8; 32] {
 }
 
 pub fn config() -> &'static RwLock<Config> {
-    CONFIG
-        .get()
-        .expect("CONFIG must be bootstrapped before use")
+    CONFIG.get().expect("CONFIG must be bootstrapped before use")
 }
 
 pub fn config_path() -> &'static str {
@@ -92,9 +91,7 @@ pub fn bootstrap_config_file() -> Result<ConfigFile> {
 }
 
 pub fn load_config_file() -> Result<ConfigFile> {
-    load_config_file_once()
-        .map(|loaded| loaded.config_file)
-        .map_err(|error| anyhow!("{error}"))
+    load_config_file_once().map(|loaded| loaded.config_file).map_err(|error| anyhow!("{error}"))
 }
 
 pub fn persist_config_file(config_file: &ConfigFile) -> Result<()> {
@@ -114,9 +111,8 @@ pub fn sync_security_patch(value: &str) -> Result<()> {
 fn sync_security_patch_to_path(path: &Path, value: &str) -> Result<()> {
     validate_security_patch_sync_value(value)?;
 
-    let _write_guard = CONFIG_FILE_WRITE_LOCK
-        .lock()
-        .map_err(|_| anyhow!("config file write lock poisoned"))?;
+    let _write_guard =
+        CONFIG_FILE_WRITE_LOCK.lock().map_err(|_| anyhow!("config file write lock poisoned"))?;
     let existing = fs::read_to_string(path)
         .with_context(|| format!("failed to read config file {}", path.display()))?;
     let mut table: toml::Table =
@@ -128,12 +124,7 @@ fn sync_security_patch_to_path(path: &Path, value: &str) -> Result<()> {
         .get_mut("trust")
         .and_then(toml::Value::as_table_mut)
         .ok_or_else(|| anyhow!("config is missing a valid [trust] table"))?;
-    for field in [
-        "security_patch",
-        "os_patchlevel",
-        "vendor_patchlevel",
-        "boot_patchlevel",
-    ] {
+    for field in ["security_patch", "os_patchlevel", "vendor_patchlevel", "boot_patchlevel"] {
         trust.insert(field.to_string(), toml::Value::String(value.to_string()));
     }
 
@@ -158,15 +149,10 @@ fn validate_security_patch_sync_date(date: &str) -> Result<()> {
         bail!("security patch value must be `auto` or an exact YYYY-MM-DD date");
     }
 
-    let year = date[0..4]
-        .parse::<i32>()
-        .map_err(|_| anyhow!("security patch year is invalid"))?;
-    let month = date[5..7]
-        .parse::<u32>()
-        .map_err(|_| anyhow!("security patch month is invalid"))?;
-    let day = date[8..10]
-        .parse::<u32>()
-        .map_err(|_| anyhow!("security patch day is invalid"))?;
+    let year = date[0..4].parse::<i32>().map_err(|_| anyhow!("security patch year is invalid"))?;
+    let month =
+        date[5..7].parse::<u32>().map_err(|_| anyhow!("security patch month is invalid"))?;
+    let day = date[8..10].parse::<u32>().map_err(|_| anyhow!("security patch day is invalid"))?;
     let days_in_month = match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
@@ -196,25 +182,18 @@ fn current_local_date() -> Result<(i32, u32, u32)> {
         if libc::localtime_r(&now, &mut local).is_null() {
             bail!("libc::localtime_r failed");
         }
-        Ok((
-            local.tm_year + 1900,
-            (local.tm_mon + 1) as u32,
-            local.tm_mday as u32,
-        ))
+        Ok((local.tm_year + 1900, (local.tm_mon + 1) as u32, local.tm_mday as u32))
     }
 
     #[cfg(not(unix))]
     {
-        Err(anyhow!(
-            "current_local_date is unsupported on this platform"
-        ))
+        Err(anyhow!("current_local_date is unsupported on this platform"))
     }
 }
 
 fn bootstrap_config_file_to_path(path: &Path) -> Result<ConfigFile> {
-    let _write_guard = CONFIG_FILE_WRITE_LOCK
-        .lock()
-        .map_err(|_| anyhow!("config file write lock poisoned"))?;
+    let _write_guard =
+        CONFIG_FILE_WRITE_LOCK.lock().map_err(|_| anyhow!("config file write lock poisoned"))?;
     let (contents, parsed) = match fs::read_to_string(path) {
         Ok(contents) => {
             let parsed = parse_config_file(&contents, true)?;
@@ -224,14 +203,7 @@ fn bootstrap_config_file_to_path(path: &Path) -> Result<ConfigFile> {
             log::warn!("config file missing during startup: {error}; seeding defaults");
             let config_file = ConfigFile::default();
             let table = toml::from_str(&toml::to_string_pretty(&config_file)?)?;
-            (
-                None,
-                ParsedConfigFile {
-                    config_file,
-                    table,
-                    migrated: false,
-                },
-            )
+            (None, ParsedConfigFile { config_file, table, migrated: false })
         }
         Err(error) => {
             return Err(error)
@@ -264,16 +236,12 @@ fn bootstrap_config_file_to_path(path: &Path) -> Result<ConfigFile> {
 }
 
 fn persist_config_file_to_path(path: &Path, config_file: &ConfigFile) -> Result<()> {
-    let _write_guard = CONFIG_FILE_WRITE_LOCK
-        .lock()
-        .map_err(|_| anyhow!("config file write lock poisoned"))?;
+    let _write_guard =
+        CONFIG_FILE_WRITE_LOCK.lock().map_err(|_| anyhow!("config file write lock poisoned"))?;
     let typed = toml::to_string_pretty(config_file).context("failed to serialize config.toml")?;
     let mut updated: toml::Table =
         toml::from_str(&typed).context("failed to deserialize serialized config.toml")?;
-    updated.insert(
-        "version".to_string(),
-        toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION)),
-    );
+    updated.insert("version".to_string(), toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION)));
     let mut merged = match fs::read_to_string(path) {
         Ok(existing) => {
             parse_config_file(&existing, false)
@@ -348,10 +316,7 @@ fn load_config_file_once() -> Result<LoadedConfigFile, ConfigLoadError> {
         Ok(contents) => {
             let parsed = parse_config_file(&contents, false)
                 .map_err(|error| ConfigLoadError::Parse(format!("{error:#}")))?;
-            Ok(LoadedConfigFile {
-                config_file: parsed.config_file,
-                retries: 0,
-            })
+            Ok(LoadedConfigFile { config_file: parsed.config_file, retries: 0 })
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             Err(ConfigLoadError::Missing(error))
@@ -404,16 +369,20 @@ fn parse_config_file(contents: &str, allow_migration: bool) -> Result<ParsedConf
         0 if allow_migration => {
             upgrade_v0_to_v1(&mut table)?;
             upgrade_v1_to_v2(&mut table)?;
+            upgrade_v2_to_v3(&mut table)?;
             true
         }
         CONFIG_VERSION_V1 if allow_migration => {
             upgrade_v1_to_v2(&mut table)?;
+            upgrade_v2_to_v3(&mut table)?;
             true
         }
-        0 | CONFIG_VERSION_V1 => {
-            return Err(anyhow!(
-                "config version {version} requires a keymint restart to migrate"
-            ))
+        CONFIG_VERSION_V2 if allow_migration => {
+            upgrade_v2_to_v3(&mut table)?;
+            true
+        }
+        0 | CONFIG_VERSION_V1 | CONFIG_VERSION_V2 => {
+            return Err(anyhow!("config version {version} requires a keymint restart to migrate"))
         }
         CURRENT_CONFIG_VERSION => false,
         version => {
@@ -429,11 +398,7 @@ fn parse_config_file(contents: &str, allow_migration: bool) -> Result<ParsedConf
     validate_main_config(&config_file.main)?;
     validate_trust_config(&config_file.trust)?;
     validate_app_patch_levels(&config_file.app_patch_levels)?;
-    Ok(ParsedConfigFile {
-        config_file,
-        table,
-        migrated,
-    })
+    Ok(ParsedConfigFile { config_file, table, migrated })
 }
 
 fn config_version(table: &toml::Table) -> Result<u32> {
@@ -450,10 +415,7 @@ fn config_version(table: &toml::Table) -> Result<u32> {
 
 fn upgrade_v0_to_v1(table: &mut toml::Table) -> Result<()> {
     table.remove("trust_record");
-    table.insert(
-        "version".to_string(),
-        toml::Value::Integer(i64::from(CONFIG_VERSION_V1)),
-    );
+    table.insert("version".to_string(), toml::Value::Integer(i64::from(CONFIG_VERSION_V1)));
     let trust = table
         .get_mut("trust")
         .and_then(toml::Value::as_table_mut)
@@ -463,9 +425,7 @@ fn upgrade_v0_to_v1(table: &mut toml::Table) -> Result<()> {
         .cloned()
         .unwrap_or_else(|| toml::Value::String("auto".to_string()));
     for field in ["os_patchlevel", "vendor_patchlevel", "boot_patchlevel"] {
-        trust
-            .entry(field.to_string())
-            .or_insert_with(|| inherited_patchlevel.clone());
+        trust.entry(field.to_string()).or_insert_with(|| inherited_patchlevel.clone());
     }
     Ok(())
 }
@@ -475,14 +435,18 @@ fn upgrade_v1_to_v2(table: &mut toml::Table) -> Result<()> {
         .get_mut("trust")
         .and_then(toml::Value::as_table_mut)
         .ok_or_else(|| anyhow!("config is missing a valid [trust] table"))?;
-    trust.insert(
-        "os_version".to_string(),
-        toml::Value::String("auto".to_string()),
-    );
-    table.insert(
-        "version".to_string(),
-        toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION)),
-    );
+    trust.insert("os_version".to_string(), toml::Value::String("auto".to_string()));
+    table.insert("version".to_string(), toml::Value::Integer(i64::from(CONFIG_VERSION_V2)));
+    Ok(())
+}
+
+fn upgrade_v2_to_v3(table: &mut toml::Table) -> Result<()> {
+    let main = table
+        .get_mut("main")
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| anyhow!("config is missing a valid [main] table"))?;
+    main.insert("retire_stale_keybox_bound_keys".to_string(), toml::Value::Boolean(true));
+    table.insert("version".to_string(), toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION)));
     Ok(())
 }
 
@@ -572,10 +536,8 @@ fn reload_runtime_config(trigger: WatchTrigger) {
                         &patches.boot_patchlevel,
                     );
                 if patches.write_security_patch {
-                    security_patch_update = Some((
-                        patches.security_patch.clone(),
-                        patches.observed_security_patch,
-                    ));
+                    security_patch_update =
+                        Some((patches.security_patch.clone(), patches.observed_security_patch));
                 }
                 applied_trust.security_patch = patches.security_patch;
                 applied_trust.os_patchlevel = patches.os_patchlevel;
@@ -764,10 +726,7 @@ fn app_patch_target(target: &str) -> Option<(&str, Option<u32>)> {
         .split('.')
         .all(|part| {
             !part.is_empty()
-                && part
-                    .bytes()
-                    .next()
-                    .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                && part.bytes().next().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
                 && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
         })
         .then_some((package, user))
@@ -902,9 +861,8 @@ fn save_app_patch_levels_base64_to_path(path: &Path, payload: &str) -> Result<()
     };
     let profiles = BTreeMap::from([(update.target.clone(), profile.clone())]);
     validate_app_patch_levels(&profiles)?;
-    let _write_guard = CONFIG_FILE_WRITE_LOCK
-        .lock()
-        .map_err(|_| anyhow!("config file write lock poisoned"))?;
+    let _write_guard =
+        CONFIG_FILE_WRITE_LOCK.lock().map_err(|_| anyhow!("config file write lock poisoned"))?;
     let existing = fs::read_to_string(path).context("failed to read config.toml")?;
     let mut parsed = parse_config_file(&existing, false)?;
     let profiles = parsed
@@ -939,9 +897,7 @@ impl<'de> Deserialize<'de> for Backend {
         D: serde::Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        value
-            .parse()
-            .map_err(|()| serde::de::Error::custom(format!("unknown backend {value:?}")))
+        value.parse().map_err(|()| serde::de::Error::custom(format!("unknown backend {value:?}")))
     }
 }
 
@@ -985,6 +941,9 @@ pub struct MainConfig {
     /// When enabled, OMK accepts shape-valid HATs without system KeyMint MAC verification.
     #[serde(default)]
     pub force_skip_system_biometric_hat_verification: bool,
+    /// Retire dedicated ATTEST_KEY entries bound to a previous keybox identity.
+    /// Ordinary application keys and passkeys remain usable after a keybox change.
+    pub retire_stale_keybox_bound_keys: bool,
 }
 
 fn deserialize_ta_delay_range<'de, D>(deserializer: D) -> Result<[u16; 2], D::Error>
@@ -1005,6 +964,7 @@ impl Default for MainConfig {
             ta_generation_delay_ms: [6, 16],
             ta_control_delay_ms: [1, 4],
             force_skip_system_biometric_hat_verification: false,
+            retire_stale_keybox_bound_keys: true,
         }
     }
 }
@@ -1030,10 +990,7 @@ impl Serialize for CryptoConfig {
         state.serialize_field("root_kek_seed", &hex::encode(self.root_kek_seed))?;
         state.serialize_field("kak_seed", &hex::encode(self.kak_seed))?;
         state.serialize_field("shared_secret_seed", &hex::encode(self.shared_secret_seed))?;
-        state.serialize_field(
-            "shared_secret_nonce",
-            &hex::encode(self.shared_secret_nonce),
-        )?;
+        state.serialize_field("shared_secret_nonce", &hex::encode(self.shared_secret_nonce))?;
         if let Some(key) = self.auth_token_hmac_key {
             state.serialize_field("auth_token_hmac_key", &hex::encode(key))?;
         }
@@ -1173,12 +1130,10 @@ impl<'de> Deserialize<'de> for OsVersionSpec {
     {
         match toml::Value::deserialize(deserializer)? {
             toml::Value::String(value) if value == "auto" => Ok(Self::Auto),
-            toml::Value::Integer(value) => i32::try_from(value)
-                .map(Self::Fixed)
-                .map_err(serde::de::Error::custom),
-            _ => Err(serde::de::Error::custom(
-                "os_version must be \"auto\" or an integer",
-            )),
+            toml::Value::Integer(value) => {
+                i32::try_from(value).map(Self::Fixed).map_err(serde::de::Error::custom)
+            }
+            _ => Err(serde::de::Error::custom("os_version must be \"auto\" or an integer")),
         }
     }
 }
@@ -1321,10 +1276,7 @@ mod tests {
             value: TrustValueSpec,
         }
 
-        let serialized = toml::to_string(&Wrapper {
-            value: TrustValueSpec::Random,
-        })
-        .unwrap();
+        let serialized = toml::to_string(&Wrapper { value: TrustValueSpec::Random }).unwrap();
         assert!(serialized.contains("value = \"random\""));
     }
 
@@ -1356,10 +1308,7 @@ mod tests {
         config_file.trust.os_version = OsVersionSpec::Fixed(17);
         let parsed = parse_config_file(&toml::to_string(&config_file).unwrap(), false).unwrap();
         assert!(!parsed.migrated);
-        assert_eq!(
-            parsed.config_file.trust.os_version,
-            OsVersionSpec::Fixed(17)
-        );
+        assert_eq!(parsed.config_file.trust.os_version, OsVersionSpec::Fixed(17));
 
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("config.toml");
@@ -1380,9 +1329,7 @@ mod tests {
         let trust = RawTrustConfig::default();
         assert_eq!(ConfigFile::default().version, CURRENT_CONFIG_VERSION);
         assert_eq!(trust.os_version, OsVersionSpec::Auto);
-        assert!(toml::to_string(&trust)
-            .unwrap()
-            .contains("os_version = \"auto\""));
+        assert!(toml::to_string(&trust).unwrap().contains("os_version = \"auto\""));
         assert_eq!(trust.security_patch, "auto");
         assert_eq!(trust.os_patchlevel, "auto");
         assert_eq!(trust.vendor_patchlevel, "auto");
@@ -1413,28 +1360,18 @@ mod tests {
         let path = temp_dir.path().join("config.toml");
         let mut table: toml::Table =
             toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
-        table.insert(
-            "future_key".to_string(),
-            toml::Value::String("preserve-me".to_string()),
+        table.insert("future_key".to_string(), toml::Value::String("preserve-me".to_string()));
+        table.get_mut("trust").and_then(toml::Value::as_table_mut).unwrap().insert(
+            "future_trust_key".to_string(),
+            toml::Value::String("preserve-me-too".to_string()),
         );
-        table
-            .get_mut("trust")
-            .and_then(toml::Value::as_table_mut)
-            .unwrap()
-            .insert(
-                "future_trust_key".to_string(),
-                toml::Value::String("preserve-me-too".to_string()),
-            );
         let original_crypto = table.get("crypto").cloned();
         fs::write(&path, toml::to_string_pretty(&table).unwrap()).unwrap();
 
         sync_security_patch_to_path(&path, "2020-01-05").unwrap();
 
         let persisted: toml::Table = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(
-            persisted.get("future_key").and_then(toml::Value::as_str),
-            Some("preserve-me")
-        );
+        assert_eq!(persisted.get("future_key").and_then(toml::Value::as_str), Some("preserve-me"));
         assert_eq!(
             persisted
                 .get("trust")
@@ -1443,20 +1380,9 @@ mod tests {
                 .and_then(toml::Value::as_str),
             Some("preserve-me-too")
         );
-        let trust = persisted
-            .get("trust")
-            .and_then(toml::Value::as_table)
-            .unwrap();
-        for field in [
-            "security_patch",
-            "os_patchlevel",
-            "vendor_patchlevel",
-            "boot_patchlevel",
-        ] {
-            assert_eq!(
-                trust.get(field).and_then(toml::Value::as_str),
-                Some("2020-01-05")
-            );
+        let trust = persisted.get("trust").and_then(toml::Value::as_table).unwrap();
+        for field in ["security_patch", "os_patchlevel", "vendor_patchlevel", "boot_patchlevel"] {
+            assert_eq!(trust.get(field).and_then(toml::Value::as_str), Some("2020-01-05"));
         }
         assert_eq!(persisted.get("crypto"), original_crypto.as_ref());
     }
@@ -1467,42 +1393,20 @@ mod tests {
         let path = temp_dir.path().join("config.toml");
         let mut original: toml::Table =
             toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
-        original.insert(
-            "future_key".to_string(),
-            toml::Value::String("preserve-me".to_string()),
-        );
-        let trust = original
-            .get_mut("trust")
-            .and_then(toml::Value::as_table_mut)
-            .unwrap();
+        original.insert("future_key".to_string(), toml::Value::String("preserve-me".to_string()));
+        let trust = original.get_mut("trust").and_then(toml::Value::as_table_mut).unwrap();
         trust.insert(
             "future_trust_key".to_string(),
             toml::Value::String("preserve-me-too".to_string()),
         );
-        for field in [
-            "security_patch",
-            "os_patchlevel",
-            "vendor_patchlevel",
-            "boot_patchlevel",
-        ] {
-            trust.insert(
-                field.to_string(),
-                toml::Value::String("2020-01-05".to_string()),
-            );
+        for field in ["security_patch", "os_patchlevel", "vendor_patchlevel", "boot_patchlevel"] {
+            trust.insert(field.to_string(), toml::Value::String("2020-01-05".to_string()));
         }
         fs::write(&path, toml::to_string_pretty(&original).unwrap()).unwrap();
 
         let mut expected = original;
-        let expected_trust = expected
-            .get_mut("trust")
-            .and_then(toml::Value::as_table_mut)
-            .unwrap();
-        for field in [
-            "security_patch",
-            "os_patchlevel",
-            "vendor_patchlevel",
-            "boot_patchlevel",
-        ] {
+        let expected_trust = expected.get_mut("trust").and_then(toml::Value::as_table_mut).unwrap();
+        for field in ["security_patch", "os_patchlevel", "vendor_patchlevel", "boot_patchlevel"] {
             expected_trust.insert(field.to_string(), toml::Value::String("auto".to_string()));
         }
 
@@ -1510,22 +1414,11 @@ mod tests {
 
         let persisted: toml::Table = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(persisted, expected);
-        let trust = persisted
-            .get("trust")
-            .and_then(toml::Value::as_table)
-            .unwrap();
-        for field in [
-            "security_patch",
-            "os_patchlevel",
-            "vendor_patchlevel",
-            "boot_patchlevel",
-        ] {
+        let trust = persisted.get("trust").and_then(toml::Value::as_table).unwrap();
+        for field in ["security_patch", "os_patchlevel", "vendor_patchlevel", "boot_patchlevel"] {
             assert_eq!(trust.get(field).and_then(toml::Value::as_str), Some("auto"));
         }
-        assert_eq!(
-            persisted.get("future_key").and_then(toml::Value::as_str),
-            Some("preserve-me")
-        );
+        assert_eq!(persisted.get("future_key").and_then(toml::Value::as_str), Some("preserve-me"));
         assert_eq!(
             trust.get("future_trust_key").and_then(toml::Value::as_str),
             Some("preserve-me-too")
@@ -1550,10 +1443,7 @@ mod tests {
             "9999-12-31",
             "\u{0662}\u{0660}\u{0662}\u{0666}-\u{0660}\u{0668}-\u{0660}\u{0665}",
         ] {
-            assert!(
-                sync_security_patch_to_path(&path, date).is_err(),
-                "{date:?}"
-            );
+            assert!(sync_security_patch_to_path(&path, date).is_err(), "{date:?}");
             assert_eq!(fs::read_to_string(&path).unwrap(), original);
         }
     }
@@ -1626,15 +1516,8 @@ force_skip_system_biometric_hat_verification = true"#,
     fn ta_delay_defaults_apply_to_existing_configs() {
         let mut table: toml::Table =
             toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
-        let main = table
-            .get_mut("main")
-            .and_then(toml::Value::as_table_mut)
-            .unwrap();
-        for field in [
-            "ta_operation_delay_ms",
-            "ta_generation_delay_ms",
-            "ta_control_delay_ms",
-        ] {
+        let main = table.get_mut("main").and_then(toml::Value::as_table_mut).unwrap();
+        for field in ["ta_operation_delay_ms", "ta_generation_delay_ms", "ta_control_delay_ms"] {
             main.remove(field);
         }
         let contents = toml::to_string_pretty(&table).unwrap();
@@ -1648,9 +1531,8 @@ force_skip_system_biometric_hat_verification = true"#,
         fs::write(&path, contents).unwrap();
         let bootstrapped = bootstrap_config_file_to_path(&path).unwrap();
         assert_eq!(bootstrapped.main, parsed.main);
-        let saved = parse_config_file(&fs::read_to_string(&path).unwrap(), false)
-            .unwrap()
-            .config_file;
+        let saved =
+            parse_config_file(&fs::read_to_string(&path).unwrap(), false).unwrap().config_file;
         assert_eq!(saved.main, parsed.main);
     }
 
@@ -1671,11 +1553,7 @@ force_skip_system_biometric_hat_verification = true"#,
     fn ta_delay_ranges_reject_invalid_values_in_file_parser() {
         let mut table: toml::Table =
             toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
-        for field in [
-            "ta_operation_delay_ms",
-            "ta_generation_delay_ms",
-            "ta_control_delay_ms",
-        ] {
+        for field in ["ta_operation_delay_ms", "ta_generation_delay_ms", "ta_control_delay_ms"] {
             for value in [
                 "[22, 21]",
                 "[0, 251]",
@@ -1690,22 +1568,12 @@ force_skip_system_biometric_hat_verification = true"#,
             ] {
                 let mut assignment: toml::Table =
                     toml::from_str(&format!("{field} = {value}")).unwrap();
-                let main = table
-                    .get_mut("main")
-                    .and_then(toml::Value::as_table_mut)
-                    .unwrap();
+                let main = table.get_mut("main").and_then(toml::Value::as_table_mut).unwrap();
                 main.insert(field.to_string(), assignment.remove(field).unwrap());
                 let contents = toml::to_string_pretty(&table).unwrap();
-                assert!(
-                    parse_config_file(&contents, false).is_err(),
-                    "accepted {field} = {value}"
-                );
+                assert!(parse_config_file(&contents, false).is_err(), "accepted {field} = {value}");
             }
-            table
-                .get_mut("main")
-                .and_then(toml::Value::as_table_mut)
-                .unwrap()
-                .remove(field);
+            table.get_mut("main").and_then(toml::Value::as_table_mut).unwrap().remove(field);
         }
     }
 
@@ -1778,39 +1646,22 @@ imei2 = ""
         let mut table: toml::Table =
             toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
         table.insert("version".to_string(), toml::Value::Integer(0));
-        table.insert(
-            "trust_record".to_string(),
-            toml::Value::Table(toml::Table::new()),
-        );
-        table.insert(
-            "future_key".to_string(),
-            toml::Value::String("preserve-me".to_string()),
-        );
-        let trust = table
-            .get_mut("trust")
-            .and_then(toml::Value::as_table_mut)
-            .unwrap();
+        table.insert("trust_record".to_string(), toml::Value::Table(toml::Table::new()));
+        table.insert("future_key".to_string(), toml::Value::String("preserve-me".to_string()));
+        let trust = table.get_mut("trust").and_then(toml::Value::as_table_mut).unwrap();
         trust.insert(
             "future_trust_key".to_string(),
             toml::Value::String("preserve-me-too".to_string()),
         );
         trust.insert("os_version".to_string(), toml::Value::Integer(17));
         trust.remove("os_patchlevel");
-        trust.insert(
-            "vendor_patchlevel".to_string(),
-            toml::Value::String("2026-03-05".to_string()),
-        );
+        trust
+            .insert("vendor_patchlevel".to_string(), toml::Value::String("2026-03-05".to_string()));
         trust.remove("boot_patchlevel");
-        let crypto = table
-            .get_mut("crypto")
-            .and_then(toml::Value::as_table_mut)
-            .unwrap();
+        let crypto = table.get_mut("crypto").and_then(toml::Value::as_table_mut).unwrap();
         crypto.remove("shared_secret_seed");
         crypto.remove("shared_secret_nonce");
-        crypto.insert(
-            "auth_token_hmac_key".to_string(),
-            toml::Value::String("44".repeat(32)),
-        );
+        crypto.insert("auth_token_hmac_key".to_string(), toml::Value::String("44".repeat(32)));
 
         let original = toml::to_string_pretty(&table).unwrap();
         let parsed = parse_config_file(&original, true).unwrap();
@@ -1846,30 +1697,18 @@ imei2 = ""
             Some("auto")
         );
         assert!(!migrated.contains_key("trust_record"));
+        assert_eq!(migrated.get("future_key").and_then(toml::Value::as_str), Some("preserve-me"));
+        let migrated_crypto = migrated.get("crypto").and_then(toml::Value::as_table).unwrap();
         assert_eq!(
-            migrated.get("future_key").and_then(toml::Value::as_str),
-            Some("preserve-me")
-        );
-        let migrated_crypto = migrated
-            .get("crypto")
-            .and_then(toml::Value::as_table)
-            .unwrap();
-        assert_eq!(
-            migrated_crypto
-                .get("shared_secret_seed")
-                .and_then(toml::Value::as_str),
+            migrated_crypto.get("shared_secret_seed").and_then(toml::Value::as_str),
             Some(expected_shared_secret_seed.as_str())
         );
         assert_eq!(
-            migrated_crypto
-                .get("shared_secret_nonce")
-                .and_then(toml::Value::as_str),
+            migrated_crypto.get("shared_secret_nonce").and_then(toml::Value::as_str),
             Some(expected_shared_secret_nonce.as_str())
         );
         assert_eq!(
-            migrated_crypto
-                .get("auth_token_hmac_key")
-                .and_then(toml::Value::as_str),
+            migrated_crypto.get("auth_token_hmac_key").and_then(toml::Value::as_str),
             Some("4444444444444444444444444444444444444444444444444444444444444444")
         );
 
@@ -1882,10 +1721,7 @@ imei2 = ""
             persisted.get("version").and_then(toml::Value::as_integer),
             Some(i64::from(CURRENT_CONFIG_VERSION))
         );
-        assert_eq!(
-            persisted.get("future_key").and_then(toml::Value::as_str),
-            Some("preserve-me")
-        );
+        assert_eq!(persisted.get("future_key").and_then(toml::Value::as_str), Some("preserve-me"));
         assert_eq!(
             persisted
                 .get("trust")
@@ -1909,20 +1745,13 @@ imei2 = ""
             .unwrap()
             .get("auth_token_hmac_key")
             .is_none());
-        let persisted_crypto = persisted
-            .get("crypto")
-            .and_then(toml::Value::as_table)
-            .unwrap();
+        let persisted_crypto = persisted.get("crypto").and_then(toml::Value::as_table).unwrap();
         assert_eq!(
-            persisted_crypto
-                .get("shared_secret_seed")
-                .and_then(toml::Value::as_str),
+            persisted_crypto.get("shared_secret_seed").and_then(toml::Value::as_str),
             Some(expected_shared_secret_seed.as_str())
         );
         assert_eq!(
-            persisted_crypto
-                .get("shared_secret_nonce")
-                .and_then(toml::Value::as_str),
+            persisted_crypto.get("shared_secret_nonce").and_then(toml::Value::as_str),
             Some(expected_shared_secret_nonce.as_str())
         );
     }
@@ -1931,10 +1760,7 @@ imei2 = ""
     fn config_v1_migration_forces_os_version_auto() {
         let mut table: toml::Table =
             toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
-        table.insert(
-            "version".to_string(),
-            toml::Value::Integer(i64::from(CONFIG_VERSION_V1)),
-        );
+        table.insert("version".to_string(), toml::Value::Integer(i64::from(CONFIG_VERSION_V1)));
         table
             .get_mut("trust")
             .and_then(toml::Value::as_table_mut)
@@ -1944,10 +1770,7 @@ imei2 = ""
             .get_mut("main")
             .and_then(toml::Value::as_table_mut)
             .unwrap()
-            .insert(
-                "log_level".to_string(),
-                toml::Value::String("trace".to_string()),
-            );
+            .insert("log_level".to_string(), toml::Value::String("trace".to_string()));
 
         let parsed = parse_config_file(&toml::to_string_pretty(&table).unwrap(), true).unwrap();
         assert!(parsed.migrated);
@@ -1957,16 +1780,30 @@ imei2 = ""
     }
 
     #[test]
-    fn bootstrap_uses_latest_v2_instead_of_stale_migration_snapshot() {
+    fn config_v2_migration_enables_keybox_bound_retirement() {
+        let mut table: toml::Table =
+            toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
+        table.insert("version".to_string(), toml::Value::Integer(i64::from(CONFIG_VERSION_V2)));
+        table
+            .get_mut("main")
+            .and_then(toml::Value::as_table_mut)
+            .unwrap()
+            .insert("retire_stale_keybox_bound_keys".to_string(), toml::Value::Boolean(false));
+
+        let parsed = parse_config_file(&toml::to_string_pretty(&table).unwrap(), true).unwrap();
+        assert!(parsed.migrated);
+        assert_eq!(parsed.config_file.version, CURRENT_CONFIG_VERSION);
+        assert!(parsed.config_file.main.retire_stale_keybox_bound_keys);
+    }
+
+    #[test]
+    fn bootstrap_uses_latest_v3_instead_of_stale_migration_snapshot() {
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("config.toml");
 
         let legacy = ConfigFile {
             version: CONFIG_VERSION_V1,
-            trust: RawTrustConfig {
-                os_version: OsVersionSpec::Fixed(16),
-                ..Default::default()
-            },
+            trust: RawTrustConfig { os_version: OsVersionSpec::Fixed(16), ..Default::default() },
             ..Default::default()
         };
         let stale = parse_config_file(&toml::to_string_pretty(&legacy).unwrap(), true).unwrap();
@@ -1974,14 +1811,8 @@ imei2 = ""
         assert_eq!(stale.config_file.trust.os_version, OsVersionSpec::Auto);
 
         let current = ConfigFile {
-            main: MainConfig {
-                log_level: "trace".to_string(),
-                ..Default::default()
-            },
-            trust: RawTrustConfig {
-                os_version: OsVersionSpec::Fixed(17),
-                ..Default::default()
-            },
+            main: MainConfig { log_level: "trace".to_string(), ..Default::default() },
+            trust: RawTrustConfig { os_version: OsVersionSpec::Fixed(17), ..Default::default() },
             ..Default::default()
         };
         let current_contents = toml::to_string_pretty(&current).unwrap();
@@ -1997,22 +1828,16 @@ imei2 = ""
     fn config_version_validation_handles_v0_and_rejects_unsupported_values() {
         assert_eq!(config_version(&toml::Table::new()).unwrap(), 0);
 
-        for value in [
-            toml::Value::Integer(-1),
-            toml::Value::String("1".to_string()),
-        ] {
+        for value in [toml::Value::Integer(-1), toml::Value::String("1".to_string())] {
             let mut table = toml::Table::new();
             table.insert("version".to_string(), value);
             assert!(config_version(&table).is_err());
         }
 
-        for version in [0, CONFIG_VERSION_V1] {
+        for version in [0, CONFIG_VERSION_V1, CONFIG_VERSION_V2] {
             let mut table: toml::Table =
                 toml::from_str(&toml::to_string_pretty(&ConfigFile::default()).unwrap()).unwrap();
-            table.insert(
-                "version".to_string(),
-                toml::Value::Integer(i64::from(version)),
-            );
+            table.insert("version".to_string(), toml::Value::Integer(i64::from(version)));
             assert!(parse_config_file(&toml::to_string_pretty(&table).unwrap(), false).is_err());
         }
 
@@ -2070,49 +1895,28 @@ imei2 = ""
         let mut config = app_profile_config();
         config.app_patch_levels.insert(
             "com.example.app".into(),
-            AppPatchLevels {
-                os_patchlevel: Some("2026-04-05".into()),
-                ..Default::default()
-            },
+            AppPatchLevels { os_patchlevel: Some("2026-04-05".into()), ..Default::default() },
         );
-        config
-            .app_patch_levels
-            .insert("com.example.app@10".into(), AppPatchLevels::default());
+        config.app_patch_levels.insert("com.example.app@10".into(), AppPatchLevels::default());
         let packages = vec!["com.example.app".into()];
         assert_eq!(
-            config
-                .app_patch_profile(10123, &packages)
-                .unwrap()
-                .unwrap()
-                .os_patchlevel,
+            config.app_patch_profile(10123, &packages).unwrap().unwrap().os_patchlevel,
             202604
         );
         assert_eq!(
-            config
-                .app_patch_profile(1010123, &packages)
-                .unwrap()
-                .unwrap()
-                .os_patchlevel,
+            config.app_patch_profile(1010123, &packages).unwrap().unwrap().os_patchlevel,
             202606
         );
-        assert!(config
-            .app_patch_profile(10123, &["com.unmatched.app".into()])
-            .unwrap()
-            .is_none());
+        assert!(config.app_patch_profile(10123, &["com.unmatched.app".into()]).unwrap().is_none());
         config.app_patch_levels.insert(
             "com.shared.app".into(),
-            AppPatchLevels {
-                os_patchlevel: Some("2026-05-05".into()),
-                ..Default::default()
-            },
+            AppPatchLevels { os_patchlevel: Some("2026-05-05".into()), ..Default::default() },
         );
         let error = config
             .app_patch_profile(10123, &["com.example.app".into(), "com.shared.app".into()])
             .unwrap_err();
         assert!(matches!(
-            error
-                .root_cause()
-                .downcast_ref::<crate::keymaster::error::Error>(),
+            error.root_cause().downcast_ref::<crate::keymaster::error::Error>(),
             Some(crate::keymaster::error::Error::Km(
                 crate::android::hardware::security::keymint::ErrorCode::ErrorCode::INVALID_ARGUMENT
             ))
@@ -2130,15 +1934,11 @@ imei2 = ""
             r#"{"target":"com.example.app@10","os_patchlevel":null,"vendor_patchlevel":null,"boot_patchlevel":null}"#
         );
         save_app_patch_levels_base64_to_path(&path, &payload).unwrap();
-        let parsed = parse_config_file(&fs::read_to_string(&path).unwrap(), false)
-            .unwrap()
-            .config_file;
+        let parsed =
+            parse_config_file(&fs::read_to_string(&path).unwrap(), false).unwrap().config_file;
         assert_eq!(parsed.crypto, original.crypto);
         assert_eq!(parsed.trust, original.trust);
-        assert_eq!(
-            parsed.app_patch_levels["com.example.app@10"],
-            AppPatchLevels::default()
-        );
+        assert_eq!(parsed.app_patch_levels["com.example.app@10"], AppPatchLevels::default());
         for json in [
             r#"{"target":"com.example.app@00","os_patchlevel":"2026-04-05"}"#,
             r#"{"target":"com.example.app","os_patchlevel":"latest"}"#,
@@ -2148,10 +1948,7 @@ imei2 = ""
         ] {
             let prior = fs::read_to_string(&path).unwrap();
             let payload = base64::engine::general_purpose::STANDARD.encode(json);
-            assert!(
-                save_app_patch_levels_base64_to_path(&path, &payload).is_err(),
-                "{json}"
-            );
+            assert!(save_app_patch_levels_base64_to_path(&path, &payload).is_err(), "{json}");
             assert_eq!(fs::read_to_string(&path).unwrap(), prior);
         }
     }

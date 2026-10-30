@@ -151,9 +151,8 @@ fn download_feed(resource: &FeedResource) -> Result<String> {
     };
 
     let fetch = |url: &str| -> Result<String> {
-        let uri: Uri = url
-            .parse()
-            .with_context(|| format!("{} URL is invalid", resource.label()))?;
+        let uri: Uri =
+            url.parse().with_context(|| format!("{} URL is invalid", resource.label()))?;
         if !is_allowed_feed_uri(&uri, resource) {
             bail!("{} URL is outside the fixed feed paths", resource.label());
         }
@@ -188,9 +187,7 @@ fn is_allowed_feed_uri(uri: &Uri, resource: &FeedResource) -> bool {
     let relative = resource.relative_path();
     let jsdelivr_path = format!("/gh/KOWX712/PlayIntegrityFix@bot/{relative}");
     let raw_path = format!("/KOWX712/PlayIntegrityFix/bot/{relative}");
-    (JSDELIVR_HOSTS
-        .iter()
-        .any(|allowed| host.eq_ignore_ascii_case(allowed))
+    (JSDELIVR_HOSTS.iter().any(|allowed| host.eq_ignore_ascii_case(allowed))
         && uri.path() == jsdelivr_path)
         || (host.eq_ignore_ascii_case(RAW_HOST) && uri.path() == raw_path)
 }
@@ -244,14 +241,8 @@ fn load_profile(path: &Path) -> Result<Option<PifProfile>> {
 fn persist_profile(path: &Path, profile: &PifProfile, uid: u32, gid: u32) -> Result<()> {
     let contents = profile.to_canonical_json().map_err(anyhow::Error::msg)?;
     validate_profile_target(path)?;
-    atomic_replace_preserving_metadata(path, contents.as_bytes(), 0o600, uid, gid).with_context(
-        || {
-            format!(
-                "failed to atomically replace PIF profile {}",
-                path.display()
-            )
-        },
-    )?;
+    atomic_replace_preserving_metadata(path, contents.as_bytes(), 0o600, uid, gid)
+        .with_context(|| format!("failed to atomically replace PIF profile {}", path.display()))?;
     validate_profile_target(path)?;
     enforce_profile_metadata(path, uid, gid)?;
     let saved = load_profile(path)?.ok_or_else(|| anyhow!("PIF profile vanished after write"))?;
@@ -262,16 +253,11 @@ fn persist_profile(path: &Path, profile: &PifProfile, uid: u32, gid: u32) -> Res
 }
 
 fn validate_profile_target(path: &Path) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("PIF profile path has no parent"))?;
+    let parent = path.parent().ok_or_else(|| anyhow!("PIF profile path has no parent"))?;
     let parent_metadata = fs::symlink_metadata(parent)
         .with_context(|| format!("failed to inspect PIF state directory {}", parent.display()))?;
     if parent_metadata.file_type().is_symlink() || !parent_metadata.file_type().is_dir() {
-        bail!(
-            "PIF state parent is not a real directory: {}",
-            parent.display()
-        );
+        bail!("PIF state parent is not a real directory: {}", parent.display());
     }
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
@@ -293,8 +279,7 @@ fn enforce_profile_metadata(path: &Path, uid: u32, gid: u32) -> Result<()> {
     if unsafe { libc::fchmod(file.as_raw_fd(), 0o600) } != 0 {
         return Err(std::io::Error::last_os_error()).context("failed to set PIF profile mode");
     }
-    file.sync_all()
-        .context("failed to sync PIF profile metadata")?;
+    file.sync_all().context("failed to sync PIF profile metadata")?;
     Ok(())
 }
 
@@ -307,9 +292,7 @@ fn remove_profile(path: &Path) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error).context("failed to inspect PIF profile before removal"),
     }
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("PIF profile path has no parent"))?;
+    let parent = path.parent().ok_or_else(|| anyhow!("PIF profile path has no parent"))?;
     fs::remove_file(path)
         .with_context(|| format!("failed to remove PIF profile {}", path.display()))?;
     File::open(parent)
@@ -353,10 +336,7 @@ mod tests {
             "https://cdn.jsdelivr.net:443/gh/KOWX712/PlayIntegrityFix@bot/device_list.json",
             "https://raw.githubusercontent.com/KOWX712/PlayIntegrityFix/bot/device_list.json",
         ] {
-            assert!(
-                is_allowed_feed_uri(&url.parse().unwrap(), &catalog),
-                "{url}"
-            );
+            assert!(is_allowed_feed_uri(&url.parse().unwrap(), &catalog), "{url}");
         }
         for url in [
             "http://fastly.jsdelivr.net/gh/KOWX712/PlayIntegrityFix@bot/device_list.json",
@@ -447,11 +427,8 @@ mod tests {
         assert!(load_profile(&link).is_err());
 
         let noncanonical = temp.path().join("noncanonical");
-        fs::write(
-            &noncanonical,
-            format!("{}\n", sample_profile().to_canonical_json().unwrap()),
-        )
-        .unwrap();
+        fs::write(&noncanonical, format!("{}\n", sample_profile().to_canonical_json().unwrap()))
+            .unwrap();
         assert!(load_profile(&noncanonical).is_err());
     }
 
@@ -463,11 +440,7 @@ mod tests {
             b"com.android.vending".as_slice(),
             b"com.android.vending:instant".as_slice(),
         ] {
-            assert!(
-                is_target_process_name(name),
-                "{}",
-                String::from_utf8_lossy(name)
-            );
+            assert!(is_target_process_name(name), "{}", String::from_utf8_lossy(name));
         }
         for name in [
             b"com.google.android.gms".as_slice(),
@@ -476,11 +449,7 @@ mod tests {
             b"com.android.vending.evil".as_slice(),
             b"com.android.vending/child".as_slice(),
         ] {
-            assert!(
-                !is_target_process_name(name),
-                "{}",
-                String::from_utf8_lossy(name)
-            );
+            assert!(!is_target_process_name(name), "{}", String::from_utf8_lossy(name));
         }
     }
 }

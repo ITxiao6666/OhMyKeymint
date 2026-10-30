@@ -34,10 +34,7 @@ fn preflight(bytes: &[u8]) -> Result<()> {
     );
     let mut scanner = Scanner { bytes, position: 0 };
     scanner.item(0)?;
-    ensure!(
-        scanner.position == bytes.len(),
-        "trailing data after CBOR item"
-    );
+    ensure!(scanner.position == bytes.len(), "trailing data after CBOR item");
     Ok(())
 }
 
@@ -80,18 +77,14 @@ impl Scanner<'_> {
             2 | 3 => match argument {
                 Some(length) => {
                     let length = usize::try_from(length).context("CBOR length overflow")?;
-                    self.position = self
-                        .position
-                        .checked_add(length)
-                        .context("CBOR length overflow")?;
+                    self.position =
+                        self.position.checked_add(length).context("CBOR length overflow")?;
                     ensure!(self.position <= self.bytes.len(), "truncated CBOR string");
                 }
                 None => {
                     while self.bytes.get(self.position) != Some(&0xff) {
-                        let chunk = *self
-                            .bytes
-                            .get(self.position)
-                            .context("truncated CBOR string")?;
+                        let chunk =
+                            *self.bytes.get(self.position).context("truncated CBOR string")?;
                         ensure!(
                             chunk >> 5 == major && chunk & 31 != 31,
                             "invalid indefinite CBOR string chunk"
@@ -103,10 +96,7 @@ impl Scanner<'_> {
             },
             4 | 5 => {
                 if let Some(length) = argument {
-                    ensure!(
-                        length <= MAX_CONTAINER_ITEMS,
-                        "CBOR container exceeds 64 entries"
-                    );
+                    ensure!(length <= MAX_CONTAINER_ITEMS, "CBOR container exceeds 64 entries");
                     for _ in 0..length {
                         self.item(depth + 1)?;
                         if major == 5 {
@@ -117,10 +107,7 @@ impl Scanner<'_> {
                     let mut count = 0;
                     while self.bytes.get(self.position) != Some(&0xff) {
                         count += 1;
-                        ensure!(
-                            count <= MAX_CONTAINER_ITEMS,
-                            "CBOR container exceeds 64 entries"
-                        );
+                        ensure!(count <= MAX_CONTAINER_ITEMS, "CBOR container exceeds 64 entries");
                         self.item(depth + 1)?;
                         if major == 5 {
                             self.item(depth + 1)?;
@@ -235,9 +222,9 @@ pub fn map_get_text<'a>(entries: &'a [(Value, Value)], key: &str) -> Option<&'a 
 
 fn canonicalize(value: &Value) -> Result<Value> {
     match value {
-        Value::Array(items) => Ok(Value::Array(
-            items.iter().map(canonicalize).collect::<Result<Vec<_>>>()?,
-        )),
+        Value::Array(items) => {
+            Ok(Value::Array(items.iter().map(canonicalize).collect::<Result<Vec<_>>>()?))
+        }
         Value::Map(entries) => {
             let mut sorted = Vec::with_capacity(entries.len());
             for (key, value) in entries {
@@ -248,18 +235,10 @@ fn canonicalize(value: &Value) -> Result<Value> {
             }
 
             sorted.sort_by(|left, right| {
-                left.0
-                    .len()
-                    .cmp(&right.0.len())
-                    .then_with(|| left.0.cmp(&right.0))
+                left.0.len().cmp(&right.0.len()).then_with(|| left.0.cmp(&right.0))
             });
 
-            Ok(Value::Map(
-                sorted
-                    .into_iter()
-                    .map(|(_, key, value)| (key, value))
-                    .collect(),
-            ))
+            Ok(Value::Map(sorted.into_iter().map(|(_, key, value)| (key, value)).collect()))
         }
         Value::Tag(tag, inner) => Ok(Value::Tag(*tag, Box::new(canonicalize(inner)?))),
         other => Ok(other.clone()),

@@ -49,10 +49,7 @@ pub fn run() -> Result<()> {
             let mut live = BTreeSet::new();
             let mut unsupported = 0;
             for entry in fs::read_dir("/proc")?.flatten() {
-                let Some(pid) = entry
-                    .file_name()
-                    .to_str()
-                    .and_then(|s| s.parse::<i32>().ok())
+                let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<i32>().ok())
                 else {
                     continue;
                 };

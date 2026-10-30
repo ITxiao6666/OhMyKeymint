@@ -86,10 +86,7 @@ pub fn reset_thread(connection: BinderStateKey) {
     });
 }
 pub fn retire_connection(connection: BinderStateKey) {
-    REPLIES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .retain(|(key, _), _| *key != connection);
+    REPLIES.lock().unwrap_or_else(|e| e.into_inner()).retain(|(key, _), _| *key != connection);
 }
 fn fail(errno: i32) -> i32 {
     unsafe {
@@ -156,12 +153,7 @@ fn receive(fd: i32, connection: BinderStateKey, bytes: &[u8]) {
                         }
                         s.next_scope = s.next_scope.wrapping_add(1);
                         let id = s.next_scope;
-                        s.scopes.push(Scope {
-                            connection,
-                            uid,
-                            oneway,
-                            id,
-                        });
+                        s.scopes.push(Scope { connection, uid, oneway, id });
                     });
                 }
             }
@@ -186,9 +178,7 @@ fn accepted_real(fd: i32, connection: BinderStateKey, cmd: u32, payload: &[u8]) 
                     !reply && transaction(payload).is_some_and(|tr| tr.flags & TF_ONE_WAY == 0);
                 native_submission(fd, reply, expects);
                 if matches!(_ioc_nr(cmd), BC_REPLY_NR | BC_REPLY_SG_NR)
-                    && s.scopes
-                        .last()
-                        .is_some_and(|scope| scope.connection == connection)
+                    && s.scopes.last().is_some_and(|scope| scope.connection == connection)
                 {
                     s.scopes.pop();
                 }
@@ -204,10 +194,9 @@ fn observe_native(payload: &[u8], reason: NativeReason) {
     let Some(tr) = transaction(payload) else {
         return;
     };
-    let Ok(header) = copy_process_buffer(
-        unsafe { tr.data.ptr.buffer } as usize,
-        tr.data_size.min(256),
-    ) else {
+    let Ok(header) =
+        copy_process_buffer(unsafe { tr.data.ptr.buffer } as usize, tr.data_size.min(256))
+    else {
         return;
     };
     let Some((contract, _)) = Contract::identify(&header) else {
@@ -308,11 +297,7 @@ fn synthetic(connection: BinderStateKey, cmd: u32, payload: &[u8]) -> Result<boo
     {
         let replies = REPLIES.lock().unwrap_or_else(|e| e.into_inner());
         if replies.len() >= 64
-            || replies
-                .values()
-                .map(OwnedReply::allocation_size)
-                .sum::<usize>()
-                > 16 * MAX_IO
+            || replies.values().map(OwnedReply::allocation_size).sum::<usize>() > 16 * MAX_IO
         {
             log::warn!(target: "omk_soter_remote", "event=soter path=native_remote stage=reply uid={uid} tx={tx} reason=reply_capacity");
             return Err(libc::EBUSY);
@@ -346,20 +331,12 @@ fn synthetic(connection: BinderStateKey, cmd: u32, payload: &[u8]) -> Result<boo
     };
     let mut event = BR_REPLY.to_ne_bytes().to_vec();
     event.extend_from_slice(bytes_of(&response));
-    REPLIES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert((connection, pointer), reply);
+    REPLIES.lock().unwrap_or_else(|e| e.into_inner()).insert((connection, pointer), reply);
     STATE.with(|s| {
-        s.borrow_mut()
-            .connections
-            .entry(connection)
-            .or_default()
-            .synthetic
-            .push_back(Synthetic {
-                scope: scope.id,
-                events: VecDeque::from([BR_TRANSACTION_COMPLETE_CMD.to_ne_bytes().to_vec(), event]),
-            })
+        s.borrow_mut().connections.entry(connection).or_default().synthetic.push_back(Synthetic {
+            scope: scope.id,
+            events: VecDeque::from([BR_TRANSACTION_COMPLETE_CMD.to_ne_bytes().to_vec(), event]),
+        })
     });
     Ok(true)
 }
@@ -372,19 +349,11 @@ fn drain(connection: BinderStateKey, capacity: usize) -> Result<Option<Vec<u8>>,
         if native_pending(connection) {
             return Ok(None);
         }
-        let Some(pending) = state
-            .synthetic
-            .front_mut()
-            .filter(|v| Some(v.scope) == scope)
-        else {
+        let Some(pending) = state.synthetic.front_mut().filter(|v| Some(v.scope) == scope) else {
             return Ok(None);
         };
         let mut bytes = Vec::new();
-        while pending
-            .events
-            .front()
-            .is_some_and(|event| bytes.len() + event.len() <= capacity)
-        {
+        while pending.events.front().is_some_and(|event| bytes.len() + event.len() <= capacity) {
             bytes.extend(pending.events.pop_front().unwrap());
         }
         if bytes.is_empty() {
@@ -403,11 +372,7 @@ fn copyback(connection: BinderStateKey, saved: Copyback) -> i32 {
         || !write_process_value(saved.arg as *mut binder_write_read, &saved.output)
     {
         STATE.with(|s| {
-            s.borrow_mut()
-                .connections
-                .entry(connection)
-                .or_default()
-                .pending = Some(saved)
+            s.borrow_mut().connections.entry(connection).or_default().pending = Some(saved)
         });
         return fail(libc::EFAULT);
     }
@@ -449,14 +414,8 @@ unsafe fn ioctl_with(fd: i32, request: i32, arg: *mut c_void, original: Ioctl) -
     let Some(mut bwr) = copy_process_value(arg.cast()) else {
         return fail(libc::EFAULT);
     };
-    let pending = STATE.with(|s| {
-        s.borrow_mut()
-            .connections
-            .entry(connection)
-            .or_default()
-            .pending
-            .take()
-    });
+    let pending =
+        STATE.with(|s| s.borrow_mut().connections.entry(connection).or_default().pending.take());
     if let Some(pending) = pending {
         if pending.arg != arg as usize
             || pending.original.write_buffer != bwr.write_buffer
@@ -465,11 +424,7 @@ unsafe fn ioctl_with(fd: i32, request: i32, arg: *mut c_void, original: Ioctl) -
             || pending.original.read_size != bwr.read_size
         {
             STATE.with(|s| {
-                s.borrow_mut()
-                    .connections
-                    .entry(connection)
-                    .or_default()
-                    .pending = Some(pending)
+                s.borrow_mut().connections.entry(connection).or_default().pending = Some(pending)
             });
             return fail(libc::EBUSY);
         }
@@ -528,11 +483,7 @@ unsafe fn ioctl_with(fd: i32, request: i32, arg: *mut c_void, original: Ioctl) -
         let mut part: binder_write_read = std::mem::zeroed();
         part.write_buffer = rest.as_ptr() as _;
         part.write_size = len;
-        ret = original(
-            guard.fd(),
-            request,
-            (&mut part as *mut binder_write_read).cast(),
-        );
+        ret = original(guard.fd(), request, (&mut part as *mut binder_write_read).cast());
         errno = *libc::__errno();
         if part.write_consumed > len {
             ret = -1;
@@ -566,11 +517,7 @@ unsafe fn ioctl_with(fd: i32, request: i32, arg: *mut c_void, original: Ioctl) -
                 let mut part: binder_write_read = std::mem::zeroed();
                 part.read_buffer = read.as_mut_ptr() as _;
                 part.read_size = capacity;
-                ret = original(
-                    guard.fd(),
-                    request,
-                    (&mut part as *mut binder_write_read).cast(),
-                );
+                ret = original(guard.fd(), request, (&mut part as *mut binder_write_read).cast());
                 errno = *libc::__errno();
                 if part.read_consumed > capacity {
                     read.clear();
@@ -586,21 +533,14 @@ unsafe fn ioctl_with(fd: i32, request: i32, arg: *mut c_void, original: Ioctl) -
     }
     copyback(
         connection,
-        Copyback {
-            arg: arg as usize,
-            original: input,
-            output: bwr,
-            read,
-            ret,
-            errno,
-            freed,
-        },
+        Copyback { arg: arg as usize, original: input, output: bwr, read, ret, errno, freed },
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hook::binder::tests::{BC_FREE_BUFFER_CMD, BC_REPLY_CMD, BR_TRANSACTION_CMD};
     use std::sync::atomic::AtomicUsize;
 
     static DRIVER_WRITES: AtomicUsize = AtomicUsize::new(0);
@@ -610,10 +550,7 @@ mod tests {
         let mut tr: binder_transaction_data = unsafe { std::mem::zeroed() };
         tr.code = 5;
         tr.data_size = MAX_REQUEST_BYTES + 1;
-        tr.data.ptr = binder_transaction_data_data_ptr {
-            buffer: 1,
-            offsets: 0,
-        };
+        tr.data.ptr = binder_transaction_data_data_ptr { buffer: 1, offsets: 0 };
         assert!(current_scope().is_none());
         assert_eq!(synthetic(0, TRANSACTION, bytes_of(&tr)), Ok(false));
         let mut header = soter_ta::parcel::Reply::ok();
@@ -633,12 +570,7 @@ mod tests {
         for uid in [None, Some(10124), Some(1010124)] {
             reset_thread(connection);
             STATE.with(|state| {
-                state.borrow_mut().scopes.push(Scope {
-                    connection,
-                    uid,
-                    oneway: false,
-                    id: 1,
-                })
+                state.borrow_mut().scopes.push(Scope { connection, uid, oneway: false, id: 1 })
             });
             for wire in [2, 6, 9] {
                 let mut parcel = soter_ta::parcel::Reply::ok();
@@ -663,17 +595,10 @@ mod tests {
 
     unsafe extern "C" fn driver(_fd: i32, _request: i32, arg: *mut c_void) -> i32 {
         let bwr = &mut *arg.cast::<binder_write_read>();
-        assert_eq!(
-            bwr.read_size, 0,
-            "test must not issue a kernel read for synthetic replies"
-        );
+        assert_eq!(bwr.read_size, 0, "test must not issue a kernel read for synthetic replies");
         let data = std::slice::from_raw_parts(bwr.write_buffer as *const u8, bwr.write_size);
         let (cmd, _) = command(data).unwrap();
-        assert_ne!(
-            _ioc_nr(cmd),
-            BC_FREE_BUFFER_NR,
-            "fake buffer reached driver"
-        );
+        assert_ne!(_ioc_nr(cmd), BC_FREE_BUFFER_NR, "fake buffer reached driver");
         DRIVER_WRITES.fetch_add(1, Ordering::Relaxed);
         bwr.write_consumed = bwr.write_size;
         0
@@ -684,32 +609,18 @@ mod tests {
         let fd = 9191;
         let connection = synchronize_binder_fd_generation(fd).unwrap().connection;
         reset_thread(connection);
-        let reply = Contract::Hidl.reply(
-            8,
-            Outcome::Buffer {
-                code: 0,
-                data: vec![5; 16],
-                field: 16,
-            },
-        );
+        let reply =
+            Contract::Hidl.reply(8, Outcome::Buffer { code: 0, data: vec![5; 16], field: 16 });
         let pointer = reply.bytes.as_ptr() as usize;
         REPLIES.lock().unwrap().insert((connection, pointer), reply);
         STATE.with(|s| {
             let mut s = s.borrow_mut();
-            s.scopes.push(Scope {
-                connection,
-                uid: Some(10123),
-                oneway: false,
-                id: 1,
-            });
+            s.scopes.push(Scope { connection, uid: Some(10123), oneway: false, id: 1 });
             s.connections
                 .entry(connection)
                 .or_default()
                 .synthetic
-                .push_back(Synthetic {
-                    scope: 1,
-                    events: VecDeque::from([vec![7; 4]]),
-                });
+                .push_back(Synthetic { scope: 1, events: VecDeque::from([vec![7; 4]]) });
         });
         let mut read = [0u8; 4];
         let mut bwr: binder_write_read = unsafe { std::mem::zeroed() };
@@ -806,20 +717,11 @@ mod tests {
         reset_thread(123);
         STATE.with(|s| {
             let mut s = s.borrow_mut();
-            s.scopes.push(Scope {
-                connection: 123,
-                uid: Some(10123),
-                oneway: false,
-                id: 7,
+            s.scopes.push(Scope { connection: 123, uid: Some(10123), oneway: false, id: 7 });
+            s.connections.entry(123).or_default().synthetic.push_back(Synthetic {
+                scope: 7,
+                events: VecDeque::from([vec![1; 4], vec![2; 68]]),
             });
-            s.connections
-                .entry(123)
-                .or_default()
-                .synthetic
-                .push_back(Synthetic {
-                    scope: 7,
-                    events: VecDeque::from([vec![1; 4], vec![2; 68]]),
-                });
         });
         assert_eq!(drain(123, 4).unwrap(), Some(vec![1; 4]));
         assert_eq!(drain(123, 4), Err(libc::EINVAL));
@@ -832,25 +734,12 @@ mod tests {
         reset_thread(124);
         STATE.with(|s| {
             let mut s = s.borrow_mut();
-            s.scopes.push(Scope {
-                connection: 124,
-                uid: None,
-                oneway: false,
-                id: 9,
-            });
+            s.scopes.push(Scope { connection: 124, uid: None, oneway: false, id: 9 });
             let c = s.connections.entry(124).or_default();
-            c.synthetic.push_back(Synthetic {
-                scope: 9,
-                events: VecDeque::from([vec![1; 4]]),
-            });
+            c.synthetic.push_back(Synthetic { scope: 9, events: VecDeque::from([vec![1; 4]]) });
         });
         STATE.with(|s| {
-            s.borrow_mut().scopes.push(Scope {
-                connection: 124,
-                uid: None,
-                oneway: false,
-                id: 10,
-            })
+            s.borrow_mut().scopes.push(Scope { connection: 124, uid: None, oneway: false, id: 10 })
         });
         assert!(drain(124, 100).unwrap().is_none());
         STATE.with(|s| {

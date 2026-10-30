@@ -87,27 +87,20 @@ pub fn verify_csr(bytes: &[u8]) -> Result<VerifyReport> {
 
     let version = as_i128(&csr[0], "CSR version")?;
     if version != AUTHENTICATED_REQUEST_VERSION {
-        return Err(anyhow!(
-            "CSR version must be {AUTHENTICATED_REQUEST_VERSION}, got {version}"
-        ));
+        return Err(anyhow!("CSR version must be {AUTHENTICATED_REQUEST_VERSION}, got {version}"));
     }
 
     validate_uds_certs(&csr[1])?;
 
     let dice_chain = as_array(&csr[2], "DICE chain")?;
     if !(2..=32).contains(&dice_chain.len()) {
-        return Err(anyhow!(
-            "DICE chain must contain a UDS key and 1..31 DICE entries"
-        ));
+        return Err(anyhow!("DICE chain must contain a UDS key and 1..31 DICE entries"));
     }
     let uds = extract_uds_key(dice_chain)?;
     let leaf = verify_dice_chain_and_extract_leaf_key(dice_chain)?;
 
-    let signed_data = parse_cose_sign1(
-        as_array(&csr[3], "signed data")?,
-        "signed data",
-        Some(&leaf),
-    )?;
+    let signed_data =
+        parse_cose_sign1(as_array(&csr[3], "signed data")?, "signed data", Some(&leaf))?;
     let signature_input =
         build_sig_structure("Signature1", signed_data.protected, signed_data.payload)?;
     let signature_valid =

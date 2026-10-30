@@ -16,9 +16,7 @@ pub fn parse_app_target(target: &str) -> Option<(&str, u32)> {
     }
     for component in package.split('.') {
         let mut bytes = component.bytes();
-        if !bytes
-            .next()
-            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == b'_')
+        if !bytes.next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == b'_')
             || !bytes.all(|ch| ch.is_ascii_alphanumeric() || ch == b'_')
         {
             return None;
@@ -38,10 +36,7 @@ pub fn validate_app_targets(targets: &[String]) -> Result<(), String> {
         return Err("Soter application selection exceeds its size limit".into());
     }
     let mut seen = std::collections::BTreeSet::new();
-    if targets
-        .iter()
-        .any(|target| parse_app_target(target).is_none() || !seen.insert(target))
-    {
+    if targets.iter().any(|target| parse_app_target(target).is_none() || !seen.insert(target)) {
         return Err("Soter application selection contains an invalid or duplicate target".into());
     }
     Ok(())
@@ -104,14 +99,8 @@ mod tests {
 
     #[test]
     fn app_targets_require_an_explicit_canonical_android_user() {
-        assert_eq!(
-            parse_app_target("com.example.wallet@0"),
-            Some(("com.example.wallet", 0))
-        );
-        assert_eq!(
-            parse_app_target("com.example.wallet@10"),
-            Some(("com.example.wallet", 10))
-        );
+        assert_eq!(parse_app_target("com.example.wallet@0"), Some(("com.example.wallet", 0)));
+        assert_eq!(parse_app_target("com.example.wallet@10"), Some(("com.example.wallet", 10)));
         for target in [
             "com.example",
             "com.example@01",
@@ -134,10 +123,7 @@ mod tests {
             assert_eq!(parse(canonical_bytes(enabled)).unwrap(), enabled);
         }
         for invalid in [b"".as_slice(), b"true", b"2", b" 1", b"1\n", b"0\0"] {
-            assert_eq!(
-                parse(invalid).unwrap_err().kind(),
-                io::ErrorKind::InvalidData
-            );
+            assert_eq!(parse(invalid).unwrap_err().kind(), io::ErrorKind::InvalidData);
         }
     }
 

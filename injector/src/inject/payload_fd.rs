@@ -1,14 +1,15 @@
+use crate::sys;
+use anyhow::{anyhow, bail, Context, Result};
+use log::{debug, info};
+use nix::unistd::Pid;
+use rand::TryRng;
 use std::ffi::{c_void, CString};
 use std::mem::{offset_of, size_of};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::Path;
 
-use anyhow::{anyhow, bail, Context, Result};
-use log::{debug, info};
-use nix::unistd::Pid;
-use rand::TryRng;
-
-use crate::sys;
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Copy)]
 pub(super) struct RemoteFdHandoffAddrs {
@@ -42,27 +43,20 @@ pub(super) fn log_loader_abi() {
 fn build_abstract_sockaddr(magic_bytes: &[u8]) -> Result<(libc::sockaddr_un, usize)> {
     let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
     if magic_bytes.len() > addr.sun_path.len().saturating_sub(1) {
-        bail!(
-            "abstract socket name is too long for sockaddr_un: {} bytes",
-            magic_bytes.len()
-        );
+        bail!("abstract socket name is too long for sockaddr_un: {} bytes", magic_bytes.len());
     }
 
     addr.sun_family = libc::AF_UNIX as u16;
     for (i, byte) in magic_bytes.iter().enumerate() {
         addr.sun_path[1 + i] = *byte as libc::c_char;
     }
-    Ok((
-        addr,
-        offset_of!(libc::sockaddr_un, sun_path) + 1 + magic_bytes.len(),
-    ))
+    Ok((addr, offset_of!(libc::sockaddr_un, sun_path) + 1 + magic_bytes.len()))
 }
 
 fn generate_fd_handoff_name() -> Result<[u8; 16]> {
     let mut random = [0u8; 16];
     let mut rng = rand::rngs::SysRng;
-    rng.try_fill_bytes(&mut random)
-        .context("failed to fill fd handoff socket name from SysRng")?;
+    rng.try_fill_bytes(&mut random).context("failed to fill fd handoff socket name from SysRng")?;
     Ok(random)
 }
 
@@ -98,25 +92,13 @@ where
         pid,
         open_addr,
         libc_return_addr,
-        &[
-            remote_path_ptr,
-            (libc::O_RDONLY | libc::O_CLOEXEC) as usize,
-            0,
-        ],
+        &[remote_path_ptr, (libc::O_RDONLY | libc::O_CLOEXEC) as usize, 0],
     )?);
     if remote_lib_fd == -1 {
         let err = get_remote_errno()?;
-        bail!(
-            "Failed to open remote payload path {}. Remote errno: {}",
-            path.display(),
-            err
-        );
+        bail!("Failed to open remote payload path {}. Remote errno: {}", path.display(), err);
     }
-    info!(
-        "remote payload path opened: path={} fd={}",
-        path.display(),
-        remote_lib_fd
-    );
+    info!("remote payload path opened: path={} fd={}", path.display(), remote_lib_fd);
     Ok(remote_lib_fd)
 }
 
@@ -332,10 +314,7 @@ where
     let local_socket =
         unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
     if local_socket == -1 {
-        bail!(
-            "Failed to create local {label} handoff socket: {}",
-            std::io::Error::last_os_error()
-        );
+        bail!("Failed to create local {label} handoff socket: {}", std::io::Error::last_os_error());
     }
     let local_socket = unsafe { OwnedFd::from_raw_fd(local_socket) };
 
@@ -343,11 +322,7 @@ where
         pid,
         addrs.socket,
         addrs.libc_return,
-        &[
-            libc::AF_UNIX as usize,
-            (libc::SOCK_DGRAM | libc::SOCK_CLOEXEC) as usize,
-            0,
-        ],
+        &[libc::AF_UNIX as usize, (libc::SOCK_DGRAM | libc::SOCK_CLOEXEC) as usize, 0],
     )?);
     if remote_socket == -1 {
         let err = get_remote_errno()?;
@@ -409,15 +384,9 @@ where
     };
     let remote_cmsg_ptr = push_to_remote_stack(remote_cmsg_bytes)?;
     let remote_payload_storage = push_to_remote_stack(&[0u8])?;
-    let remote_iov = libc::iovec {
-        iov_base: remote_payload_storage as *mut c_void,
-        iov_len: 1,
-    };
+    let remote_iov = libc::iovec { iov_base: remote_payload_storage as *mut c_void, iov_len: 1 };
     let remote_iov_bytes = unsafe {
-        std::slice::from_raw_parts(
-            &remote_iov as *const _ as *const u8,
-            size_of::<libc::iovec>(),
-        )
+        std::slice::from_raw_parts(&remote_iov as *const _ as *const u8, size_of::<libc::iovec>())
     };
     let remote_iov_ptr = push_to_remote_stack(remote_iov_bytes)?;
 
@@ -436,11 +405,7 @@ where
         pid,
         addrs.recvmsg,
         addrs.libc_return,
-        &[
-            remote_socket as usize,
-            remote_msg_ptr,
-            libc::MSG_WAITALL as usize,
-        ],
+        &[remote_socket as usize, remote_msg_ptr, libc::MSG_WAITALL as usize],
     )?;
 
     let mut local_cmsg_storage = vec![0usize; control_words(send_cmsg_space)];
@@ -478,18 +443,16 @@ where
     if send_res == -1 {
         let send_error = std::io::Error::last_os_error();
         if let Err(cancel_error) = sys::remote_cancel_call(pid, recvmsg_call) {
-            return Err(
-                anyhow!("Failed to send {label} fd locally: {send_error}").context(format!(
+            return Err(anyhow!("Failed to send {label} fd locally: {send_error}").context(
+                format!(
                     "failed to cancel remote recvmsg after local sendmsg failure: {cancel_error:#}"
-                )),
-            );
+                ),
+            ));
         }
         if let Err(close_error) = close_remote(remote_socket) {
-            return Err(
-                anyhow!("Failed to send {label} fd locally: {send_error}").context(format!(
-                    "failed to close remote socket after canceling recvmsg: {close_error:#}"
-                )),
-            );
+            return Err(anyhow!("Failed to send {label} fd locally: {send_error}").context(
+                format!("failed to close remote socket after canceling recvmsg: {close_error:#}"),
+            ));
         }
         bail!("Failed to send {label} fd locally: {send_error}");
     }
@@ -505,9 +468,8 @@ where
                         "remote recvmsg for {label} failed after register restore; remote socket close also failed: {close_error:#}"
                     )));
                 }
-                return Err(error.context(format!(
-                    "remote recvmsg for {label} failed after register restore"
-                )));
+                return Err(error
+                    .context(format!("remote recvmsg for {label} failed after register restore")));
             }
             return Err(error.context(format!(
                 "remote recvmsg for {label} failed and register restore failed; remote socket not closed because tracee state is uncertain"
@@ -579,12 +541,9 @@ where
                 "failed to close remote {label} socket; received fd close also failed: {close_error:#}"
             )));
         }
-        return Err(error.context(format!(
-            "failed to close remote {label} socket after receiving fd"
-        )));
+        return Err(
+            error.context(format!("failed to close remote {label} socket after receiving fd"))
+        );
     }
     Ok(fd)
 }
-
-#[cfg(test)]
-mod tests;

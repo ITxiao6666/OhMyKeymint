@@ -9,13 +9,10 @@ const INTERFACES: [&str; 3] = [
 ];
 
 fn target_for(interface: &str) -> Option<LocalBinderTarget> {
-    INTERFACES
-        .iter()
-        .position(|known| *known == interface)
-        .map(|index| LocalBinderTarget {
-            ptr: 0x1000 + index as libc::c_ulong,
-            cookie: 0x2000 + index as libc::c_ulong,
-        })
+    INTERFACES.iter().position(|known| *known == interface).map(|index| LocalBinderTarget {
+        ptr: 0x1000 + index as libc::c_ulong,
+        cookie: 0x2000 + index as libc::c_ulong,
+    })
 }
 
 fn request_for(interface: &str) -> (u32, Parcel) {
@@ -59,9 +56,10 @@ fn request_for(interface: &str) -> (u32, Parcel) {
 fn cross_interface_requests_leave_original_transaction_and_reply_untouched() {
     let _guard = route_state_test_guard();
     for requested in INTERFACES {
-        let (code, request) = request_for(requested);
         for actual in INTERFACES.into_iter().filter(|actual| *actual != requested) {
-            let mut tr = transaction_for_parcel(target_for(actual).unwrap(), code, &request);
+            let (code, request) = request_for(requested);
+            let (mut tr, _data) =
+                transaction_for_parcel(target_for(actual).unwrap(), code, request);
             let original = tr;
             push_pending_frame(101);
             assert!(!unsafe {
@@ -70,7 +68,7 @@ fn cross_interface_requests_leave_original_transaction_and_reply_untouched() {
                     &mut tr,
                     None,
                     "BR_TRANSACTION",
-                    &config::InjectorConfig::default(),
+                    &Arc::new(config::InjectorConfig::default()),
                     target_for,
                 )
             });
@@ -78,12 +76,8 @@ fn cross_interface_requests_leave_original_transaction_and_reply_untouched() {
             assert_eq!(tr.flags, original.flags);
             assert_eq!(tr.data_size, original.data_size);
             assert_eq!(tr.offsets_size, original.offsets_size);
-            assert_eq!(unsafe { tr.data.ptr.buffer }, unsafe {
-                original.data.ptr.buffer
-            });
-            assert_eq!(unsafe { tr.data.ptr.offsets }, unsafe {
-                original.data.ptr.offsets
-            });
+            assert_eq!(unsafe { tr.data.ptr.buffer }, unsafe { original.data.ptr.buffer });
+            assert_eq!(unsafe { tr.data.ptr.offsets }, unsafe { original.data.ptr.offsets });
             assert!(
                 matches!(take_top_pending(101), Some(None)),
                 "wrong interface must not schedule OMK execution or mirroring"
@@ -97,7 +91,7 @@ fn matching_service_maintenance_and_authorization_requests_keep_their_routes() {
     let _guard = route_state_test_guard();
     for requested in INTERFACES {
         let (code, request) = request_for(requested);
-        let mut tr = transaction_for_parcel(target_for(requested).unwrap(), code, &request);
+        let (mut tr, _data) = transaction_for_parcel(target_for(requested).unwrap(), code, request);
         tr.sender_euid = 1000; // The default Android-identity filter selects System.
         push_pending_frame(102);
         assert!(!unsafe {
@@ -106,7 +100,7 @@ fn matching_service_maintenance_and_authorization_requests_keep_their_routes() {
                 &mut tr,
                 None,
                 "BR_TRANSACTION",
-                &config::InjectorConfig::default(),
+                &Arc::new(config::InjectorConfig::default()),
                 target_for,
             )
         });
@@ -160,14 +154,8 @@ fn known_target_rejects_other_token_even_when_other_service_is_not_ready() {
 fn target_identity_includes_both_pointer_and_cookie() {
     let target = target_for(identify::KEYSTORE_SERVICE_INTERFACE).unwrap();
     for changed in [
-        LocalBinderTarget {
-            ptr: target.ptr + 1,
-            ..target
-        },
-        LocalBinderTarget {
-            cookie: target.cookie + 1,
-            ..target
-        },
+        LocalBinderTarget { ptr: target.ptr + 1, ..target },
+        LocalBinderTarget { cookie: target.cookie + 1, ..target },
     ] {
         assert_eq!(
             registered_interface_matches_target(
@@ -183,18 +171,11 @@ fn target_identity_includes_both_pointer_and_cookie() {
 #[test]
 fn missing_local_target_cannot_enter_service_dispatch() {
     let _guard = route_state_test_guard();
-    let (code, request) = request_for(identify::KEYSTORE_MAINTENANCE_INTERFACE);
-    for target in [
-        LocalBinderTarget {
-            ptr: 0,
-            cookie: 123,
-        },
-        LocalBinderTarget {
-            ptr: 123,
-            cookie: 0,
-        },
-    ] {
-        let mut tr = transaction_for_parcel(target, code, &request);
+    for target in
+        [LocalBinderTarget { ptr: 0, cookie: 123 }, LocalBinderTarget { ptr: 123, cookie: 0 }]
+    {
+        let (code, request) = request_for(identify::KEYSTORE_MAINTENANCE_INTERFACE);
+        let (mut tr, _data) = transaction_for_parcel(target, code, request);
         push_pending_frame(103);
         assert!(!unsafe {
             handle_keystore_transaction(
@@ -202,7 +183,7 @@ fn missing_local_target_cannot_enter_service_dispatch() {
                 &mut tr,
                 None,
                 "BR_TRANSACTION",
-                &config::InjectorConfig::default(),
+                &Arc::new(config::InjectorConfig::default()),
                 |_| panic!("missing local target must be rejected first"),
             )
         });
@@ -214,19 +195,17 @@ fn missing_local_target_cannot_enter_service_dispatch() {
 #[test]
 fn unverified_maintenance_mutation_is_blocked_and_returns_system_error() {
     let _guard = route_state_test_guard();
-    let mut request = Parcel::new();
-    request.write(&0i32).unwrap();
-    request.write(&0i32).unwrap();
-    request.write(&rsbinder::INTERFACE_HEADER).unwrap();
-    request
-        .write(&identify::KEYSTORE_MAINTENANCE_INTERFACE.to_owned())
-        .unwrap();
-    request.write(&10i32).unwrap();
     for one_way in [false, true] {
-        let mut tr = transaction_for_parcel(
+        let mut request = Parcel::new();
+        request.write(&0i32).unwrap();
+        request.write(&0i32).unwrap();
+        request.write(&rsbinder::INTERFACE_HEADER).unwrap();
+        request.write(&identify::KEYSTORE_MAINTENANCE_INTERFACE.to_owned()).unwrap();
+        request.write(&10i32).unwrap();
+        let (mut tr, _data) = transaction_for_parcel(
             target_for(identify::KEYSTORE_MAINTENANCE_INTERFACE).unwrap(),
             1,
-            &request,
+            request,
         );
         if one_way {
             tr.flags = crate::hook::binder::TF_ONE_WAY;
@@ -239,15 +218,11 @@ fn unverified_maintenance_mutation_is_blocked_and_returns_system_error() {
                 &mut tr,
                 None,
                 "BR_TRANSACTION",
-                &config::InjectorConfig::default(),
+                &Arc::new(config::InjectorConfig::default()),
                 |_| None,
             )
         });
-        assert_eq!(
-            tr.code,
-            u32::MAX,
-            "neither backend may perform an unverified mutation"
-        );
+        assert_eq!(tr.code, u32::MAX, "neither backend may perform an unverified mutation");
         if one_way {
             assert!(take_top_pending(104).is_none());
             continue;
@@ -256,15 +231,12 @@ fn unverified_maintenance_mutation_is_blocked_and_returns_system_error() {
         let mut reply: binder_transaction_data = unsafe { std::mem::zeroed() };
         reply.data.ptr.buffer = success.data_ptr() as libc::c_ulong;
         reply.data_size = success.data_size();
-        let frame = unsafe { handle_bc_reply(104, &mut reply) }.unwrap();
+        let frame = unsafe { handle_bc_reply(104, &mut reply, true) }.unwrap();
         let (data, size, offsets, offsets_size) = unsafe { transaction_parts(&reply) };
         let status =
             unsafe { parcel::parse_reply_status(data, size, offsets, offsets_size) }.unwrap();
         assert_eq!(status.exception_code(), ExceptionCode::ServiceSpecific);
-        assert_eq!(
-            status.service_specific_error(),
-            ResponseCode::SYSTEM_ERROR.0
-        );
+        assert_eq!(status.service_specific_error(), ResponseCode::SYSTEM_ERROR.0);
         let _ = commit_bc_reply(104, Some(frame), unsafe { reply.data.ptr.buffer } as usize);
         clear_outbound_reply_buffers(104);
     }
@@ -274,10 +246,10 @@ fn unverified_maintenance_mutation_is_blocked_and_returns_system_error() {
 fn unverified_system_only_service_requests_are_unchanged() {
     let _guard = route_state_test_guard();
     let (code, request) = request_for(identify::KEYSTORE_SERVICE_INTERFACE);
-    let mut tr = transaction_for_parcel(
+    let (mut tr, _data) = transaction_for_parcel(
         target_for(identify::KEYSTORE_SERVICE_INTERFACE).unwrap(),
         code,
-        &request,
+        request,
     );
     tr.sender_euid = 1000;
     push_pending_frame(105);
@@ -287,7 +259,7 @@ fn unverified_system_only_service_requests_are_unchanged() {
             &mut tr,
             None,
             "BR_TRANSACTION",
-            &config::InjectorConfig::default(),
+            &Arc::new(config::InjectorConfig::default()),
             |_| None,
         )
     });
@@ -300,19 +272,17 @@ fn unverified_best_effort_auth_tokens_preserve_system_authentication() {
     use crate::android::hardware::security::keymint::HardwareAuthToken::HardwareAuthToken;
 
     let _guard = route_state_test_guard();
-    let mut request = Parcel::new();
-    request.write(&0i32).unwrap();
-    request.write(&0i32).unwrap();
-    request.write(&rsbinder::INTERFACE_HEADER).unwrap();
-    request
-        .write(&identify::KEYSTORE_AUTHORIZATION_INTERFACE.to_owned())
-        .unwrap();
-    request.write(&HardwareAuthToken::default()).unwrap();
     for one_way in [false, true] {
-        let mut tr = transaction_for_parcel(
+        let mut request = Parcel::new();
+        request.write(&0i32).unwrap();
+        request.write(&0i32).unwrap();
+        request.write(&rsbinder::INTERFACE_HEADER).unwrap();
+        request.write(&identify::KEYSTORE_AUTHORIZATION_INTERFACE.to_owned()).unwrap();
+        request.write(&HardwareAuthToken::default()).unwrap();
+        let (mut tr, _data) = transaction_for_parcel(
             target_for(identify::KEYSTORE_AUTHORIZATION_INTERFACE).unwrap(),
             1,
-            &request,
+            request,
         );
         if one_way {
             tr.flags = crate::hook::binder::TF_ONE_WAY;
@@ -325,7 +295,7 @@ fn unverified_best_effort_auth_tokens_preserve_system_authentication() {
                 &mut tr,
                 None,
                 "BR_TRANSACTION",
-                &config::InjectorConfig::default(),
+                &Arc::new(config::InjectorConfig::default()),
                 |_| None,
             )
         });
@@ -340,24 +310,15 @@ fn unverified_best_effort_auth_tokens_preserve_system_authentication() {
 
 #[test]
 fn service_identity_requirement_preserves_intercept_and_filter_decisions() {
-    let request = ParsedServiceRequest::DeleteKey {
-        key: sample_key_descriptor(),
-    };
-    let mut decision = filter::FilterDecision {
-        allowed: true,
-        reason: FilterReason::Allowed,
-        packages: vec![],
-    };
+    let request = ParsedServiceRequest::DeleteKey { key: sample_key_descriptor() };
+    let mut decision =
+        filter::FilterDecision { allowed: true, reason: FilterReason::Allowed, packages: vec![] };
     assert!(service_request_needs_identity(
         &request,
         &decision,
         &config::InterceptConfig::default()
     ));
-    assert!(!service_request_needs_identity(
-        &request,
-        &decision,
-        &disabled_intercept_config()
-    ));
+    assert!(!service_request_needs_identity(&request, &decision, &disabled_intercept_config()));
     decision.allowed = false;
     decision.reason = FilterReason::RejectedByDenylist;
     assert!(!service_request_needs_identity(
@@ -366,10 +327,7 @@ fn service_identity_requirement_preserves_intercept_and_filter_decisions() {
         &config::InterceptConfig::default()
     ));
     let request = ParsedServiceRequest::GetKeyEntry {
-        key: KeyDescriptor {
-            domain: Domain::GRANT,
-            ..sample_key_descriptor()
-        },
+        key: KeyDescriptor { domain: Domain::GRANT, ..sample_key_descriptor() },
     };
     assert!(!service_request_needs_identity(
         &request,
@@ -377,7 +335,7 @@ fn service_identity_requirement_preserves_intercept_and_filter_decisions() {
         &config::InterceptConfig::default()
     ));
     decision.reason = FilterReason::RejectedNotInScope;
-    assert!(service_request_needs_identity(
+    assert!(!service_request_needs_identity(
         &request,
         &decision,
         &config::InterceptConfig::default()

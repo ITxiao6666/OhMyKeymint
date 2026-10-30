@@ -4,11 +4,12 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use rand_core::{OsRng, RngCore};
-use rsa::pkcs8::{
-    DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding,
+use openssl::{
+    bn::BigNum,
+    pkey::{PKey, Private, Public},
+    rsa::Rsa,
 };
-use rsa::{BigUint, RsaPrivateKey, RsaPublicKey};
+use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 use crate::blob;
@@ -66,22 +67,22 @@ pub struct KeyPair {
 
 impl KeyPair {
     fn generate() -> Option<Self> {
-        let mut rng = OsRng;
-        let private =
-            RsaPrivateKey::new_with_exp(&mut rng, RSA_BITS, &BigUint::from(RSA_EXPONENT)).ok()?;
-        let public = RsaPublicKey::from(&private);
+        let exponent = BigNum::from_u32(RSA_EXPONENT).ok()?;
+        let private = Rsa::generate_with_e(RSA_BITS as u32, &exponent).ok()?;
+        let public_pem = blob::public_key_pem(&private)?;
+        let private = PKey::from_rsa(private).ok()?;
         Some(Self {
-            private_pem: private.to_pkcs8_pem(LineEnding::LF).ok()?.to_string(),
-            public_pem: public.to_public_key_pem(LineEnding::LF).ok()?,
+            private_pem: String::from_utf8(private.private_key_to_pem_pkcs8().ok()?).ok()?,
+            public_pem,
         })
     }
 
-    pub fn private(&self) -> Option<RsaPrivateKey> {
-        RsaPrivateKey::from_pkcs8_pem(&self.private_pem).ok()
+    pub fn private(&self) -> Option<Rsa<Private>> {
+        blob::private_key_from_pem(&self.private_pem)
     }
 
-    pub fn public(&self) -> Option<RsaPublicKey> {
-        RsaPublicKey::from_public_key_pem(&self.public_pem).ok()
+    pub fn public(&self) -> Option<Rsa<Public>> {
+        blob::public_key_from_pem(&self.public_pem)
     }
 }
 
@@ -165,9 +166,7 @@ impl TaState {
     }
 
     pub fn load(path: &Path) -> Option<Self> {
-        std::fs::read(path)
-            .ok()
-            .and_then(|bytes| Self::from_json(&bytes))
+        std::fs::read(path).ok().and_then(|bytes| Self::from_json(&bytes))
     }
 
     /// Load the ledger, falling back to the previous revision.
@@ -244,10 +243,7 @@ impl TaState {
     }
 
     fn auth_of(&self, uid: u32, kname: &str) -> Option<KeyPair> {
-        self.uids
-            .get(&uid)
-            .and_then(|entry| entry.auth.get(kname))
-            .cloned()
+        self.uids.get(&uid).and_then(|entry| entry.auth.get(kname)).cloned()
     }
 
     /// `generateAskKeyPair`: create the uid's ASK, keep an existing one.
@@ -470,12 +466,9 @@ impl TaState {
     /// enabled gate before dispatch; a counter without a fresh match answers
     /// `false`, the `-26` a stock TA gives without a match.
     fn biometric_ok(&mut self, entry: &Session, platform: Platform) -> bool {
-        let (Some(opened), Some(before), Some(now), Some(after)) = (
-            entry.opened_ms,
-            entry.bio_mark,
-            platform.boot_ms,
-            platform.bio_mark,
-        ) else {
+        let (Some(opened), Some(before), Some(now), Some(after)) =
+            (entry.opened_ms, entry.bio_mark, platform.boot_ms, platform.bio_mark)
+        else {
             return true;
         };
         if !same_boot(before, after) || now < opened || now - opened > BIO_WINDOW_MS {
@@ -484,11 +477,7 @@ impl TaState {
         if after <= before {
             return false;
         }
-        let watermark = if same_boot(self.bio_watermark, after) {
-            self.bio_watermark
-        } else {
-            0
-        };
+        let watermark = if same_boot(self.bio_watermark, after) { self.bio_watermark } else { 0 };
         if after <= watermark {
             return false;
         }

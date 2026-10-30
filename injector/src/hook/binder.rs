@@ -1,13 +1,14 @@
-use std::mem::size_of;
-
 use log::info;
-
-mod native;
+use std::mem::size_of;
 
 pub(crate) use native::{
     create_native_operation_binder, create_native_security_level_binder, registered_service_target,
     start_registered_service_target_worker, NativeBinder, NativeBinderRetirement,
 };
+
+mod native;
+#[cfg(test)]
+pub(super) mod tests;
 
 const PARCEL_PREVIEW_CHARS: usize = 50;
 const B_TYPE_LARGE: u32 = 0x85;
@@ -24,8 +25,6 @@ pub(crate) const BR_REPLY_NR: u32 = 3;
 pub(crate) const BR_DEAD_REPLY_NR: u32 = 5;
 pub(crate) const BR_TRANSACTION_COMPLETE_NR: u32 = 6;
 pub(crate) const BR_ACQUIRE_NR: u32 = 8;
-#[cfg(test)]
-pub(crate) const BR_NOOP_NR: u32 = 12;
 pub(crate) const BR_FAILED_REPLY_NR: u32 = 17;
 pub(crate) const BR_FROZEN_REPLY_NR: u32 = 18;
 pub(crate) const BR_ONEWAY_SPAM_SUSPECT_NR: u32 = 19;
@@ -118,50 +117,15 @@ pub(crate) struct binder_version {
     pub protocol_version: i32,
 }
 
-pub(crate) const BINDER_VERSION: u32 = ioc(
-    IOC_READ | IOC_WRITE,
-    b'b' as u32,
-    9,
-    size_of::<binder_version>(),
-);
-pub(crate) const BINDER_GET_NODE_DEBUG_INFO: u32 = ioc(
-    IOC_READ | IOC_WRITE,
-    b'b' as u32,
-    11,
-    size_of::<binder_node_debug_info>(),
-);
+pub(crate) const BINDER_VERSION: u32 =
+    ioc(IOC_READ | IOC_WRITE, b'b' as u32, 9, size_of::<binder_version>());
+pub(crate) const BINDER_GET_NODE_DEBUG_INFO: u32 =
+    ioc(IOC_READ | IOC_WRITE, b'b' as u32, 11, size_of::<binder_node_debug_info>());
 
-#[cfg(test)]
-pub(crate) const BR_NOOP_CMD: u32 = ioc(IOC_NONE, b'r' as u32, BR_NOOP_NR, 0);
 pub(crate) const BR_TRANSACTION_COMPLETE_CMD: u32 =
     ioc(IOC_NONE, b'r' as u32, BR_TRANSACTION_COMPLETE_NR, 0);
-#[cfg(test)]
-pub(crate) const BR_TRANSACTION_CMD: u32 = ioc(
-    IOC_READ,
-    b'r' as u32,
-    BR_TRANSACTION_NR,
-    size_of::<binder_transaction_data>(),
-);
-#[cfg(test)]
-pub(crate) const BC_FREE_BUFFER_CMD: u32 = ioc(
-    IOC_WRITE,
-    b'c' as u32,
-    BC_FREE_BUFFER_NR,
-    size_of::<libc::c_ulong>(),
-);
-#[cfg(test)]
-pub(crate) const BC_REPLY_CMD: u32 = ioc(
-    IOC_WRITE,
-    b'c' as u32,
-    BC_REPLY_NR,
-    size_of::<binder_transaction_data>(),
-);
-pub(crate) const BC_ACQUIRE_DONE_CMD: u32 = ioc(
-    IOC_WRITE,
-    b'c' as u32,
-    BC_ACQUIRE_DONE_NR,
-    size_of::<binder_ptr_cookie>(),
-);
+pub(crate) const BC_ACQUIRE_DONE_CMD: u32 =
+    ioc(IOC_WRITE, b'c' as u32, BC_ACQUIRE_DONE_NR, size_of::<binder_ptr_cookie>());
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct LocalBinderTarget {
@@ -341,9 +305,7 @@ pub(crate) unsafe fn describe_transaction_objects(tr: &binder_transaction_data) 
 
         let stability_offset = offset + object_size;
         let stability = if data_size.saturating_sub(stability_offset) >= size_of::<i32>() {
-            Some(std::ptr::read_unaligned(
-                bytes.as_ptr().add(stability_offset) as *const i32,
-            ))
+            Some(std::ptr::read_unaligned(bytes.as_ptr().add(stability_offset) as *const i32))
         } else {
             None
         };
@@ -396,10 +358,7 @@ pub(crate) unsafe fn parse_local_binder_target_from_parcel_bytes(
     }
 
     let object = std::ptr::read_unaligned(bytes.as_ptr() as *const flat_binder_object);
-    if !matches!(
-        object.hdr.type_,
-        BINDER_TYPE_BINDER | BINDER_TYPE_WEAK_BINDER
-    ) {
+    if !matches!(object.hdr.type_, BINDER_TYPE_BINDER | BINDER_TYPE_WEAK_BINDER) {
         return None;
     }
 
@@ -408,8 +367,5 @@ pub(crate) unsafe fn parse_local_binder_target_from_parcel_bytes(
         return None;
     }
 
-    Some(LocalBinderTarget {
-        ptr,
-        cookie: object.cookie,
-    })
+    Some(LocalBinderTarget { ptr, cookie: object.cookie })
 }

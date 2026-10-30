@@ -41,10 +41,7 @@ fn fixture(code: i32) -> Vec<u8> {
 #[test]
 fn system_stub_constant_supports_oem_insertions_and_encoded_field_order() {
     for code in [15, 76, 88, 89, 256] {
-        assert_eq!(
-            Dex::new(&fixture(code)).unwrap().transaction().unwrap(),
-            Some(code as u32)
-        );
+        assert_eq!(Dex::new(&fixture(code)).unwrap().transaction().unwrap(), Some(code as u32));
     }
 }
 
@@ -89,9 +86,5 @@ fn installed_android_framework_contract_is_readable() {
     println!("installed getRunningAppProcesses transaction={code}");
     // Test binaries are not ActivityManager-managed application processes. This
     // validates the live reply layout without borrowing another app's identity.
-    assert!(
-        super::super::query_activity_packages(99001, std::process::id())
-            .unwrap()
-            .is_empty()
-    );
+    assert!(super::super::query_activity_packages(99001, std::process::id()).unwrap().is_empty());
 }

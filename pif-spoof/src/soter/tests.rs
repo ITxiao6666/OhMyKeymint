@@ -1,9 +1,9 @@
 use super::{wire::Writer, *};
-use rsa::{
-    Pss, RsaPublicKey,
-    pkcs8::DecodePublicKey,
-    sha2::{Digest, Sha256},
-    traits::PublicKeyParts,
+use openssl::{
+    hash::MessageDigest,
+    pkey::{PKey, Public},
+    rsa::{Padding, Rsa},
+    sign::{RsaPssSaltlen, Verifier},
 };
 
 #[derive(Default)]
@@ -117,10 +117,7 @@ fn accepts_aligned_string16_header_variants_without_arbitrary_descriptor_scan() 
         bytes.extend_from_slice(token);
         bytes.extend_from_slice(&[0xff; 19]);
         for code in 1..=13 {
-            assert!(
-                wire::valid_request(code, &bytes),
-                "code {code} prefix {prefix}"
-            );
+            assert!(wire::valid_request(code, &bytes), "code {code} prefix {prefix}");
         }
     }
     for prefix in [1, 2, 3, 16, 31] {
@@ -154,10 +151,7 @@ fn rejects_missing_corrupt_truncated_or_oversized_descriptors() {
 
 #[test]
 fn preserves_all_transaction_fields_except_selected_target() {
-    let destination = Target {
-        ptr: 0x8000,
-        cookie: 0x9000,
-    };
+    let destination = Target { ptr: 0x8000, cookie: 0x9000 };
     for code in 1..=13 {
         let bytes = request(code);
         let before = transaction(code, &bytes);
@@ -165,40 +159,26 @@ fn preserves_all_transaction_fields_except_selected_target() {
         assert!(retarget(&mut after, &bytes, destination));
         assert_eq!(
             after,
-            Transaction {
-                target: destination.ptr,
-                cookie: destination.cookie,
-                ..before
-            }
+            Transaction { target: destination.ptr, cookie: destination.cookie, ..before }
         );
     }
 }
 
 #[test]
 fn beta_ignores_app_selection_and_is_not_a_remote_router() {
-    let destination = Target {
-        ptr: 0x8000,
-        cookie: 0x9000,
-    };
+    let destination = Target { ptr: 0x8000, cookie: 0x9000 };
     for code in 1..=13 {
         // Deliberately make the argument UID differ from the kernel sender.
         let bytes = request_for(code, 10199, "key", "challenge", 123);
         for uid in [10001, 10002, 1010001] {
-            let before = Transaction {
-                sender_euid: uid,
-                ..transaction(code, &bytes)
-            };
+            let before = Transaction { sender_euid: uid, ..transaction(code, &bytes) };
             let mut after = before;
             let changed = retarget(&mut after, &bytes, destination);
             assert!(changed);
             assert_eq!(
                 after,
                 if changed {
-                    Transaction {
-                        target: destination.ptr,
-                        cookie: destination.cookie,
-                        ..before
-                    }
+                    Transaction { target: destination.ptr, cookie: destination.cookie, ..before }
                 } else {
                     before
                 }
@@ -224,14 +204,7 @@ fn preserves_oem_flags_and_argument_objects_when_redirecting() {
         };
         let mut after = before;
         assert!(retarget(&mut after, &bytes, Target { ptr: 1, cookie: 2 },));
-        assert_eq!(
-            after,
-            Transaction {
-                target: 1,
-                cookie: 2,
-                ..before
-            }
-        );
+        assert_eq!(after, Transaction { target: 1, cookie: 2, ..before });
     }
 }
 
@@ -242,19 +215,10 @@ fn leaves_unrelated_unsupported_or_malformed_transactions_unchanged() {
     for before in [
         Transaction { target: 0, ..base },
         Transaction { code: 14, ..base },
-        Transaction {
-            data_size: MAX_REQUEST_BYTES as u64 + 1,
-            ..base
-        },
+        Transaction { data_size: MAX_REQUEST_BYTES as u64 + 1, ..base },
         Transaction { buffer: 0, ..base },
-        Transaction {
-            buffer: u64::MAX,
-            ..base
-        },
-        Transaction {
-            data_size: base.data_size - 1,
-            ..base
-        },
+        Transaction { buffer: u64::MAX, ..base },
+        Transaction { data_size: base.data_size - 1, ..base },
     ] {
         let mut after = before;
         assert!(!retarget(&mut after, &bytes, Target { ptr: 1, cookie: 2 },));
@@ -263,11 +227,7 @@ fn leaves_unrelated_unsupported_or_malformed_transactions_unchanged() {
     let mut malformed = bytes.clone();
     malformed[16] ^= 1;
     let mut after = base;
-    assert!(!retarget(
-        &mut after,
-        &malformed,
-        Target { ptr: 1, cookie: 2 },
-    ));
+    assert!(!retarget(&mut after, &malformed, Target { ptr: 1, cookie: 2 },));
     assert_eq!(after, base);
 }
 
@@ -290,22 +250,12 @@ fn validates_full_command_buffer_before_visiting_and_handles_secctx() {
     assert_eq!(size_of::<Transaction>(), 64);
     assert_eq!(size_of::<WriteRead>(), 48);
     let mut commands = Vec::new();
-    append_command(
-        &mut commands,
-        BR_TRANSACTION,
-        Transaction {
-            code: 2,
-            ..Default::default()
-        },
-    );
+    append_command(&mut commands, BR_TRANSACTION, Transaction { code: 2, ..Default::default() });
     commands.extend_from_slice(&0x720cu32.to_ne_bytes()); // BR_NOOP
     append_command(
         &mut commands,
         BR_TRANSACTION_SEC_CTX,
-        Transaction {
-            code: 6,
-            ..Default::default()
-        },
+        Transaction { code: 6, ..Default::default() },
     );
     assert!(valid_read_commands(&commands));
     let mut visited = Vec::new();
@@ -343,13 +293,7 @@ fn rejects_invalid_binder_carriers() {
     carrier[..4].copy_from_slice(&BINDER_TYPE_BINDER.to_ne_bytes());
     carrier[8..16].copy_from_slice(&0x1000u64.to_ne_bytes());
     carrier[16..24].copy_from_slice(&0x2000u64.to_ne_bytes());
-    assert_eq!(
-        parse_carrier(&carrier),
-        Some(Target {
-            ptr: 0x1000,
-            cookie: 0x2000
-        })
-    );
+    assert_eq!(parse_carrier(&carrier), Some(Target { ptr: 0x1000, cookie: 0x2000 }));
     for length in 0..28 {
         assert!(parse_carrier(&carrier[..length]).is_none());
     }
@@ -379,17 +323,11 @@ fn buffer_payload(bytes: &[u8], expected_code: i32) -> &[u8] {
     assert_eq!(int32(bytes, 0), 0);
     assert_eq!(int32(bytes, 4), 1, "buffer return present");
     assert_eq!(int32(bytes, 8), expected_code, "Soter return code");
-    let length: usize = int32(bytes, 12)
-        .try_into()
-        .expect("nonnegative array length");
+    let length: usize = int32(bytes, 12).try_into().expect("nonnegative array length");
     let padded = (length + 3) & !3;
     assert_eq!(bytes.len(), 20 + padded);
     assert_eq!(int32(bytes, 16 + padded), length as i32);
-    assert!(
-        bytes[16 + length..16 + padded]
-            .iter()
-            .all(|byte| *byte == 0)
-    );
+    assert!(bytes[16 + length..16 + padded].iter().all(|byte| *byte == 0));
     &bytes[16..16 + length]
 }
 
@@ -407,13 +345,14 @@ fn blob_json(bytes: &[u8]) -> serde_json::Value {
     serde_json::from_slice(split_blob(bytes).0).unwrap()
 }
 
-fn verifies(key: &RsaPublicKey, json: &[u8], signature: &[u8]) -> bool {
-    key.verify(
-        Pss::new_with_salt::<Sha256>(20),
-        &Sha256::digest(json),
-        signature,
-    )
-    .is_ok()
+fn verifies(key: &Rsa<Public>, json: &[u8], signature: &[u8]) -> bool {
+    let key = PKey::from_rsa(key.clone()).unwrap();
+    let mut verifier = Verifier::new(MessageDigest::sha256(), &key).unwrap();
+    verifier.set_rsa_padding(Padding::PKCS1_PSS).unwrap();
+    verifier.set_rsa_mgf1_md(MessageDigest::sha256()).unwrap();
+    verifier.set_rsa_pss_saltlen(RsaPssSaltlen::custom(20)).unwrap();
+    verifier.update(json).unwrap();
+    verifier.verify(signature).unwrap_or(false)
 }
 
 // Independent public half of the published RustCrypto RSA 0.9.10 fixture.
@@ -433,16 +372,20 @@ fn exported_public_fixture_signs_exact_json_and_rejects_all_field_tampering() {
     let mut state = wire::SoftwareState::default();
     assert_eq!(int32(&call(&mut state, 1, 10001, "alias"), 4), 0);
     assert_eq!(int32(&call(&mut state, 4, 10001, "alias"), 4), 0);
-    let expected = RsaPublicKey::from_public_key_pem(EXPECTED_TEST_PUBLIC).unwrap();
+    let expected = Rsa::public_key_from_pem(EXPECTED_TEST_PUBLIC.as_bytes()).unwrap();
     for code in [2, 6] {
         let bytes = export_blob(&mut state, code, 10001, "alias");
         let (json, signature) = split_blob(&bytes);
         let value: serde_json::Value = serde_json::from_slice(json).unwrap();
-        let exported = RsaPublicKey::from_public_key_pem(value["pub_key"].as_str().unwrap())
+        let exported = Rsa::public_key_from_pem(value["pub_key"].as_str().unwrap().as_bytes())
             .expect("valid SPKI public key");
-        assert_eq!(exported, expected, "matches independent upstream fixture");
-        assert_eq!(exported.n().bits(), 2048);
-        assert_eq!(exported.e(), &rsa::BigUint::from(65537u32));
+        assert_eq!(
+            exported.public_key_to_der().unwrap(),
+            expected.public_key_to_der().unwrap(),
+            "matches independent upstream fixture"
+        );
+        assert_eq!(exported.n().num_bits(), 2048);
+        assert_eq!(exported.e().to_vec(), [1, 0, 1]);
         assert_eq!(value["uid"], "10001");
         assert_eq!(value["cpu_id"], "4f4d4b2d534f46542d544553542d3031");
         assert_eq!(value["software_test"], true);
@@ -459,10 +402,7 @@ fn exported_public_fixture_signs_exact_json_and_rejects_all_field_tampering() {
         for (field, replacement) in [
             ("uid", serde_json::json!("10002")),
             ("cpu_id", serde_json::json!("different-software-id")),
-            (
-                "counter",
-                serde_json::json!(value["counter"].as_u64().unwrap() + 1),
-            ),
+            ("counter", serde_json::json!(value["counter"].as_u64().unwrap() + 1)),
             ("pub_key", serde_json::json!("changed public key")),
             ("key_name", serde_json::json!("changed alias")),
         ] {
@@ -485,10 +425,7 @@ fn exported_public_fixture_signs_exact_json_and_rejects_all_field_tampering() {
         use std::fmt::Write as _;
         write!(device_hex, "{byte:02x}").unwrap();
     }
-    assert_eq!(
-        device_hex,
-        blob_json(&export_blob(&mut state, 2, 10001, ""))["cpu_id"]
-    );
+    assert_eq!(device_hex, blob_json(&export_blob(&mut state, 2, 10001, ""))["cpu_id"]);
 }
 
 #[test]
@@ -571,10 +508,7 @@ fn sign_sessions_are_unique_consumed_and_never_fabricate_biometrics() {
     assert_eq!(call(&mut state, 12, 0, ""), [0, 0, 0, 0, 1, 0, 0, 0]);
     let extra = call(&mut state, 13, 0, "");
     assert_eq!(extra.len(), 12);
-    assert_eq!(
-        [int32(&extra, 0), int32(&extra, 4), int32(&extra, 8)],
-        [0, 1, -1]
-    );
+    assert_eq!([int32(&extra, 0), int32(&extra, 4), int32(&extra, 8)], [0, 1, -1]);
 }
 
 #[test]
@@ -582,10 +516,7 @@ fn bounded_alias_and_session_tables_recover_capacity_after_removal() {
     let mut state = wire::SoftwareState::default();
     assert_eq!(int32(&call(&mut state, 1, 10001, ""), 4), 0);
     for index in 0..64 {
-        assert_eq!(
-            int32(&call(&mut state, 4, 10001, &format!("alias-{index}")), 4),
-            0
-        );
+        assert_eq!(int32(&call(&mut state, 4, 10001, &format!("alias-{index}")), 4), 0);
     }
     assert_eq!(int32(&call(&mut state, 4, 10001, "alias-0"), 4), 0);
     assert_eq!(int32(&call(&mut state, 4, 10001, "alias-64"), 4), -20);
@@ -608,10 +539,7 @@ fn rejects_malformed_arguments_before_output_and_null_aliases_as_business_errors
     let mut state = wire::SoftwareState::default();
     for code in [1, 2, 3, 7, 4, 5, 6, 8, 9, 10, 13] {
         let mut output = Buffer::default();
-        assert_eq!(
-            state.write_reply(code, &request(12), &mut output),
-            Err(BAD_VALUE)
-        );
+        assert_eq!(state.write_reply(code, &request(12), &mut output), Err(BAD_VALUE));
         assert!(output.0.is_empty(), "missing argument for code {code}");
     }
     for code in [1, 2, 3, 4, 5, 6, 7, 8, 9] {
@@ -626,36 +554,24 @@ fn rejects_malformed_arguments_before_output_and_null_aliases_as_business_errors
     let args_start = request(12).len();
     for length in args_start..key_request.len() {
         let mut output = Buffer::default();
-        assert_eq!(
-            state.write_reply(4, &key_request[..length], &mut output),
-            Err(BAD_VALUE)
-        );
+        assert_eq!(state.write_reply(4, &key_request[..length], &mut output), Err(BAD_VALUE));
         assert!(output.0.is_empty(), "truncated key length {length}");
     }
     let mut unterminated = key_request.clone();
     let terminator = args_start + 4 + 4 + "key".encode_utf16().count() * 2;
     unterminated[terminator] = 1;
     let mut output = Buffer::default();
-    assert_eq!(
-        state.write_reply(4, &unterminated, &mut output),
-        Err(BAD_VALUE)
-    );
+    assert_eq!(state.write_reply(4, &unterminated, &mut output), Err(BAD_VALUE));
     assert!(output.0.is_empty());
     let mut invalid_utf16 = key_request;
     invalid_utf16[args_start + 8..args_start + 10].copy_from_slice(&0xd800u16.to_le_bytes());
     let mut output = Buffer::default();
-    assert_eq!(
-        state.write_reply(4, &invalid_utf16, &mut output),
-        Err(BAD_VALUE)
-    );
+    assert_eq!(state.write_reply(4, &invalid_utf16, &mut output), Err(BAD_VALUE));
     assert!(output.0.is_empty());
     let mut null_descriptor = vec![0; 12];
     null_descriptor.extend_from_slice(&(-1i32).to_le_bytes());
     let mut output = Buffer::default();
-    assert_eq!(
-        state.write_reply(12, &null_descriptor, &mut output),
-        Err(BAD_VALUE)
-    );
+    assert_eq!(state.write_reply(12, &null_descriptor, &mut output), Err(BAD_VALUE));
     assert!(output.0.is_empty());
 
     assert_eq!(int32(&call(&mut state, 1, 10001, ""), 4), 0);
@@ -671,10 +587,7 @@ fn rejects_malformed_arguments_before_output_and_null_aliases_as_business_errors
     null_challenge.int32(-1).unwrap();
     let rejected_init = reply(&mut state, 9, &null_challenge.0);
     assert_eq!(int32(&rejected_init, 16), BAD_VALUE);
-    assert_eq!(
-        i64::from_le_bytes(rejected_init[8..16].try_into().unwrap()),
-        0
-    );
+    assert_eq!(i64::from_le_bytes(rejected_init[8..16].try_into().unwrap()), 0);
 }
 
 #[cfg(target_os = "android")]
@@ -715,18 +628,9 @@ fn android_local_binder_round_trip_uses_native_parcels_without_enabling_module()
         );
     };
     let invoke = |code: u32, session: i64| {
-        let mut input = Parcel {
-            pointer: ptr::null_mut(),
-            delete,
-        };
-        let mut output = Parcel {
-            pointer: ptr::null_mut(),
-            delete,
-        };
-        assert_eq!(
-            unsafe { prepare(native.binder as *mut c_void, &mut input.pointer) },
-            0
-        );
+        let mut input = Parcel { pointer: ptr::null_mut(), delete };
+        let mut output = Parcel { pointer: ptr::null_mut(), delete };
+        assert_eq!(unsafe { prepare(native.binder as *mut c_void, &mut input.pointer) }, 0);
         assert!(!input.pointer.is_null());
         // prepareTransaction writes the class header on Android 12. The class
         // disables that header on Android 13+, so supply the Java AIDL header
@@ -767,22 +671,12 @@ fn android_local_binder_round_trip_uses_native_parcels_without_enabling_module()
             0,
             "local transaction {code}"
         );
-        assert!(
-            input.pointer.is_null(),
-            "transact consumes the input parcel"
-        );
+        assert!(input.pointer.is_null(), "transact consumes the input parcel");
         // No hook is installed and no service is registered: only this local
         // Binder instance and its in-memory software-test state are exercised.
-        unsafe {
-            native.api.bytes(
-                output.pointer,
-                native.binder as *const c_void,
-                true,
-                Some(0),
-            )
-        }
-        .expect("read native reply bytes")
-        .to_vec()
+        unsafe { native.api.bytes(output.pointer, native.binder as *const c_void, true, Some(0)) }
+            .expect("read native reply bytes")
+            .to_vec()
     };
 
     assert_eq!(int32(&invoke(3, 0), 4), 0);
@@ -790,7 +684,7 @@ fn android_local_binder_round_trip_uses_native_parcels_without_enabling_module()
     assert_eq!(int32(&invoke(3, 0), 4), 1);
     assert_eq!(int32(&invoke(4, 0), 4), 0);
     assert_eq!(int32(&invoke(8, 0), 4), 1);
-    let expected = RsaPublicKey::from_public_key_pem(EXPECTED_TEST_PUBLIC).unwrap();
+    let expected = Rsa::public_key_from_pem(EXPECTED_TEST_PUBLIC.as_bytes()).unwrap();
     for code in [2, 6] {
         let reply = invoke(code, 0);
         let (json, signature) = split_blob(buffer_payload(&reply, 0));
@@ -807,16 +701,10 @@ fn android_local_binder_round_trip_uses_native_parcels_without_enabling_module()
     assert!(buffer_payload(&invoke(10, session), -1000).is_empty());
     assert_eq!(buffer_payload(&invoke(11, 0), 0), b"OMK-SOFT-TEST-01");
     let extras = invoke(13, 0);
-    assert_eq!(
-        [int32(&extras, 0), int32(&extras, 4), int32(&extras, 8)],
-        [0, 1, -1]
-    );
+    assert_eq!([int32(&extras, 0), int32(&extras, 4), int32(&extras, 8)], [0, 1, -1]);
     assert_eq!(int32(&invoke(7, 0), 4), 0);
     assert_eq!(int32(&invoke(3, 0), 4), 0);
-    assert!(
-        !ACTIVE.load(Ordering::Acquire),
-        "test does not activate Zygisk interception"
-    );
+    assert!(!ACTIVE.load(Ordering::Acquire), "test does not activate Zygisk interception");
 }
 
 #[test]
@@ -835,10 +723,7 @@ fn initial_native_write_failure_stops_without_mutating_ledger_or_sessions() {
     }
     let mut state = wire::SoftwareState::default();
     for code in 1..=13 {
-        assert_eq!(
-            state.write_reply(code, &request(code), &mut Reject),
-            Err(-12)
-        );
+        assert_eq!(state.write_reply(code, &request(code), &mut Reject), Err(-12));
     }
     assert_eq!(
         int32(&call(&mut state, 3, 10001, ""), 4),
@@ -849,33 +734,17 @@ fn initial_native_write_failure_stops_without_mutating_ledger_or_sessions() {
     assert_eq!(int32(&call(&mut state, 4, 10001, "key"), 4), 0);
     let session = init_session(&mut state, 10001, "key", 0);
     for code in [2, 5, 6, 7, 9] {
-        assert_eq!(
-            state.write_reply(code, &request(code), &mut Reject),
-            Err(-12)
-        );
+        assert_eq!(state.write_reply(code, &request(code), &mut Reject), Err(-12));
     }
-    assert_eq!(
-        state.write_reply(10, &request_for(10, 0, "", "", session), &mut Reject),
-        Err(-12)
-    );
+    assert_eq!(state.write_reply(10, &request_for(10, 0, "", "", session), &mut Reject), Err(-12));
     assert_eq!(int32(&call(&mut state, 8, 10001, "key"), 4), 1);
-    assert_eq!(
-        blob_json(&export_blob(&mut state, 2, 10001, ""))["counter"],
-        1
-    );
+    assert_eq!(blob_json(&export_blob(&mut state, 2, 10001, ""))["counter"], 1);
     let next = init_session(&mut state, 10001, "key", 0);
-    assert_eq!(
-        next,
-        session + 1,
-        "rejected init did not allocate a session"
-    );
+    assert_eq!(next, session + 1, "rejected init did not allocate a session");
     finish_session(&mut state, session, -26);
     for code in [0, 14, u32::MAX] {
         let mut output = Buffer::default();
-        assert_eq!(
-            state.write_reply(code, &request(code), &mut output),
-            Err(UNKNOWN_TRANSACTION)
-        );
+        assert_eq!(state.write_reply(code, &request(code), &mut output), Err(UNKNOWN_TRANSACTION));
         assert!(output.0.is_empty());
     }
 }

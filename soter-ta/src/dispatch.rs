@@ -96,11 +96,7 @@ pub enum Request {
     /// `int32 uid, string kname`.
     UidKey { uid: u32, kname: String },
     /// `int32 uid, string kname, string challenge`.
-    InitSign {
-        uid: u32,
-        kname: String,
-        challenge: String,
-    },
+    InitSign { uid: u32, kname: String, challenge: String },
     /// `int64 session`.
     Session(u64),
     /// One byte, the magic `generateAttkKeyPair` passes.
@@ -118,11 +114,7 @@ pub enum Outcome {
     /// working TA writes the length of `data` there and the Java layer reports
     /// it to applications as `exportDataLength` (B-side capture of a live TA,
     /// 2026-09-24: 809 for a 809-byte ASK blob, 16 for the 16-byte device id).
-    Buffer {
-        code: i32,
-        data: Vec<u8>,
-        field: i32,
-    },
+    Buffer { code: i32, data: Vec<u8>, field: i32 },
     /// The `SoterInitReturn` parcelable `initSign` returns by value.
     Init { code: i32, session: u64 },
     /// A binder-level exception: status header plus message.
@@ -187,10 +179,9 @@ fn parse_request(tx: u32, args: &mut Args) -> Option<Request> {
         TX_HAS_ASK | TX_GENERATE_ASK | TX_EXPORT_ASK | TX_REMOVE_ALL_UID_KEY => {
             Request::Uid(args.read_u32()?)
         }
-        TX_GENERATE_AUTH | TX_HAS_AUTH | TX_EXPORT_AUTH | TX_REMOVE_AUTH => Request::UidKey {
-            uid: args.read_u32()?,
-            kname: string(args)?,
-        },
+        TX_GENERATE_AUTH | TX_HAS_AUTH | TX_EXPORT_AUTH | TX_REMOVE_AUTH => {
+            Request::UidKey { uid: args.read_u32()?, kname: string(args)? }
+        }
         TX_INIT_SIGN => Request::InitSign {
             uid: args.read_u32()?,
             kname: string(args)?,
@@ -255,21 +246,13 @@ pub fn handle_request(
     Some(match (tx, request) {
         (TX_GET_DEVICE_ID, Request::None) => {
             let (code, data) = state.device_id();
-            Outcome::Buffer {
-                field: data.len() as i32,
-                code,
-                data,
-            }
+            Outcome::Buffer { field: data.len() as i32, code, data }
         }
         (TX_HAS_ASK, Request::Uid(uid)) => Outcome::Code(state.has_ask(uid)),
         (TX_GENERATE_ASK, Request::Uid(uid)) => Outcome::Code(state.generate_ask(uid)),
         (TX_EXPORT_ASK, Request::Uid(uid)) => {
             let (code, data) = state.export_ask(uid);
-            Outcome::Buffer {
-                field: data.len() as i32,
-                code,
-                data,
-            }
+            Outcome::Buffer { field: data.len() as i32, code, data }
         }
         (TX_GENERATE_AUTH, Request::UidKey { uid, kname }) => {
             Outcome::Code(state.generate_auth(uid, &kname))
@@ -277,42 +260,23 @@ pub fn handle_request(
         (TX_HAS_AUTH, Request::UidKey { uid, kname }) => Outcome::Code(state.has_auth(uid, &kname)),
         (TX_EXPORT_AUTH, Request::UidKey { uid, kname }) => {
             let (code, data) = state.export_auth(uid, &kname);
-            Outcome::Buffer {
-                field: data.len() as i32,
-                code,
-                data,
-            }
+            Outcome::Buffer { field: data.len() as i32, code, data }
         }
         (TX_REMOVE_AUTH, Request::UidKey { uid, kname }) => {
             Outcome::Code(state.remove_auth(uid, &kname))
         }
         (TX_REMOVE_ALL_UID_KEY, Request::Uid(uid)) => Outcome::Code(state.remove_all_uid(uid)),
-        (
-            TX_INIT_SIGN,
-            Request::InitSign {
-                uid,
-                kname,
-                challenge,
-            },
-        ) => {
+        (TX_INIT_SIGN, Request::InitSign { uid, kname, challenge }) => {
             let (code, session) = state.init_sign(uid, &kname, &challenge, platform);
             Outcome::Init { code, session }
         }
         (TX_FINISH_SIGN, Request::Session(session)) => {
             let (code, data) = state.finish_sign(session, platform);
-            Outcome::Buffer {
-                field: data.len() as i32,
-                code,
-                data,
-            }
+            Outcome::Buffer { field: data.len() as i32, code, data }
         }
         (TX_EXPORT_ATTK, Request::None) => {
             let (code, data) = state.export_attk();
-            Outcome::Buffer {
-                field: data.len() as i32,
-                code,
-                data,
-            }
+            Outcome::Buffer { field: data.len() as i32, code, data }
         }
         (TX_GENERATE_ATTK, Request::Magic(magic)) => Outcome::Code(state.generate_attk(magic)),
         (TX_VERIFY_ATTK, Request::None) => Outcome::Code(state.verify_attk()),
@@ -350,11 +314,7 @@ pub fn handle(
 ///
 /// `None` means the code is not part of this interface.
 pub fn dead_reply(tx: u32) -> Option<Outcome> {
-    let empty = |code: i32| Outcome::Buffer {
-        code,
-        data: Vec::new(),
-        field: 0,
-    };
+    let empty = |code: i32| Outcome::Buffer { code, data: Vec::new(), field: 0 };
     Some(match tx {
         TX_EXPORT_ASK | TX_EXPORT_AUTH => empty(SOTER_ERR_NO_KEY),
         TX_EXPORT_ATTK | TX_GET_DEVICE_ID => empty(SOTER_ERR_TA_UNAVAILABLE),
@@ -365,10 +325,7 @@ pub fn dead_reply(tx: u32) -> Option<Outcome> {
         TX_HAS_ASK | TX_HAS_AUTH | TX_GENERATE_AUTH | TX_REMOVE_ALL_UID_KEY | TX_REMOVE_AUTH => {
             Outcome::Code(SOTER_ERR_NO_KEY)
         }
-        TX_INIT_SIGN => Outcome::Init {
-            code: SOTER_ERR_NO_KEY,
-            session: 0,
-        },
+        TX_INIT_SIGN => Outcome::Init { code: SOTER_ERR_NO_KEY, session: 0 },
         _ => return None,
     })
 }
@@ -386,11 +343,7 @@ mod protocol_tests {
                 bytes.i32(*uid as i32);
                 bytes.string16(kname);
             }
-            Request::InitSign {
-                uid,
-                kname,
-                challenge,
-            } => {
+            Request::InitSign { uid, kname, challenge } => {
                 bytes.i32(*uid as i32);
                 bytes.string16(kname);
                 bytes.string16(challenge);
@@ -407,10 +360,9 @@ mod protocol_tests {
             TX_EXPORT_ASK | TX_GENERATE_ASK | TX_HAS_ASK | TX_REMOVE_ALL_UID_KEY => {
                 Request::Uid(10503)
             }
-            TX_EXPORT_AUTH | TX_GENERATE_AUTH | TX_HAS_AUTH | TX_REMOVE_AUTH => Request::UidKey {
-                uid: 10503,
-                kname: "test-alias".into(),
-            },
+            TX_EXPORT_AUTH | TX_GENERATE_AUTH | TX_HAS_AUTH | TX_REMOVE_AUTH => {
+                Request::UidKey { uid: 10503, kname: "test-alias".into() }
+            }
             TX_FINISH_SIGN => Request::Session(0x1234_5678_9abc_def0),
             TX_GENERATE_ATTK => Request::Magic(0),
             TX_INIT_SIGN => Request::InitSign {
@@ -459,10 +411,7 @@ mod protocol_tests {
         bad_alias.extend_from_slice(&(-1i32).to_le_bytes());
         assert!(resolve_request(10, &bad_alias).is_none());
 
-        let mut missing_nul = argument_bytes(&Request::UidKey {
-            uid: 10503,
-            kname: "a".into(),
-        });
+        let mut missing_nul = argument_bytes(&Request::UidKey { uid: 10503, kname: "a".into() });
         missing_nul[10] = b'x';
         assert!(resolve_request(TX_REMOVE_AUTH, &missing_nul).is_none());
         let mut invalid_utf16 = missing_nul;
@@ -473,10 +422,7 @@ mod protocol_tests {
     #[test]
     fn requests_are_bounded_and_strings_cannot_contain_nul() {
         for alias in ["x".repeat(MAX_STRING_BYTES + 1), "a\0b".into()] {
-            let request = Request::UidKey {
-                uid: 10503,
-                kname: alias,
-            };
+            let request = Request::UidKey { uid: 10503, kname: alias };
             assert!(resolve_request(TX_REMOVE_AUTH, &argument_bytes(&request)).is_none());
         }
         assert!(resolve_request(0, &[]).is_none());
@@ -503,38 +449,18 @@ mod protocol_tests {
 
     #[test]
     fn native_buffer_format_is_explicit_and_other_replies_match() {
-        let result = Outcome::Buffer {
-            code: 0,
-            data: vec![0xa1, 0xb2, 0xc3],
-            field: 3,
-        };
-        assert_eq!(
-            hex::encode(result.to_native_reply_bytes()),
-            "000000000000000003000000a1b2c300"
-        );
+        let result = Outcome::Buffer { code: 0, data: vec![0xa1, 0xb2, 0xc3], field: 3 };
+        assert_eq!(hex::encode(result.to_native_reply_bytes()), "000000000000000003000000a1b2c300");
         assert_eq!(
             hex::encode(result.to_reply_bytes()),
             "0000000000000000010000001000000003000000a1b2c30003000000"
         );
-        let failed = Outcome::Buffer {
-            code: -20,
-            data: Vec::new(),
-            field: 0,
-        };
-        assert_eq!(
-            hex::encode(failed.to_native_reply_bytes()),
-            "00000000ecffffff00000000"
-        );
+        let failed = Outcome::Buffer { code: -20, data: Vec::new(), field: 0 };
+        assert_eq!(hex::encode(failed.to_native_reply_bytes()), "00000000ecffffff00000000");
         for result in [
             Outcome::Code(-5),
-            Outcome::Init {
-                code: 0,
-                session: 1234,
-            },
-            Outcome::Exception {
-                code: -1,
-                message: "test".into(),
-            },
+            Outcome::Init { code: 0, session: 1234 },
+            Outcome::Exception { code: -1, message: "test".into() },
         ] {
             assert_eq!(result.to_reply_bytes(), result.to_native_reply_bytes());
         }

@@ -258,11 +258,7 @@ unsafe fn inspect_read(argument: *const WriteRead) {
             )
         };
         if retarget(transaction, data, native.target) {
-            log_code_once(
-                &MATCHED_CODES,
-                transaction.code,
-                "Soter request intercepted",
-            );
+            log_code_once(&MATCHED_CODES, transaction.code, "Soter request intercepted");
         }
     });
 }
@@ -270,9 +266,7 @@ unsafe fn inspect_read(argument: *const WriteRead) {
 fn valid_pointer_range(pointer: u64, size: u64) -> bool {
     pointer != 0
         && size <= isize::MAX as u64
-        && pointer
-            .checked_add(size)
-            .is_some_and(|end| end <= usize::MAX as u64)
+        && pointer.checked_add(size).is_some_and(|end| end <= usize::MAX as u64)
 }
 
 fn candidate(transaction: &Transaction) -> bool {
@@ -338,10 +332,7 @@ fn visit_transactions(bytes: &mut [u8], mut visit: impl FnMut(&mut Transaction))
 fn symbol<T: Copy>(library: usize, name: &CStr) -> Result<T, String> {
     let symbol = unsafe { libc::dlsym(library as *mut c_void, name.as_ptr()) };
     if symbol.is_null() || size_of::<T>() != size_of::<*mut c_void>() {
-        return Err(format!(
-            "Soter native API unavailable: {}",
-            name.to_string_lossy()
-        ));
+        return Err(format!("Soter native API unavailable: {}", name.to_string_lossy()));
     }
     Ok(unsafe { std::mem::transmute_copy(&symbol) })
 }
@@ -356,10 +347,7 @@ fn library(name: &CStr) -> Result<usize, String> {
         } else {
             unsafe { CStr::from_ptr(error) }.to_string_lossy()
         };
-        return Err(format!(
-            "Soter hook cannot load {}: {detail}",
-            name.to_string_lossy()
-        ));
+        return Err(format!("Soter hook cannot load {}: {detail}", name.to_string_lossy()));
     }
     Ok(handle as usize)
 }
@@ -476,7 +464,7 @@ impl NativeApi {
                 .is_some_and(|expected| unsafe { (self.platform_objects)(platform) != expected })
         {
             return Err(
-                "Soter hook received an unsupported Parcel size or object count".to_string(),
+                "Soter hook received an unsupported Parcel size or object count".to_string()
             );
         }
         if size == 0 {
@@ -529,25 +517,14 @@ unsafe extern "C" fn on_transact(
             .state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .write_reply(
-                code,
-                bytes,
-                &mut NativeWriter {
-                    api: &native.api,
-                    output,
-                },
-            )
+            .write_reply(code, bytes, &mut NativeWriter { api: &native.api, output })
             .map_or_else(|status| status, |()| 0)
     }))
     .unwrap_or(-libc::EFAULT);
     if result == 0 {
         log_code_once(&REPLIED_CODES, code, "Soter software test reply delivered");
     } else {
-        log_code_once(
-            &FAILED_CODES,
-            code,
-            &format!("Soter reply failed (status={result})"),
-        );
+        log_code_once(&FAILED_CODES, code, &format!("Soter reply failed (status={result})"));
     }
     result
 }

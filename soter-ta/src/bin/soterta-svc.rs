@@ -144,11 +144,7 @@ impl Remotable for SoterService {
                 return Err(StatusCode::BadValue);
             }
             reply.write_i32(0)?;
-            return if code == INTERFACE_VERSION {
-                reply.write_i32(1)
-            } else {
-                reply.write(&HASH)
-            };
+            return if code == INTERFACE_VERSION { reply.write_i32(1) } else { reply.write(&HASH) };
         }
         if !dispatch::handles(code) {
             return Err(StatusCode::UnknownTransaction);
@@ -194,17 +190,12 @@ unsafe extern "C" fn boot_ms() -> i64 {
     if libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut now) != 0 {
         return -1;
     }
-    now.tv_sec
-        .saturating_mul(1000)
-        .saturating_add(now.tv_nsec / 1_000_000)
+    now.tv_sec.saturating_mul(1000).saturating_add(now.tv_nsec / 1_000_000)
 }
 
 fn sum_counter(dump: &str, key: &str) -> Option<u64> {
     let mut total = None::<u64>;
-    for (_, tail) in dump
-        .match_indices(key)
-        .map(|(index, _)| (index, &dump[index + key.len()..]))
-    {
+    for (_, tail) in dump.match_indices(key).map(|(index, _)| (index, &dump[index + key.len()..])) {
         let Some(tail) = tail.trim_start().strip_prefix(':') else {
             continue;
         };
@@ -374,17 +365,11 @@ mod tests {
     fn biometric_counter_parser_preserves_missing_evidence() {
         assert_eq!(sum_counter("no data", "\"accept\""), None);
         assert_eq!(
-            sum_counter(
-                "{\"accept\": 3, \"acceptCrypto\": 6} {\"accept\": 7}",
-                "\"accept\""
-            ),
+            sum_counter("{\"accept\": 3, \"acceptCrypto\": 6} {\"accept\": 7}", "\"accept\""),
             Some(10)
         );
         assert_eq!(sum_counter("\"accept\": -1", "\"accept\""), None);
-        assert_eq!(
-            sum_counter("\"accept\": 18446744073709551616", "\"accept\""),
-            None
-        );
+        assert_eq!(sum_counter("\"accept\": 18446744073709551616", "\"accept\""), None);
     }
 
     #[test]
@@ -392,10 +377,7 @@ mod tests {
         let service = SoterService(Mode::Dead);
         let mut input = Parcel::new();
         let mut reply = Parcel::new();
-        assert_eq!(
-            service.on_transact(5, &mut input, &mut reply),
-            Err(StatusCode::BadValue)
-        );
+        assert_eq!(service.on_transact(5, &mut input, &mut reply), Err(StatusCode::BadValue));
         assert_eq!(reply.data_size(), 0);
         assert_eq!(
             service.on_transact(99, &mut input, &mut reply),
@@ -410,11 +392,7 @@ mod tests {
         let name =
             std::env::var("OMK_SOTER_TEST_SERVICE").expect("test-only service name required");
         assert!(name.starts_with("omk.soter.test."));
-        serve(&Options {
-            name,
-            ..Options::default()
-        })
-        .unwrap();
+        serve(&Options { name, ..Options::default() }).unwrap();
     }
 
     fn check_remote(native: bool) {
@@ -427,25 +405,16 @@ mod tests {
             let mut reply = proxy.submit_transact(tx, &data, 0).unwrap().unwrap();
             reply.set_data_position(0);
             let expected = dispatch::dead_reply(dispatch::TX_GET_DEVICE_ID).unwrap();
-            let expected = if native {
-                expected.to_native_reply_bytes()
-            } else {
-                expected.to_reply_bytes()
-            };
+            let expected =
+                if native { expected.to_native_reply_bytes() } else { expected.to_reply_bytes() };
             assert_eq!(read_words(&mut reply).unwrap(), expected);
         }
         let data = proxy.prepare_transact(true).unwrap();
-        let mut reply = proxy
-            .submit_transact(INTERFACE_VERSION, &data, 0)
-            .unwrap()
-            .unwrap();
+        let mut reply = proxy.submit_transact(INTERFACE_VERSION, &data, 0).unwrap().unwrap();
         reply.set_data_position(0);
         assert_eq!(reply.read_i32().unwrap(), 0);
         assert_eq!(reply.read_i32().unwrap(), 1);
-        let mut reply = proxy
-            .submit_transact(INTERFACE_HASH, &data, 0)
-            .unwrap()
-            .unwrap();
+        let mut reply = proxy.submit_transact(INTERFACE_HASH, &data, 0).unwrap().unwrap();
         reply.set_data_position(0);
         assert_eq!(reply.read_i32().unwrap(), 0);
         assert_eq!(reply.read::<String>().unwrap(), HASH);
@@ -462,11 +431,7 @@ mod tests {
     #[ignore = "requires explicitly authorized Android root Binder test"]
     fn binder_roundtrip() {
         use std::os::unix::process::CommandExt;
-        assert_eq!(
-            unsafe { libc::getuid() },
-            0,
-            "run isolated Binder test as root"
-        );
+        assert_eq!(unsafe { libc::getuid() }, 0, "run isolated Binder test as root");
         let name = format!("omk.soter.test.{}", std::process::id());
         std::env::set_var("OMK_SOTER_TEST_SERVICE", &name);
         struct Child(std::process::Child);

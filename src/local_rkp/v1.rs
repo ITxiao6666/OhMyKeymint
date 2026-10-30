@@ -39,9 +39,8 @@ fn parse_bridge(reply: &[u8], challenge: &[u8], public: &Value) -> Result<Vec<u8
 }
 
 fn read_int(rest: &mut &[u8]) -> Result<u32> {
-    let (head, tail) = rest
-        .split_at_checked(4)
-        .ok_or_else(|| anyhow!("truncated V1 bridge reply"))?;
+    let (head, tail) =
+        rest.split_at_checked(4).ok_or_else(|| anyhow!("truncated V1 bridge reply"))?;
     *rest = tail;
     Ok(u32::from_be_bytes(head.try_into()?))
 }
@@ -51,19 +50,14 @@ fn read_bytes<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8]> {
     if length > BUFFER_SIZE {
         bail!("oversized V1 reply field");
     }
-    let (field, tail) = rest
-        .split_at_checked(length)
-        .ok_or_else(|| anyhow!("truncated V1 reply field"))?;
+    let (field, tail) =
+        rest.split_at_checked(length).ok_or_else(|| anyhow!("truncated V1 reply field"))?;
     *rest = tail;
     Ok(field)
 }
 
 pub(super) fn native(eek: &Eek, public: &Value) -> Result<Vec<u8>> {
-    let chain = if !eek.x25519.is_empty() {
-        &eek.x25519
-    } else {
-        &eek.p256
-    };
+    let chain = if !eek.x25519.is_empty() { &eek.x25519 } else { &eek.p256 };
     let mut mac_key = [0; 32];
     SystemRandom::new()
         .fill(&mut mac_key)
@@ -137,12 +131,7 @@ fn assemble(
     if required(as_map(&headers, "encryption headers")?, 1)? != &int(3) {
         bail!("V1 ProtectedData must use A256GCM");
     }
-    if as_bytes(
-        required(as_map(&encrypted[1], "unprotected headers")?, 5)?,
-        "IV",
-    )?
-    .len()
-        != 12
+    if as_bytes(required(as_map(&encrypted[1], "unprotected headers")?, 5)?, "IV")?.len() != 12
         || as_bytes(&encrypted[2], "ciphertext")?.len() < 16
     {
         bail!("invalid V1 encrypted fields");
@@ -182,9 +171,7 @@ mod tests {
         let mut reply = 1u32.to_be_bytes().to_vec();
         reply.extend((-18i32).to_be_bytes());
         reply.extend(b"SECRET HAL MESSAGE");
-        let error = parse_bridge(&reply, b"challenge", &Value::Null)
-            .unwrap_err()
-            .to_string();
+        let error = parse_bridge(&reply, b"challenge", &Value::Null).unwrap_err().to_string();
         assert!(error.contains("-18"));
         assert!(!error.contains("SECRET"));
         assert!(parse_bridge(&[], &[], &Value::Null).is_err());
@@ -197,11 +184,7 @@ mod tests {
             bytes([0xa1, 1, 3]),
             Value::Map(vec![(int(5), bytes([0; 12]))]),
             bytes([0; 16]),
-            Value::Array(vec![Value::Array(vec![
-                bytes([]),
-                Value::Map(vec![]),
-                Value::Null,
-            ])]),
+            Value::Array(vec![Value::Array(vec![bytes([]), Value::Map(vec![]), Value::Null])]),
         ]))
         .unwrap();
         let csr = assemble(&[7; 32], &device, &protected, b"test", &Value::Map(vec![])).unwrap();

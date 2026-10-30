@@ -1,11 +1,6 @@
 use super::*;
 
-mod publication;
-
 use publication::register_operation_publication;
-
-#[cfg(test)]
-pub(in crate::hook) use publication::register_operation_publication_for_test;
 pub(in crate::hook) use publication::{
     bind_operation_publication_connection, cancel_operation_publication_acquire_pending,
     finish_local_operation_publication, finish_operation_publication_probe,
@@ -15,13 +10,41 @@ pub(in crate::hook) use publication::{
     retire_binder_connection_publications, take_operation_publication_probe,
 };
 
+mod publication;
+#[cfg(test)]
+pub(super) mod tests;
+
 #[derive(Clone)]
 pub(super) struct OperationTargetInfo {
     pub(super) route: RouteTarget,
     pub(super) aad_allowed: bool,
-    pub(super) backend: Option<AospOperationBinder>,
+    pub(super) backend: Option<Arc<AospOperationBinder>>,
     pub(super) finalized: bool,
     pub(super) call_gate: Arc<Mutex<()>>,
+}
+
+pub(in crate::hook) struct NativeOperationState {
+    pub(super) backend: AospOperationBinder,
+    pub(super) aad_allowed: bool,
+    pub(super) caller: CallerInfo,
+    pub(super) finalized: AtomicBool,
+    pub(super) call_gate: Mutex<()>,
+}
+
+impl NativeOperationState {
+    pub(super) fn is_finalized(&self) -> bool {
+        self.finalized.load(Ordering::Acquire)
+    }
+
+    pub(super) fn retire(&self) {
+        if self.finalized.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let _guard = BypassGuard::enter();
+        if let Err(status) = self.backend.r#abort() {
+            debug!("event=synthetic retired OMK operation abort failed: {status}");
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,8 +80,10 @@ pub(in crate::hook) enum SyntheticReply {
 #[derive(Clone, Debug)]
 pub(super) struct SyntheticTargetInfo {
     pub(super) kind: SyntheticTargetKind,
+    #[cfg(test)]
     pub(super) caller: Option<CallerInfo>,
     pub(super) native_generation: Option<u64>,
+    pub(super) operation: Option<Weak<NativeOperationState>>,
 }
 
 static OPERATION_TARGETS: LazyLock<Mutex<HashMap<LocalBinderTarget, OperationTargetInfo>>> =
@@ -80,39 +105,6 @@ static OPERATION_PUBLICATIONS: LazyLock<Mutex<HashMap<LocalBinderTarget, Operati
 static OPERATION_PUBLICATION_PROBES: LazyLock<Mutex<VecDeque<OperationPublicationProbe>>> =
     LazyLock::new(|| Mutex::new(VecDeque::new()));
 
-#[cfg(test)]
-pub(super) fn reset_state_for_tests() {
-    OPERATION_TARGETS
-        .lock()
-        .expect("operation target map poisoned")
-        .clear();
-    OPERATION_PUBLICATIONS
-        .lock()
-        .expect("operation publication map poisoned")
-        .clear();
-    OPERATION_PUBLICATION_PROBES
-        .lock()
-        .expect("operation publication probe queue poisoned")
-        .clear();
-    SYNTHETIC_SECURITY_LEVEL_TARGETS
-        .lock()
-        .expect("synthetic security-level target map poisoned")
-        .clear();
-    SYNTHETIC_TARGETS
-        .lock()
-        .expect("synthetic target map poisoned")
-        .clear();
-    let natives = NATIVE_BINDERS
-        .lock()
-        .expect("native binder map poisoned")
-        .drain()
-        .map(|(_, native)| native)
-        .collect::<Vec<_>>();
-    for native in &natives {
-        native.disarm_retirement();
-    }
-}
-
 static NEXT_OPERATION_PUBLICATION_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 const OPERATION_PUBLICATION_PROBE_GRACE: Duration = Duration::from_millis(250);
@@ -123,27 +115,19 @@ const MAX_PENDING_OPERATION_PUBLICATIONS: usize = 64;
 pub(in crate::hook) fn lookup_synthetic_target(
     target: LocalBinderTarget,
 ) -> Option<SyntheticTargetKind> {
-    lookup_synthetic_target_info(target).map(|info| info.kind)
-}
-
-pub(in crate::hook::rewrite) fn lookup_synthetic_target_info(
-    target: LocalBinderTarget,
-) -> Option<SyntheticTargetInfo> {
     SYNTHETIC_TARGETS
         .lock()
         .expect("synthetic target map poisoned")
         .get(&target)
-        .cloned()
+        .map(|info| info.kind)
 }
 
 pub(in crate::hook::rewrite) fn remember_operation_target(
     target: LocalBinderTarget,
     info: OperationTargetInfo,
 ) {
-    let previous = OPERATION_TARGETS
-        .lock()
-        .expect("operation target map poisoned")
-        .insert(target, info);
+    let previous =
+        OPERATION_TARGETS.lock().expect("operation target map poisoned").insert(target, info);
     if let Some(previous) = previous {
         if let Some(backend) = previous.backend {
             let _guard = BypassGuard::enter();
@@ -160,40 +144,19 @@ pub(in crate::hook::rewrite) fn remember_operation_target(
 pub(in crate::hook::rewrite) fn lookup_operation_target(
     target: LocalBinderTarget,
 ) -> Option<OperationTargetInfo> {
-    OPERATION_TARGETS
-        .lock()
-        .expect("operation target map poisoned")
-        .get(&target)
-        .cloned()
+    OPERATION_TARGETS.lock().expect("operation target map poisoned").get(&target).cloned()
 }
 
 pub(in crate::hook::rewrite) fn forget_operation_target(target: LocalBinderTarget) {
-    OPERATION_TARGETS
-        .lock()
-        .expect("operation target map poisoned")
-        .remove(&target);
-}
-
-#[cfg(test)]
-fn current_operation_retirement(target: LocalBinderTarget) -> Option<NativeBinderRetirement> {
-    let generation = SYNTHETIC_TARGETS
-        .lock()
-        .expect("synthetic target map poisoned")
-        .get(&target)
-        .filter(|info| info.kind == SyntheticTargetKind::Operation)
-        .and_then(|info| info.native_generation)?;
-    Some(NativeBinderRetirement { target, generation })
+    let retired = OPERATION_TARGETS.lock().expect("operation target map poisoned").remove(&target);
+    drop(retired);
 }
 
 pub(crate) fn drop_synthetic_operation_retirement(retirement: NativeBinderRetirement) {
-    let (info, native) = {
+    let (info, state, native) = {
         let mut binders = NATIVE_BINDERS.lock().expect("native binder map poisoned");
-        let mut operations = OPERATION_TARGETS
-            .lock()
-            .expect("operation target map poisoned");
-        let mut synthetic = SYNTHETIC_TARGETS
-            .lock()
-            .expect("synthetic target map poisoned");
+        let mut operations = OPERATION_TARGETS.lock().expect("operation target map poisoned");
+        let mut synthetic = SYNTHETIC_TARGETS.lock().expect("synthetic target map poisoned");
         let matches_generation = binders
             .get(&retirement.target)
             .is_some_and(|native| native.retirement_generation() == retirement.generation)
@@ -205,15 +168,17 @@ pub(crate) fn drop_synthetic_operation_retirement(retirement: NativeBinderRetire
             return;
         }
         let info = operations.remove(&retirement.target);
-        synthetic.remove(&retirement.target);
+        let state = synthetic
+            .remove(&retirement.target)
+            .and_then(|info| info.operation)
+            .and_then(|state| state.upgrade());
         let native = binders.remove(&retirement.target);
-        (info, native)
+        (info, state, native)
     };
 
     {
-        let mut publications = OPERATION_PUBLICATIONS
-            .lock()
-            .expect("operation publication map poisoned");
+        let mut publications =
+            OPERATION_PUBLICATIONS.lock().expect("operation publication map poisoned");
         if publications
             .get(&retirement.target)
             .is_some_and(|publication| publication.generation == retirement.generation)
@@ -230,30 +195,11 @@ pub(crate) fn drop_synthetic_operation_retirement(retirement: NativeBinderRetire
     if let Some(native) = native.as_ref() {
         native.disarm_retirement();
     }
+    if let Some(state) = state {
+        state.retire();
+    }
     abort_operation_target_info(retirement.target, info);
     drop(native);
-}
-
-#[cfg(test)]
-fn drop_synthetic_operation_target(target: LocalBinderTarget) {
-    if let Some(retirement) = current_operation_retirement(target) {
-        drop_synthetic_operation_retirement(retirement);
-        return;
-    }
-    OPERATION_PUBLICATIONS
-        .lock()
-        .expect("operation publication map poisoned")
-        .remove(&target);
-    let native = NATIVE_BINDERS
-        .lock()
-        .expect("native binder map poisoned")
-        .remove(&target);
-    if let Some(native) = native.as_ref() {
-        native.disarm_retirement();
-    }
-    drop(native);
-
-    retire_synthetic_operation_target(target);
 }
 
 fn release_native_operation_initial_strong(retirement: NativeBinderRetirement) {
@@ -295,44 +241,10 @@ fn abort_operation_target_info(target: LocalBinderTarget, info: Option<Operation
     }
 }
 
-#[cfg(test)]
-fn retire_synthetic_operation_target(target: LocalBinderTarget) {
-    let info = OPERATION_TARGETS
-        .lock()
-        .expect("operation target map poisoned")
-        .remove(&target);
-    SYNTHETIC_TARGETS
-        .lock()
-        .expect("synthetic target map poisoned")
-        .remove(&target);
-    if OPERATION_PUBLICATIONS
-        .lock()
-        .expect("operation publication map poisoned")
-        .contains_key(&target)
-    {
-        let now = Instant::now();
-        for probe in OPERATION_PUBLICATION_PROBES
-            .lock()
-            .expect("operation publication probe queue poisoned")
-            .iter_mut()
-            .filter(|probe| probe.target == target)
-        {
-            probe.not_before = now;
-        }
-        super::super::intercept::wake_operation_publication_worker();
-    }
-
-    abort_operation_target_info(target, info);
-}
-
 pub(in crate::hook) fn retire_synthetic_operation_retirement(retirement: NativeBinderRetirement) {
-    let info = {
-        let mut operations = OPERATION_TARGETS
-            .lock()
-            .expect("operation target map poisoned");
-        let mut synthetic = SYNTHETIC_TARGETS
-            .lock()
-            .expect("synthetic target map poisoned");
+    let (info, state) = {
+        let mut operations = OPERATION_TARGETS.lock().expect("operation target map poisoned");
+        let mut synthetic = SYNTHETIC_TARGETS.lock().expect("synthetic target map poisoned");
         let matches_generation = synthetic.get(&retirement.target).is_some_and(|info| {
             info.kind == SyntheticTargetKind::Operation
                 && info.native_generation == Some(retirement.generation)
@@ -340,8 +252,11 @@ pub(in crate::hook) fn retire_synthetic_operation_retirement(retirement: NativeB
         if !matches_generation {
             return;
         }
-        synthetic.remove(&retirement.target);
-        operations.remove(&retirement.target)
+        let state = synthetic
+            .remove(&retirement.target)
+            .and_then(|info| info.operation)
+            .and_then(|state| state.upgrade());
+        (operations.remove(&retirement.target), state)
     };
     if OPERATION_PUBLICATIONS
         .lock()
@@ -362,17 +277,16 @@ pub(in crate::hook) fn retire_synthetic_operation_retirement(retirement: NativeB
         }
         super::super::intercept::wake_operation_publication_worker();
     }
+    if let Some(state) = state {
+        state.retire();
+    }
     abort_operation_target_info(retirement.target, info);
 }
 
 pub(crate) fn retire_native_operation_target(retirement: NativeBinderRetirement) {
     let info = {
-        let mut operations = OPERATION_TARGETS
-            .lock()
-            .expect("operation target map poisoned");
-        let mut synthetic = SYNTHETIC_TARGETS
-            .lock()
-            .expect("synthetic target map poisoned");
+        let mut operations = OPERATION_TARGETS.lock().expect("operation target map poisoned");
+        let mut synthetic = SYNTHETIC_TARGETS.lock().expect("synthetic target map poisoned");
         let matches_generation = synthetic.get(&retirement.target).is_some_and(|info| {
             info.kind == SyntheticTargetKind::Operation
                 && info.native_generation == Some(retirement.generation)
@@ -389,9 +303,8 @@ pub(crate) fn retire_native_operation_target(retirement: NativeBinderRetirement)
     };
 
     {
-        let mut publications = OPERATION_PUBLICATIONS
-            .lock()
-            .expect("operation publication map poisoned");
+        let mut publications =
+            OPERATION_PUBLICATIONS.lock().expect("operation publication map poisoned");
         if publications
             .get(&retirement.target)
             .is_some_and(|publication| publication.generation == retirement.generation)
@@ -409,39 +322,25 @@ pub(crate) fn retire_native_operation_target(retirement: NativeBinderRetirement)
     drop(info);
 }
 
-#[cfg(test)]
-fn observe_synthetic_operation_release(target: LocalBinderTarget) {
-    if lookup_synthetic_target(target) == Some(SyntheticTargetKind::Operation) {
-        drop_synthetic_operation_target(target);
-    }
-}
-
 pub(in crate::hook::rewrite) fn mark_operation_target_finalized(target: LocalBinderTarget) {
-    if let Some(info) = OPERATION_TARGETS
-        .lock()
-        .expect("operation target map poisoned")
-        .get_mut(&target)
-    {
-        info.backend = None;
-        info.finalized = true;
-    }
+    let retired = {
+        let mut operations = OPERATION_TARGETS.lock().expect("operation target map poisoned");
+        operations.get_mut(&target).and_then(|info| {
+            info.finalized = true;
+            info.backend.take()
+        })
+    };
+    drop(retired);
 }
 
 fn native_binder_carrier(native: &NativeBinder) -> parcel::ReplyBinderCarrier {
-    parcel::ReplyBinderCarrier {
-        bytes: native.carrier().to_vec(),
-        is_object: true,
-    }
+    parcel::ReplyBinderCarrier { bytes: native.carrier().to_vec(), is_object: true }
 }
 
 pub(in crate::hook) fn lookup_native_binder(
     target: LocalBinderTarget,
 ) -> Option<Arc<NativeBinder>> {
-    NATIVE_BINDERS
-        .lock()
-        .expect("native binder map poisoned")
-        .get(&target)
-        .cloned()
+    NATIVE_BINDERS.lock().expect("native binder map poisoned").get(&target).cloned()
 }
 
 pub(in crate::hook) fn lookup_native_binder_for(
@@ -460,21 +359,23 @@ pub(in crate::hook::rewrite) fn register_synthetic_operation_carrier(
     caller: &CallerInfo,
 ) -> anyhow::Result<(parcel::ReplyBinderCarrier, NativeBinderRetirement)> {
     let native = Arc::new(create_native_operation_binder()?);
+    let state = Arc::new(NativeOperationState {
+        backend,
+        aad_allowed,
+        caller: caller.clone(),
+        finalized: AtomicBool::new(false),
+        call_gate: Mutex::new(()),
+    });
+    native.set_operation_state(Arc::clone(&state))?;
     let target = native.target();
     let carrier = native_binder_carrier(&native);
     let generation = register_operation_publication(target)?;
     let mut binders = NATIVE_BINDERS.lock().expect("native binder map poisoned");
-    let mut operations = OPERATION_TARGETS
-        .lock()
-        .expect("operation target map poisoned");
-    let mut synthetic = SYNTHETIC_TARGETS
-        .lock()
-        .expect("synthetic target map poisoned");
+    let mut operations = OPERATION_TARGETS.lock().expect("operation target map poisoned");
+    let mut synthetic = SYNTHETIC_TARGETS.lock().expect("synthetic target map poisoned");
     let replaced_stale_system = if !synthetic.contains_key(&target)
         && !binders.contains_key(&target)
-        && operations
-            .get(&target)
-            .is_some_and(|info| info.route == RouteTarget::System)
+        && operations.get(&target).is_some_and(|info| info.route == RouteTarget::System)
     {
         operations.remove(&target);
         true
@@ -488,32 +389,21 @@ pub(in crate::hook::rewrite) fn register_synthetic_operation_carrier(
         drop(synthetic);
         drop(operations);
         drop(binders);
-        OPERATION_PUBLICATIONS
-            .lock()
-            .expect("operation publication map poisoned")
-            .remove(&target);
+        OPERATION_PUBLICATIONS.lock().expect("operation publication map poisoned").remove(&target);
         anyhow::bail!(
             "native operation target collision for ptr=0x{:x} cookie=0x{:x}",
             target.ptr,
             target.cookie
         );
     }
-    operations.insert(
-        target,
-        OperationTargetInfo {
-            route: RouteTarget::Omk,
-            aad_allowed,
-            backend: Some(backend),
-            finalized: false,
-            call_gate: Arc::new(Mutex::new(())),
-        },
-    );
     synthetic.insert(
         target,
         SyntheticTargetInfo {
             kind: SyntheticTargetKind::Operation,
+            #[cfg(test)]
             caller: Some(caller.clone()),
             native_generation: Some(generation),
+            operation: Some(Arc::downgrade(&state)),
         },
     );
     binders.insert(target, native.clone());
@@ -544,11 +434,8 @@ pub(in crate::hook::rewrite) fn register_synthetic_security_level_carrier(
             .lock()
             .expect("synthetic security-level target map poisoned");
         if let Some(target) = targets.get(&security_level) {
-            let native = NATIVE_BINDERS
-                .lock()
-                .expect("native binder map poisoned")
-                .get(target)
-                .cloned();
+            let native =
+                NATIVE_BINDERS.lock().expect("native binder map poisoned").get(target).cloned();
             let carrier = if let Some(native) = native {
                 native_binder_carrier(&native)
             } else {
@@ -564,9 +451,7 @@ pub(in crate::hook::rewrite) fn register_synthetic_security_level_carrier(
             let target = native.target();
             let carrier = native_binder_carrier(&native);
             let mut binders = NATIVE_BINDERS.lock().expect("native binder map poisoned");
-            let mut synthetic = SYNTHETIC_TARGETS
-                .lock()
-                .expect("synthetic target map poisoned");
+            let mut synthetic = SYNTHETIC_TARGETS.lock().expect("synthetic target map poisoned");
             if binders.contains_key(&target) || synthetic.contains_key(&target) {
                 anyhow::bail!(
                     "native security-level binder collision for ptr=0x{:x} cookie=0x{:x}",
@@ -579,8 +464,10 @@ pub(in crate::hook::rewrite) fn register_synthetic_security_level_carrier(
                 target,
                 SyntheticTargetInfo {
                     kind: SyntheticTargetKind::SecurityLevel,
+                    #[cfg(test)]
                     caller: None,
                     native_generation: None,
+                    operation: None,
                 },
             );
             targets.insert(security_level, target);
@@ -594,6 +481,3 @@ pub(in crate::hook::rewrite) fn register_synthetic_security_level_carrier(
     );
     Ok(carrier)
 }
-
-#[cfg(test)]
-mod tests;

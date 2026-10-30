@@ -37,7 +37,7 @@ impl AospKeystoreSecurityLevel for FakeAospSecurityLevel {
         _arg_operation_parameters:
             &[crate::android::hardware::security::keymint::KeyParameter::KeyParameter],
         _arg_forced: bool,
-    ) -> rsbinder::status::Result<CreateOperationResponse> {
+    ) -> rsbinder::BinderResult<CreateOperationResponse> {
         Err(StatusCode::UnknownTransaction.into())
     }
 
@@ -48,7 +48,7 @@ impl AospKeystoreSecurityLevel for FakeAospSecurityLevel {
         _arg_params: &[crate::android::hardware::security::keymint::KeyParameter::KeyParameter],
         _arg_flags: i32,
         _arg_entropy: &[u8],
-    ) -> rsbinder::status::Result<KeyMetadata> {
+    ) -> rsbinder::BinderResult<KeyMetadata> {
         Err(StatusCode::UnknownTransaction.into())
     }
 
@@ -59,7 +59,7 @@ impl AospKeystoreSecurityLevel for FakeAospSecurityLevel {
         _arg_params: &[crate::android::hardware::security::keymint::KeyParameter::KeyParameter],
         _arg_flags: i32,
         _arg_key_data: &[u8],
-    ) -> rsbinder::status::Result<KeyMetadata> {
+    ) -> rsbinder::BinderResult<KeyMetadata> {
         Err(StatusCode::UnknownTransaction.into())
     }
 
@@ -71,18 +71,18 @@ impl AospKeystoreSecurityLevel for FakeAospSecurityLevel {
         _arg_params: &[crate::android::hardware::security::keymint::KeyParameter::KeyParameter],
         _arg_authenticators:
             &[crate::android::system::keystore2::AuthenticatorSpec::AuthenticatorSpec],
-    ) -> rsbinder::status::Result<KeyMetadata> {
+    ) -> rsbinder::BinderResult<KeyMetadata> {
         Err(StatusCode::UnknownTransaction.into())
     }
 
     fn r#convertStorageKeyToEphemeral(
         &self,
         _arg_storage_key: &KeyDescriptor,
-    ) -> rsbinder::status::Result<EphemeralStorageKeyResponse> {
+    ) -> rsbinder::BinderResult<EphemeralStorageKeyResponse> {
         Err(StatusCode::UnknownTransaction.into())
     }
 
-    fn r#deleteKey(&self, _arg_key: &KeyDescriptor) -> rsbinder::status::Result<()> {
+    fn r#deleteKey(&self, _arg_key: &KeyDescriptor) -> rsbinder::BinderResult<()> {
         Err(StatusCode::UnknownTransaction.into())
     }
 }
@@ -109,11 +109,7 @@ fn take_ready_operation_publication_probe() -> Option<OperationPublicationProbe>
 }
 
 fn binder_token(fd: i32) -> BinderFdToken {
-    BinderFdToken {
-        fd,
-        generation: 0,
-        connection: fd as BinderStateKey,
-    }
+    BinderFdToken { fd, generation: 0, connection: fd as BinderStateKey }
 }
 
 fn publication_retirement(target: LocalBinderTarget) -> NativeBinderRetirement {
@@ -138,4 +134,110 @@ fn finish_operation_publication_probe_for_test(
     node_exists: Result<bool, i32>,
 ) -> Option<NativeBinderRetirement> {
     finish_operation_publication_probe(probe, node_exists, Instant::now())
+}
+
+pub(in crate::hook::rewrite) fn reset_state_for_tests() {
+    OPERATION_TARGETS.lock().expect("operation target map poisoned").clear();
+    OPERATION_PUBLICATIONS.lock().expect("operation publication map poisoned").clear();
+    OPERATION_PUBLICATION_PROBES
+        .lock()
+        .expect("operation publication probe queue poisoned")
+        .clear();
+    SYNTHETIC_SECURITY_LEVEL_TARGETS
+        .lock()
+        .expect("synthetic security-level target map poisoned")
+        .clear();
+    SYNTHETIC_TARGETS.lock().expect("synthetic target map poisoned").clear();
+    let natives = NATIVE_BINDERS
+        .lock()
+        .expect("native binder map poisoned")
+        .drain()
+        .map(|(_, native)| native)
+        .collect::<Vec<_>>();
+    for native in &natives {
+        native.disarm_retirement();
+    }
+}
+
+pub(in crate::hook::rewrite) fn lookup_synthetic_target_info(
+    target: LocalBinderTarget,
+) -> Option<SyntheticTargetInfo> {
+    SYNTHETIC_TARGETS.lock().expect("synthetic target map poisoned").get(&target).cloned()
+}
+
+pub(in crate::hook::rewrite) fn lookup_native_operation_state(
+    target: LocalBinderTarget,
+) -> Option<Arc<NativeOperationState>> {
+    lookup_synthetic_target_info(target)?.operation?.upgrade()
+}
+
+fn current_operation_retirement(target: LocalBinderTarget) -> Option<NativeBinderRetirement> {
+    let generation = SYNTHETIC_TARGETS
+        .lock()
+        .expect("synthetic target map poisoned")
+        .get(&target)
+        .filter(|info| info.kind == SyntheticTargetKind::Operation)
+        .and_then(|info| info.native_generation)?;
+    Some(NativeBinderRetirement { target, generation })
+}
+
+fn drop_synthetic_operation_target(target: LocalBinderTarget) {
+    if let Some(retirement) = current_operation_retirement(target) {
+        drop_synthetic_operation_retirement(retirement);
+        return;
+    }
+    OPERATION_PUBLICATIONS.lock().expect("operation publication map poisoned").remove(&target);
+    let native = NATIVE_BINDERS.lock().expect("native binder map poisoned").remove(&target);
+    if let Some(native) = native.as_ref() {
+        native.disarm_retirement();
+    }
+    drop(native);
+
+    retire_synthetic_operation_target(target);
+}
+
+fn retire_synthetic_operation_target(target: LocalBinderTarget) {
+    let info = OPERATION_TARGETS.lock().expect("operation target map poisoned").remove(&target);
+    let state = SYNTHETIC_TARGETS
+        .lock()
+        .expect("synthetic target map poisoned")
+        .remove(&target)
+        .and_then(|info| info.operation)
+        .and_then(|state| state.upgrade());
+    if OPERATION_PUBLICATIONS
+        .lock()
+        .expect("operation publication map poisoned")
+        .contains_key(&target)
+    {
+        let now = Instant::now();
+        {
+            let mut probes = OPERATION_PUBLICATION_PROBES
+                .lock()
+                .expect("operation publication probe queue poisoned");
+            let matching_probes = probes.iter_mut().filter(|probe| probe.target == target);
+            for probe in matching_probes {
+                probe.not_before = now;
+            }
+        }
+        crate::hook::intercept::wake_operation_publication_worker();
+    }
+
+    if let Some(state) = state {
+        state.retire();
+    }
+    abort_operation_target_info(target, info);
+}
+
+fn observe_synthetic_operation_release(target: LocalBinderTarget) {
+    if lookup_synthetic_target(target) == Some(SyntheticTargetKind::Operation) {
+        drop_synthetic_operation_target(target);
+    }
+}
+
+pub(in crate::hook) fn register_operation_publication_for_test(
+    target: LocalBinderTarget,
+) -> NativeBinderRetirement {
+    let generation =
+        register_operation_publication(target).expect("test operation publication should register");
+    NativeBinderRetirement { target, generation }
 }

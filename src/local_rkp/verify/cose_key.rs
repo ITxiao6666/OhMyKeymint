@@ -1,8 +1,10 @@
 // Adapted from Duck-ToolBox, MIT; see template/THIRD_PARTY_LICENSES/Duck-ToolBox.txt.
 use anyhow::{anyhow, Context, Result};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use kmr_wire::cbor::value::Value;
-use p256::ecdsa::{Signature as P256Signature, VerifyingKey as P256VerifyingKey};
+use p256::ecdsa::{
+    signature::Verifier, Signature as P256Signature, VerifyingKey as P256VerifyingKey,
+};
 use p384::ecdsa::{Signature as P384Signature, VerifyingKey as P384VerifyingKey};
 
 use crate::local_rkp::{
@@ -96,16 +98,12 @@ fn ec2_point(
     ensure_allowed_integer_keys(entries, &[1, 2, 3, 4, 5, -1, -2, -3], label)?;
     let x = required_bytes(entries, -2, label, "x coordinate")?;
     if x.len() != coord_len {
-        return Err(anyhow!(
-            "{label} {curve_name} x coordinate must be {coord_len} bytes"
-        ));
+        return Err(anyhow!("{label} {curve_name} x coordinate must be {coord_len} bytes"));
     }
     match map_get(entries, -3).ok_or_else(|| anyhow!("{label} is missing y coordinate"))? {
         Value::Bytes(y) => {
             if y.len() != coord_len {
-                return Err(anyhow!(
-                    "{label} {curve_name} y coordinate must be {coord_len} bytes"
-                ));
+                return Err(anyhow!("{label} {curve_name} y coordinate must be {coord_len} bytes"));
             }
             let raw = [x, y].concat();
             Ok(([&[0x04], raw.as_slice()].concat(), raw))
@@ -115,12 +113,12 @@ fn ec2_point(
             let full = match coord_len {
                 P256_COORD_LEN => P256VerifyingKey::from_sec1_bytes(&compressed)
                     .context("invalid compressed P-256 public key")?
-                    .to_encoded_point(false)
+                    .to_sec1_point(false)
                     .as_bytes()
                     .to_vec(),
                 P384_COORD_LEN => P384VerifyingKey::from_sec1_bytes(&compressed)
                     .context("invalid compressed P-384 public key")?
-                    .to_encoded_point(false)
+                    .to_sec1_point(false)
                     .as_bytes()
                     .to_vec(),
                 _ => return Err(anyhow!("unsupported EC2 coordinate width")),
@@ -128,9 +126,7 @@ fn ec2_point(
             let raw = full[1..].to_vec();
             Ok((full, raw))
         }
-        _ => Err(anyhow!(
-            "{label} y coordinate must be CBOR bytes or boolean"
-        )),
+        _ => Err(anyhow!("{label} y coordinate must be CBOR bytes or boolean")),
     }
 }
 
@@ -146,9 +142,7 @@ fn validate_key_metadata(entries: &[(Value, Value)], label: &str) -> Result<()> 
         for operation in operations {
             let operation = as_i128(operation, "COSE key operation")?;
             if !matches!(operation, 1 | 2) || !seen.insert(operation) {
-                return Err(anyhow!(
-                    "{label} has invalid or duplicate signing key operation"
-                ));
+                return Err(anyhow!("{label} has invalid or duplicate signing key operation"));
             }
         }
     }
@@ -164,9 +158,7 @@ pub(super) fn verify_signed_data_signature(
         CoseVerifier::Ed25519(verifying_key) => {
             let signature =
                 Signature::from_slice(signature_bytes).context("parse Ed25519 signature")?;
-            verifying_key
-                .verify_strict(signature_input, &signature)
-                .is_ok()
+            verifying_key.verify_strict(signature_input, &signature).is_ok()
         }
         CoseVerifier::P256(verifying_key) => {
             let signature =
@@ -202,13 +194,8 @@ pub(super) fn parse_cose_sign1<'a>(
     let protected_algorithm = parse_protected_algorithm(protected, label)?;
     let protected_value = decode(protected)?;
     let protected_headers = as_map(&protected_value, "protected headers")?;
-    if unprotected
-        .iter()
-        .any(|(key, _)| protected_headers.iter().any(|(other, _)| key == other))
-    {
-        return Err(anyhow!(
-            "{label} repeats a header across protected and unprotected maps"
-        ));
+    if unprotected.iter().any(|(key, _)| protected_headers.iter().any(|(other, _)| key == other)) {
+        return Err(anyhow!("{label} repeats a header across protected and unprotected maps"));
     }
     if let Some(signer) = signer {
         if signer.algorithm != protected_algorithm {
@@ -224,11 +211,7 @@ pub(super) fn parse_cose_sign1<'a>(
         return Err(anyhow!("{label} signature must not be empty"));
     }
 
-    Ok(ParsedCoseSign1 {
-        protected,
-        payload,
-        signature,
-    })
+    Ok(ParsedCoseSign1 { protected, payload, signature })
 }
 
 fn parse_protected_algorithm(protected: &[u8], label: &str) -> Result<i128> {
@@ -245,9 +228,7 @@ fn parse_protected_algorithm(protected: &[u8], label: &str) -> Result<i128> {
         return Ok(algorithm);
     }
 
-    Err(anyhow!(
-        "{label} uses unsupported protected algorithm {algorithm}"
-    ))
+    Err(anyhow!("{label} uses unsupported protected algorithm {algorithm}"))
 }
 
 fn validate_header_metadata(

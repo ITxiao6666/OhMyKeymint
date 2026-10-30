@@ -78,11 +78,7 @@ pub(super) fn validate_device_info(value: &Value) -> Result<String> {
         _ => {}
     }
 
-    for field in [
-        "system_patch_level",
-        "boot_patch_level",
-        "vendor_patch_level",
-    ] {
+    for field in ["system_patch_level", "boot_patch_level", "vendor_patch_level"] {
         if !crate::local_rkp::is_valid_patch_level(required_uint_field(entries, field)?) {
             return Err(anyhow!(
                 "DeviceInfo field `{field}` must be a valid patch level in YYYYMM or YYYYMMDD form"
@@ -92,9 +88,7 @@ pub(super) fn validate_device_info(value: &Value) -> Result<String> {
 
     let fused = required_uint_field(entries, "fused")?;
     if fused > 1 {
-        return Err(anyhow!(
-            "DeviceInfo field `fused` must be 0 or 1, got {fused}"
-        ));
+        return Err(anyhow!("DeviceInfo field `fused` must be 0 or 1, got {fused}"));
     }
 
     let expected_len = if security_level == "tee" {
@@ -125,9 +119,7 @@ fn required_uint_field(entries: &[(Value, Value)], key: &str) -> Result<u32> {
         key,
     )?;
     if value < 0 {
-        return Err(anyhow!(
-            "DeviceInfo field `{key}` must be an unsigned integer"
-        ));
+        return Err(anyhow!("DeviceInfo field `{key}` must be an unsigned integer"));
     }
 
     u32::try_from(value).map_err(|_| anyhow!("DeviceInfo field `{key}` is out of range"))
@@ -138,8 +130,5 @@ fn validate_choice(field: &str, value: &str, allowed: &[&str]) -> Result<()> {
         return Ok(());
     }
 
-    Err(anyhow!(
-        "DeviceInfo field `{field}` must be one of {}, got `{value}`",
-        allowed.join(", ")
-    ))
+    Err(anyhow!("DeviceInfo field `{field}` must be one of {}, got `{value}`", allowed.join(", ")))
 }

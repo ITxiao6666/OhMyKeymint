@@ -56,11 +56,7 @@ pub fn prepare() -> Result<()> {
 }
 
 pub fn validate_id(id: &str) -> Result<()> {
-    if id.len() != 32
-        || !id
-            .bytes()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
-    {
+    if id.len() != 32 || !id.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) {
         bail!("invalid RKP result ID");
     }
     Ok(())
@@ -69,10 +65,8 @@ pub fn validate_id(id: &str) -> Result<()> {
 fn ids() -> Result<Vec<String>> {
     let mut ids = Vec::new();
     for entry in fs::read_dir(ROOT)? {
-        let name = entry?
-            .file_name()
-            .into_string()
-            .map_err(|_| anyhow!("invalid RKP result entry"))?;
+        let name =
+            entry?.file_name().into_string().map_err(|_| anyhow!("invalid RKP result entry"))?;
         validate_id(&name)?;
         if ids.len() >= MAX_ARTIFACTS {
             bail!("too many RKP results");
@@ -88,15 +82,10 @@ pub fn store_issued_keybox(xml: &[u8]) -> Result<String> {
     crate::local_rkp::validate_issued_xml(xml)?;
     prepare()?;
     let mut raw = [0; 16];
-    SystemRandom::new()
-        .fill(&mut raw)
-        .map_err(|_| anyhow!("cannot allocate RKP result ID"))?;
+    SystemRandom::new().fill(&mut raw).map_err(|_| anyhow!("cannot allocate RKP result ID"))?;
     let id = hex::encode(raw);
     let directory = Path::new(ROOT).join(&id);
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .context("reserve RKP result directory")?;
+    fs::DirBuilder::new().mode(0o700).create(&directory).context("reserve RKP result directory")?;
     let result = (|| -> Result<()> {
         let _directory = private_directory(&directory)?;
         let mut file = OpenOptions::new()
@@ -142,8 +131,7 @@ fn open_result(id: &str) -> Result<(File, PathBuf)> {
 
 fn read_result(file: File) -> Result<Zeroizing<Vec<u8>>> {
     let mut bytes = Zeroizing::new(Vec::new());
-    file.take(crate::keybox::MAX_KEYBOX_XML_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)?;
+    file.take(crate::keybox::MAX_KEYBOX_XML_BYTES as u64 + 1).read_to_end(&mut bytes)?;
     if bytes.len() > crate::keybox::MAX_KEYBOX_XML_BYTES {
         bail!("RKP result exceeds size limit");
     }
@@ -152,11 +140,7 @@ fn read_result(file: File) -> Result<Zeroizing<Vec<u8>>> {
 
 fn summary(id: &str) -> Result<Summary> {
     let (file, _) = open_result(id)?;
-    let created_at = file
-        .metadata()?
-        .modified()?
-        .duration_since(UNIX_EPOCH)?
-        .as_secs();
+    let created_at = file.metadata()?.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
     let xml = read_result(file)?;
     let parsed = crate::keybox::KeyBox::from_xml_str(
         std::str::from_utf8(&xml).context("invalid RKP result encoding")?,
@@ -164,11 +148,7 @@ fn summary(id: &str) -> Result<Summary> {
     .map_err(|_| anyhow!("RKP result is not a valid Keybox"))?;
     let inspector = parsed.inspector();
     let chain = inspector.ec.context("RKP result has no EC chain")?;
-    let chain_subjects: Vec<_> = chain
-        .certificates
-        .into_iter()
-        .map(|cert| cert.subject)
-        .collect();
+    let chain_subjects: Vec<_> = chain.certificates.into_iter().map(|cert| cert.subject).collect();
     if chain_subjects.is_empty()
         || chain_subjects.len() > 8
         || chain_subjects
@@ -177,11 +157,7 @@ fn summary(id: &str) -> Result<Summary> {
     {
         bail!("RKP result metadata is out of bounds");
     }
-    Ok(Summary {
-        id: id.into(),
-        created_at,
-        chain_subjects,
-    })
+    Ok(Summary { id: id.into(), created_at, chain_subjects })
 }
 
 pub fn summary_json(id: &str) -> Result<String> {
@@ -200,15 +176,8 @@ pub fn list_json() -> Result<String> {
         Vec::new()
     } else {
         let _root = private_directory(Path::new(ROOT))?;
-        let mut entries = ids()?
-            .iter()
-            .map(|id| summary(id))
-            .collect::<Result<Vec<_>>>()?;
-        entries.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        let mut entries = ids()?.iter().map(|id| summary(id)).collect::<Result<Vec<_>>>()?;
+        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.id.cmp(&b.id)));
         entries
     };
     serde_json::to_string(&List { artifacts }).context("encode RKP result list")
@@ -248,8 +217,7 @@ mod tests {
     #[test]
     fn reads_of_result_xml_are_bounded() {
         let mut file = tempfile::tempfile().unwrap();
-        file.write_all(&vec![0; crate::keybox::MAX_KEYBOX_XML_BYTES + 1])
-            .unwrap();
+        file.write_all(&vec![0; crate::keybox::MAX_KEYBOX_XML_BYTES + 1]).unwrap();
         use std::io::Seek;
         file.rewind().unwrap();
         assert!(read_result(file).is_err());

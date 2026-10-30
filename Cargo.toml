@@ -2,58 +2,56 @@
 name = "OhMyKeymint"
 version = "1.3.5"
 edition = "2021"
-license = "AGPL-3.0-or-later"
+license-file = "LICENSE.md"
 
 [[bin]]
 name = "keymint"
 path = "src/main.rs"
 
 [dependencies]
-syscalls = "0.8.1"
-kmr-derive = { path = "derive" }
-kmr-common = { path = "common" }
-kmr-crypto-boring = { path = "boringssl" }
-kmr-ta = { path = "ta" }
-kmr-wire = { path = "wire" }
-libc = "0.2.189"
+kmr-derive = { path = "derive", version = "0.1.0" }
+kmr-common = { path = "common", version = "0.1.0" }
+kmr-crypto-boring = { path = "boringssl", version = "0.1.0" }
+kmr-ta = { path = "ta", version = "0.1.0" }
+kmr-wire = { path = "wire", version = "0.1.0" }
+libc = "0.2.190"
 prost = "0.14.4"
-prost-types = "0.14.4"
 hex = "0.4.3"
 log4rs = { version = "1.4.0", default-features = false, features = ["console_appender"] }
 log = "0.4.34"
-rsbinder = { version = "0.10.0", features = ["android_12_plus", "rpc"] }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rsbinder = { version = "0.12.0", features = ["android_12_plus", "rpc"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 anyhow = "1.0.104"
 async-trait = "0.1.92"
-tokio = { version = "1.53.1", features = ["macros", "libc"] }
-lazy_static = "1.5.0"
-thiserror = "2.0.20"
+tokio = { version = "1.53.3", features = ["macros", "libc"] }
+lazy_static = "1.5.1"
+thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 x509-cert = "0.3.0"
 x509-parser = { version = "0.18.1", features = ["verify"] }
 watchdog_rs = { path = "watchdog", version = "0.1.0" }
 nix = { version = "0.31.3", features = ["fs", "mman"] }
 rsproperties = { version = "0.6.0", features = ["builder"] }
-libsqlite3-sys = "0.38.2"
-rand = "0.10.2"
-der = "0.8.1"
-toml = "1.1.4"
+libsqlite3-sys = "0.39.1"
+rand = "0.10.3"
+der = "0.8.3"
+toml = "1.1.8"
 regex = "1.13.1"
-hotwatch = "0.5.0"
 base64 = "0.23.1"
 quick-xml = { version = "0.42.0", features = ["serialize"] }
 ring = "0.17.14"
 ed25519-dalek = "2.2.0"
-p256 = { version = "0.13.2", features = ["ecdsa"] }
-p384 = { version = "0.13.1", features = ["ecdsa"] }
+p256 = { version = "0.14.0", features = ["ecdsa"] }
+p384 = { version = "0.14.0", features = ["ecdsa"] }
 libloading = "0.8.9"
 zeroize = "1.9.0"
 ureq = { version = "3.4.0", default-features = false, features = ["rustls"] }
-pif-common = { path = "pif-common" }
+pif-common = { path = "pif-common", version = "0.1.0" }
 android_logger = "0.15.1"
 multi_log = "0.1.2"
-zip = { version = "8.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9.1.3", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+num_cpus = "1.17.0"
 
 [profile.dev]
 incremental = true
@@ -83,22 +81,22 @@ members = [
 ]
 
 [patch.crates-io]
-kmr-derive = { path = "derive" }
-kmr-common = { path = "common" }
-kmr-crypto-boring = { path = "boringssl" }
-kmr-ta = { path = "ta" }
+kmr-derive = { path = "derive", version = "0.1.0" }
+kmr-common = { path = "common", version = "0.1.0" }
+kmr-crypto-boring = { path = "boringssl", version = "0.1.0" }
+kmr-ta = { path = "ta", version = "0.1.0" }
 kmr-tests = { path = "tests" }
-kmr-wire = { path = "wire" }
+kmr-wire = { path = "wire", version = "0.1.0" }
 watchdog_rs = { path = "watchdog" }
 injector = { path = "injector" }
 
 [build-dependencies]
 prost-build = "0.14.4"
-rsbinder-aidl = "0.10.0"
+rsbinder-aidl = "0.12.0"
 
 [dev-dependencies]
 cargo-husky = { version = "1.5.0", default-features = false, features = ["user-hooks"] }
 ciborium = "0.2.2"
 openssl = "0.10.81"
-rcgen = "0.14.9"
+rcgen = "0.14.10"
 tempfile = "3.27.0"

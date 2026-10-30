@@ -74,9 +74,8 @@ fn property_name(bytes: &[u8], offset: usize) -> Result<&[u8], String> {
     let start = offset
         .checked_add(INFO_BYTES)
         .ok_or_else(|| "property name offset overflow".to_string())?;
-    let tail = bytes
-        .get(start..)
-        .ok_or_else(|| "property info exceeds allocated area".to_string())?;
+    let tail =
+        bytes.get(start..).ok_or_else(|| "property info exceeds allocated area".to_string())?;
     let length = tail
         .iter()
         .take(1024)
@@ -122,10 +121,7 @@ fn patch_property(bytes: &mut [u8], offset: usize, value: &CStr) -> Result<(), S
     // unchanged prop_info, with storage allocated at the area's used boundary.
     // Reuse a sufficiently large existing long value before consuming space.
     let (long_start, new_end) = if is_long {
-        if let Some(old) = old_long
-            .as_ref()
-            .filter(|old| old.len() > replacement.len())
-        {
+        if let Some(old) = old_long.as_ref().filter(|old| old.len() > replacement.len()) {
             (old.start, end)
         } else {
             let start = end.next_multiple_of(4);
@@ -199,10 +195,7 @@ unsafe extern "C" fn collect(info: *const c_void, cookie: *mut c_void) {
 }
 
 fn open_area(mapping: MemoryMapping) -> Result<Area, String> {
-    let path = mapping
-        .path
-        .as_deref()
-        .ok_or("property mapping has no path")?;
+    let path = mapping.path.as_deref().ok_or("property mapping has no path")?;
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
@@ -218,8 +211,7 @@ fn open_area(mapping: MemoryMapping) -> Result<Area, String> {
         return Err("property area identity does not match its mapping".to_string());
     }
     let mut header = [0u8; HEADER_BYTES];
-    file.read_exact_at(&mut header, 0)
-        .map_err(|error| error.to_string())?;
+    file.read_exact_at(&mut header, 0).map_err(|error| error.to_string())?;
     used_end(&header, length)?;
     let shadow = unsafe {
         libc::mmap(
@@ -237,13 +229,7 @@ fn open_area(mapping: MemoryMapping) -> Result<Area, String> {
             std::io::Error::last_os_error()
         ));
     }
-    Ok(Area {
-        mapping,
-        file,
-        shadow: shadow.cast(),
-        installed: false,
-        patches: 0,
-    })
+    Ok(Area { mapping, file, shadow: shadow.cast(), installed: false, patches: 0 })
 }
 
 fn rollback(areas: &mut [Area]) {
@@ -328,14 +314,8 @@ pub(super) fn install(values: &PropertyValues) -> Result<usize, String> {
     }
     // These core properties must be present; otherwise native hooks handle
     // already-private or unsupported vendor mappings instead of partial spoofing.
-    for name in [
-        b"ro.build.fingerprint".as_slice(),
-        b"ro.product.first_api_level".as_slice(),
-    ] {
-        if !expected
-            .iter()
-            .any(|(_, matched, _)| matched.to_bytes() == name)
-        {
+    for name in [b"ro.build.fingerprint".as_slice(), b"ro.product.first_api_level".as_slice()] {
+        if !expected.iter().any(|(_, matched, _)| matched.to_bytes() == name) {
             return Err("core property has no supported shared mapping".to_string());
         }
     }
@@ -366,9 +346,7 @@ pub(super) fn install(values: &PropertyValues) -> Result<usize, String> {
         if result == libc::MAP_FAILED {
             let error = std::io::Error::last_os_error();
             rollback(&mut areas);
-            return Err(format!(
-                "private property mapping replacement failed: {error}"
-            ));
+            return Err(format!("private property mapping replacement failed: {error}"));
         }
         area.shadow = ptr::null_mut();
     }
@@ -377,18 +355,10 @@ pub(super) fn install(values: &PropertyValues) -> Result<usize, String> {
     for (address, name, value) in expected {
         let mut buffer = [0u8; super::PROPERTY_VALUE_MAX];
         let info = unsafe { find(name.as_ptr()) };
-        let mut observed = Readback {
-            name: &name,
-            value: &value,
-            matched: false,
-        };
+        let mut observed = Readback { name: &name, value: &value, matched: false };
         if !info.is_null() {
             unsafe {
-                read(
-                    info,
-                    Some(readback_callback),
-                    (&mut observed as *mut Readback<'_>).cast(),
-                );
+                read(info, Some(readback_callback), (&mut observed as *mut Readback<'_>).cast());
             }
         }
         let length = unsafe { get(name.as_ptr(), buffer.as_mut_ptr().cast()) };
@@ -409,10 +379,7 @@ pub(super) fn install(values: &PropertyValues) -> Result<usize, String> {
     }
     let verified = std::fs::read_to_string("/proc/self/maps")
         .map(|maps| {
-            let mappings: Vec<_> = maps
-                .lines()
-                .filter_map(parse_memory_mapping_header)
-                .collect();
+            let mappings: Vec<_> = maps.lines().filter_map(parse_memory_mapping_header).collect();
             areas.iter().all(|area| {
                 mappings.iter().any(|mapped| {
                     let mut expected = area.mapping.clone();
@@ -522,10 +489,7 @@ mod tests {
             patch_property(&mut bytes, 128, &replacement).unwrap();
             assert_eq!(property_name(&bytes, 128).unwrap(), b"ro.build.fingerprint");
             assert_eq!(word(&bytes, 128 + LONG_OFFSET).unwrap(), 128);
-            assert_eq!(
-                &bytes[256..256 + length + 1],
-                replacement.to_bytes_with_nul()
-            );
+            assert_eq!(&bytes[256..256 + length + 1], replacement.to_bytes_with_nul());
             assert_eq!(
                 &bytes[132..132 + LONG_LEGACY_ERROR.to_bytes_with_nul().len()],
                 LONG_LEGACY_ERROR.to_bytes_with_nul()
@@ -558,10 +522,7 @@ mod tests {
         assert!(bytes[477..505].iter().all(|byte| *byte == 0));
         let larger = CString::new("z".repeat(200)).unwrap();
         patch_property(&mut bytes, 128, &larger).unwrap();
-        assert_eq!(
-            word(&bytes, 128 + LONG_OFFSET).unwrap() as usize,
-            old_end - 128
-        );
+        assert_eq!(word(&bytes, 128 + LONG_OFFSET).unwrap() as usize, old_end - 128);
         assert_eq!(&bytes[old_end..old_end + 201], larger.to_bytes_with_nul());
         assert!(bytes[384..505].iter().all(|byte| *byte == 0));
         assert_eq!(&bytes[256..384], neighbor);
@@ -615,11 +576,7 @@ mod tests {
         let name = c"ro.build.fingerprint";
         let value = CString::new("x".repeat(120)).unwrap();
         let serial = ((LONG_LEGACY_ERROR.to_bytes().len() as u32) << 24) | LONG_FLAG;
-        let mut observed = Readback {
-            name,
-            value: value.to_bytes(),
-            matched: false,
-        };
+        let mut observed = Readback { name, value: value.to_bytes(), matched: false };
         unsafe {
             readback_callback(
                 (&mut observed as *mut Readback<'_>).cast(),
@@ -671,11 +628,8 @@ mod tests {
             let value = CString::new("x".repeat(length)).unwrap();
             patch_property(bytes, 128, &value).unwrap();
             let property = bytes[128..].as_ptr().cast();
-            let mut observed = Readback {
-                name: c"ro.build.fingerprint",
-                value: value.to_bytes(),
-                matched: false,
-            };
+            let mut observed =
+                Readback { name: c"ro.build.fingerprint", value: value.to_bytes(), matched: false };
             unsafe {
                 read(
                     property,

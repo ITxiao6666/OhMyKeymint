@@ -53,21 +53,15 @@ pub struct RateLimitedLogger<L> {
 
 impl<L: Log> RateLimitedLogger<L> {
     pub fn new(inner: L) -> Self {
-        Self {
-            inner,
-            limiter: Mutex::new(LogRateLimiter::default()),
-        }
+        Self { inner, limiter: Mutex::new(LogRateLimiter::default()) }
     }
 
     fn log_at(&self, record: &Record, now: Instant) {
         if !self.inner.enabled(record.metadata()) {
             return;
         }
-        let decision = self
-            .limiter
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .admit(record, now);
+        let decision =
+            self.limiter.lock().unwrap_or_else(|error| error.into_inner()).admit(record, now);
         if let Some(summary) = decision.summary {
             self.publish_summary(summary);
         }
@@ -106,11 +100,8 @@ impl<L: Log> Log for RateLimitedLogger<L> {
     }
 
     fn flush(&self) {
-        let summaries = self
-            .limiter
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take_summaries();
+        let summaries =
+            self.limiter.lock().unwrap_or_else(|error| error.into_inner()).take_summaries();
         for summary in summaries {
             self.publish_summary(summary);
         }
@@ -174,10 +165,7 @@ fn log_rate_policy(level: Level, target: &str) -> Option<(Duration, u32)> {
 impl LogRateLimiter {
     fn admit(&mut self, record: &Record, now: Instant) -> LogDecision {
         let Some((window, burst)) = log_rate_policy(record.level(), record.target()) else {
-            return LogDecision {
-                publish: true,
-                summary: None,
-            };
+            return LogDecision { publish: true, summary: None };
         };
         let site = LogSite::from(record);
         let mut summary = None;
@@ -208,11 +196,7 @@ impl LogRateLimiter {
         bucket.last_seen = now;
         if now.saturating_duration_since(bucket.started) >= window {
             if bucket.suppressed != 0 {
-                summary = Some(SuppressedLogs {
-                    site,
-                    count: bucket.suppressed,
-                    window,
-                });
+                summary = Some(SuppressedLogs { site, count: bucket.suppressed, window });
             }
             bucket.started = now;
             bucket.published = 0;
@@ -220,16 +204,10 @@ impl LogRateLimiter {
         }
         if bucket.published < burst {
             bucket.published += 1;
-            LogDecision {
-                publish: true,
-                summary,
-            }
+            LogDecision { publish: true, summary }
         } else {
             bucket.suppressed = bucket.suppressed.saturating_add(1);
-            LogDecision {
-                publish: false,
-                summary,
-            }
+            LogDecision { publish: false, summary }
         }
     }
 
@@ -268,12 +246,7 @@ impl LockedRotatingFileAppender {
     ) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
         let _ = fs::remove_file(suffixed_path(&path, ".lock"));
-        Ok(Self {
-            path,
-            file: Mutex::new(None),
-            encoder,
-            max_size_bytes,
-        })
+        Ok(Self { path, file: Mutex::new(None), encoder, max_size_bytes })
     }
 
     fn open_log_file(path: &Path) -> io::Result<File> {
@@ -336,10 +309,8 @@ impl Append for LockedRotatingFileAppender {
             .with_context(|| format!("failed to encode {}", self.path.display()))?;
         let data = encoded.0;
 
-        let mut file = self
-            .file
-            .lock()
-            .map_err(|error| anyhow!("failed to lock log writer: {}", error))?;
+        let mut file =
+            self.file.lock().map_err(|error| anyhow!("failed to lock log writer: {}", error))?;
         let _file_guard = FileLockGuard::lock_path(&self.path)
             .with_context(|| format!("failed to lock {}", self.path.display()))?;
         let metadata = self
@@ -434,9 +405,8 @@ pub fn build_console_file_config<P: AsRef<Path>>(
         .map(|target| target != Path::new("/dev/null"))
         .unwrap_or(true)
     {
-        let stdout = ConsoleAppender::builder()
-            .encoder(Box::new(PatternEncoder::new(pattern)))
-            .build();
+        let stdout =
+            ConsoleAppender::builder().encoder(Box::new(PatternEncoder::new(pattern))).build();
         builder = builder.appender(Appender::builder().build("stdout", Box::new(stdout)));
         root = root.appender("stdout");
     }
@@ -491,10 +461,7 @@ mod tests {
         }
 
         fn log(&self, record: &Record) {
-            self.records
-                .lock()
-                .unwrap()
-                .push((record.level(), record.args().to_string()));
+            self.records.lock().unwrap().push((record.level(), record.args().to_string()));
         }
 
         fn flush(&self) {}
@@ -533,10 +500,7 @@ mod tests {
         let records = sink.records.lock().unwrap();
         assert_eq!(records.len(), WARNING_BURST as usize + 2);
         assert_eq!(records[4].0, Level::Warn);
-        assert_eq!(
-            records[4].1,
-            "event=log_rate_limit suppressed=8 window_ms=30000 source_line=1"
-        );
+        assert_eq!(records[4].1, "event=log_rate_limit suppressed=8 window_ms=30000 source_line=1");
         assert!(records[5].1.starts_with("event=test_runtime"));
     }
 
@@ -578,9 +542,7 @@ mod tests {
         assert_eq!(sink.records.lock().unwrap().len(), VERBOSE_BURST as usize);
         logger.log_at(&record, now + VERBOSE_WINDOW);
         let records = sink.records.lock().unwrap();
-        assert!(records[VERBOSE_BURST as usize]
-            .1
-            .contains("suppressed=8 window_ms=1000"));
+        assert!(records[VERBOSE_BURST as usize].1.contains("suppressed=8 window_ms=1000"));
         assert_eq!(records.len(), VERBOSE_BURST as usize + 2);
         assert_eq!(log_rate_policy(Level::Info, "runtime-test"), None);
         assert_eq!(log_rate_policy(Level::Error, "omk_soter_remote"), None);
@@ -623,10 +585,7 @@ mod tests {
         for line in 0..MAX_RATE_LIMIT_SITES as u32 + 16 {
             limited_message(&logger, now, Level::Warn, line);
         }
-        assert_eq!(
-            logger.limiter.lock().unwrap().sites.len(),
-            MAX_RATE_LIMIT_SITES
-        );
+        assert_eq!(logger.limiter.lock().unwrap().sites.len(), MAX_RATE_LIMIT_SITES);
     }
 
     #[test]
@@ -654,31 +613,18 @@ mod tests {
     }
 
     fn temp_log_path(name: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("omk-log-test-{}-{nanos}", std::process::id()))
-            .join(name)
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("omk-log-test-{}-{nanos}", std::process::id())).join(name)
     }
 
     fn append_message(appender: &LockedRotatingFileAppender, message: &'static str) {
         let args = format_args!("{message}");
-        let record = Record::builder()
-            .args(args)
-            .level(Level::Info)
-            .target("logging-test")
-            .build();
+        let record = Record::builder().args(args).level(Level::Info).target("logging-test").build();
         log4rs::append::Append::append(appender, &record).unwrap();
     }
 
     fn log_lines(path: &Path) -> Vec<String> {
-        fs::read_to_string(path)
-            .unwrap()
-            .lines()
-            .map(str::to_owned)
-            .collect()
+        fs::read_to_string(path).unwrap().lines().map(str::to_owned).collect()
     }
 
     #[test]

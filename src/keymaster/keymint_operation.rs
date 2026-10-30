@@ -1,4 +1,3 @@
-use kmr_wire::keymint::KeyParam;
 use rsbinder::Interface;
 
 use crate::{
@@ -10,8 +9,6 @@ use crate::{
 
 pub struct KeyMintOperation {
     wrapper: KeyMintWrapper,
-    pub challenge: i64,
-    pub params: Vec<KeyParam>,
     // Extra for internal use: returned by bottom half of KeyMint implementation, used on
     // all subsequent operation methods to identify the operation.
     pub op_handle: i64,
@@ -20,18 +17,8 @@ pub struct KeyMintOperation {
 impl Interface for KeyMintOperation {}
 
 impl KeyMintOperation {
-    pub fn new(
-        wrapper: KeyMintWrapper,
-        challenge: i64,
-        params: Vec<KeyParam>,
-        op_handle: i64,
-    ) -> Self {
-        KeyMintOperation {
-            wrapper,
-            challenge,
-            params,
-            op_handle,
-        }
+    pub fn new(wrapper: KeyMintWrapper, op_handle: i64) -> Self {
+        KeyMintOperation { wrapper, op_handle }
     }
 }
 
@@ -44,7 +31,7 @@ impl IKeyMintOperation for KeyMintOperation {
         timeStampToken: Option<
             &crate::android::hardware::security::secureclock::TimeStampToken::TimeStampToken,
         >,
-    ) -> rsbinder::status::Result<()> {
+    ) -> rsbinder::BinderResult<()> {
         self.wrapper
             .op_update_aad(self.op_handle, input, authToken, timeStampToken)
             .map_err(map_ks_error)
@@ -57,7 +44,7 @@ impl IKeyMintOperation for KeyMintOperation {
         timeStampToken: Option<
             &crate::android::hardware::security::secureclock::TimeStampToken::TimeStampToken,
         >,
-    ) -> rsbinder::status::Result<Vec<u8>> {
+    ) -> rsbinder::BinderResult<Vec<u8>> {
         self.wrapper
             .op_update(self.op_handle, input, authToken, timeStampToken)
             .map_err(map_ks_error)
@@ -72,7 +59,7 @@ impl IKeyMintOperation for KeyMintOperation {
             &crate::android::hardware::security::secureclock::TimeStampToken::TimeStampToken,
         >,
         confirmationToken: Option<&[u8]>,
-    ) -> rsbinder::status::Result<Vec<u8>> {
+    ) -> rsbinder::BinderResult<Vec<u8>> {
         self.wrapper
             .op_finish(
                 self.op_handle,
@@ -85,7 +72,7 @@ impl IKeyMintOperation for KeyMintOperation {
             .map_err(map_ks_error)
     }
 
-    fn r#abort(&self) -> rsbinder::status::Result<()> {
+    fn r#abort(&self) -> rsbinder::BinderResult<()> {
         self.wrapper.op_abort(self.op_handle).map_err(map_ks_error)
     }
 }

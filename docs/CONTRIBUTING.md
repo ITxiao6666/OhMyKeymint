@@ -105,10 +105,11 @@ cmake -GNinja -S ~/.cargo/boringssl -B ~/.cargo/boringssl/build \
   -DRUST_BINDINGS=aarch64-linux-android \
   -DCMAKE_SYSROOT=<ANDROID_NDK_SYSROOT> \
   -DCMAKE_TOOLCHAIN_FILE=<ANDROID_NDK_ROOT>/build/cmake/android.toolchain.cmake \
+  -DCMAKE_C_FLAGS=-mno-outline-atomics \
+  -DCMAKE_CXX_FLAGS=-mno-outline-atomics \
   -DANDROID_ABI=arm64-v8a \
-  -DANDROID_PLATFORM=android-21 \
-  -DANDROID_STL=c++_shared
-BINDGEN_EXTRA_CLANG_ARGS="--target=aarch64-none-linux-android21 \
+  -DANDROID_PLATFORM=android-26
+BINDGEN_EXTRA_CLANG_ARGS="--target=aarch64-none-linux-android26 \
   --sysroot=<ANDROID_NDK_SYSROOT> \
   -I<ANDROID_NDK_SYSROOT>/usr/include/aarch64-linux-android" \
   cmake --build ~/.cargo/boringssl/build --parallel
@@ -117,7 +118,7 @@ BINDGEN_EXTRA_CLANG_ARGS="--target=aarch64-none-linux-android21 \
 Generate the local Cargo configuration and build the package:
 
 ```sh
-python scripts/setup_cargo_config.py --ndk-root <ANDROID_NDK_ROOT> --force
+python scripts/setup_cargo_config.py --ndk-root <ANDROID_NDK_ROOT> --api-level 26 --force
 python build.py --debug
 ```
 
@@ -135,6 +136,7 @@ Rust changes must pass:
 cargo fmt --all -- --check
 cargo clippy --target aarch64-linux-android --workspace --all-targets -- -D warnings
 cargo test --target aarch64-linux-android --workspace --no-run
+cargo deny --workspace check
 ```
 
 When an authorized aarch64 Android device is available, run every generated
@@ -190,7 +192,7 @@ represent, warrant, and agree that:
    complete copyright, together with any other permission required to submit it.
 2. Your Contribution, as part of this project, is subject to and complies with
    both licenses current at the time of submission: the
-   [GNU Affero General Public License version 3 or any later version](../LICENSE.md)
+   [General License Agreement version 4 or any later version](../LICENSE.md)
    and the [Oh My Keymint License](../LICENSE-2). The two licenses apply together;
    they are not alternatives. Properly disclosed third-party material remains
    subject to its original license.
