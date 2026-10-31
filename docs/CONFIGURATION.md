@@ -1595,7 +1595,12 @@ automatically.
 Isolated Android service callers use the system ActivityManager process record
 for package attribution when ordinary UID package lookup has no result. The
 privileged helper matches the Binder caller PID and checks its kernel UID and
-process start time before and after the lookup. Only the process package list
+process start time before and after the lookup. Procfs identity reads temporarily
+use root credentials on the helper's current thread so restricted proc mounts
+remain readable; the original SYSTEM identity is restored before ActivityManager
+or telephony Binder calls. Monitor and Binder worker threads keep their existing
+credentials. Failure to restore the read thread's identity terminates the helper
+instead of issuing a request under the wrong UID. Only the process package list
 affects the existing package filter; dependency packages are excluded. Null
 package-list entries are ignored; present package names must pass validation. The
 original isolated UID, PID, and SELinux identity remain authoritative for key

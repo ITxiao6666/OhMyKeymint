@@ -43,11 +43,64 @@ struct ProcessIdentity {
     start_time: u64,
 }
 
+/// Procfs may hide other UIDs from SYSTEM with ENOENT (hidepid=2). The
+/// existing helper retains real/saved root, but Binder calls must remain SYSTEM.
+/// Only this thread regains root while reading identity metadata.
+struct ProcReadEuid {
+    previous: libc::uid_t,
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl ProcReadEuid {
+    fn enter() -> Result<Self> {
+        let previous = unsafe { libc::geteuid() };
+        if unsafe { libc::getuid() } != kmr_common::consts::AID_ROOT
+            || !matches!(previous, kmr_common::consts::AID_ROOT | kmr_common::consts::AID_SYSTEM)
+        {
+            bail!("proc identity reads require the privileged helper");
+        }
+        if previous != kmr_common::consts::AID_ROOT {
+            set_thread_euid(kmr_common::consts::AID_ROOT)
+                .context("failed to enter root for proc identity read")?;
+        }
+        Ok(Self { previous, _thread_bound: std::marker::PhantomData })
+    }
+}
+
+impl Drop for ProcReadEuid {
+    fn drop(&mut self) {
+        if unsafe { libc::geteuid() } != self.previous {
+            if let Err(error) = set_thread_euid(self.previous) {
+                // Never dispatch another Binder request under an unintended UID.
+                // This guard only exists in the separate privileged helper.
+                eprintln!("privileged helper cannot restore proc-read EUID: {error}");
+                unsafe { libc::_exit(1) };
+            }
+        }
+    }
+}
+
+fn set_thread_euid(uid: libc::uid_t) -> std::io::Result<()> {
+    // Linux credentials are per-thread. Bypass libc's process-wide setresuid
+    // wrapper so monitor and Binder worker threads keep their own credentials.
+    // Real and saved IDs stay unchanged, including the helper's saved root UID.
+    let result =
+        unsafe { libc::syscall(libc::SYS_setresuid, libc::uid_t::MAX, uid, libc::uid_t::MAX) };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 fn read_process_identity(pid: u32) -> Result<ProcessIdentity> {
+    let _identity = ProcReadEuid::enter()?;
     let directory = format!("/proc/{pid}");
-    let before = std::fs::read_to_string(format!("{directory}/stat"))?;
-    let status = std::fs::read_to_string(format!("{directory}/status"))?;
-    let after = std::fs::read_to_string(format!("{directory}/stat"))?;
+    let before = std::fs::read_to_string(format!("{directory}/stat"))
+        .with_context(|| format!("failed initial proc identity read for pid={pid}"))?;
+    let status = std::fs::read_to_string(format!("{directory}/status"))
+        .with_context(|| format!("failed proc UID read for pid={pid}"))?;
+    let after = std::fs::read_to_string(format!("{directory}/stat"))
+        .with_context(|| format!("failed final proc identity read for pid={pid}"))?;
     let start_time = parse_start_time(&before, pid)?;
     if parse_start_time(&after, pid)? != start_time {
         bail!("process identity changed while reading proc metadata");
@@ -91,12 +144,12 @@ fn resolve_packages_with_identity(
     if !is_isolated_uid(uid) || pid == 0 || pid > i32::MAX as u32 {
         return Ok(Vec::new());
     }
-    let before = identity(pid)?;
+    let before = identity(pid).context("isolated caller identity check before package lookup")?;
     if before.uids != [uid; 4] {
         bail!("isolated caller PID does not have the forwarded kernel UID");
     }
-    let packages = query(uid, pid)?;
-    if identity(pid)? != before {
+    let packages = query(uid, pid).context("isolated caller ActivityManager package lookup")?;
+    if identity(pid).context("isolated caller identity check after package lookup")? != before {
         bail!("isolated caller identity changed during ActivityManager lookup");
     }
     Ok(packages)
@@ -109,7 +162,8 @@ fn query_activity_packages(uid: u32, pid: u32) -> Result<Vec<String>> {
         activity_contract(sdk).context("unsupported ActivityManager wire version")?;
     // OEMs insert methods into this non-stable AIDL. Read the actual Stub constant
     // from the trusted system framework instead of calling an SDK-based guess.
-    contract.transaction = framework::running_processes_transaction()?;
+    contract.transaction = framework::running_processes_transaction()
+        .context("cannot resolve installed ActivityManager transaction")?;
     rsbinder::ProcessState::init_default()
         .map_err(|error| anyhow!("failed to initialize Binder in privileged helper: {error}"))?;
     let binder = require_binder_service(ACTIVITY_SERVICE, hub::try_get_service(ACTIVITY_SERVICE))?;

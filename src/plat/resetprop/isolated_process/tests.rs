@@ -40,6 +40,127 @@ fn lookup_requires_live_original_uid_and_stable_process() {
 }
 
 #[test]
+fn failed_identity_reads_never_query_or_accept_packages_and_name_the_stage() {
+    let error = resolve_packages_with_identity(
+        99015,
+        16624,
+        |_| Err(std::io::Error::from_raw_os_error(libc::ENOENT).into()),
+        |_, _| panic!("unverified identity must not reach ActivityManager"),
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("before package lookup"));
+    assert_eq!(
+        error.root_cause().downcast_ref::<std::io::Error>().unwrap().raw_os_error(),
+        Some(libc::ENOENT)
+    );
+
+    let mut reads = 0;
+    let error = resolve_packages_with_identity(
+        99015,
+        16624,
+        |_| {
+            reads += 1;
+            if reads == 1 {
+                Ok(identity(99015, 17))
+            } else {
+                Err(std::io::Error::from_raw_os_error(libc::ENOENT).into())
+            }
+        },
+        |_, _| Ok(vec!["com.example.owner".into()]),
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("after package lookup"));
+
+    let error = resolve_packages_with_identity(
+        99015,
+        16624,
+        |_| Ok(identity(99015, 17)),
+        |_, _| Err(std::io::Error::from_raw_os_error(libc::ENOENT).into()),
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("ActivityManager package lookup"));
+}
+
+#[cfg(target_os = "android")]
+#[test]
+fn proc_identity_guard_rejects_non_helper_without_changing_uid() {
+    let uid = unsafe { libc::getuid() };
+    let euid = unsafe { libc::geteuid() };
+    if uid != kmr_common::consts::AID_ROOT {
+        assert!(ProcReadEuid::enter().is_err());
+        assert_eq!(unsafe { libc::geteuid() }, euid);
+    }
+}
+
+#[cfg(target_os = "android")]
+#[test]
+#[ignore = "requires authorized Android root; changes EUID only in a test subprocess"]
+fn proc_identity_root_scope_restores_system_without_affecting_other_threads() {
+    use std::sync::mpsc;
+
+    const CHILD: &str = "OMK_PROC_IDENTITY_TEST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "plat::resetprop::isolated_process::tests::proc_identity_root_scope_restores_system_without_affecting_other_threads",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated proc-identity check failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    assert_eq!(unsafe { libc::getuid() }, kmr_common::consts::AID_ROOT);
+    let original_euid = unsafe { libc::geteuid() };
+    set_thread_euid(kmr_common::consts::AID_SYSTEM).unwrap();
+    let (request, receiver) = mpsc::channel::<()>();
+    let (reply, responses) = mpsc::channel();
+    let observer = std::thread::spawn(move || {
+        while receiver.recv().is_ok() {
+            reply.send(unsafe { libc::geteuid() }).unwrap();
+        }
+    });
+    let check_observer = || {
+        request.send(()).unwrap();
+        assert_eq!(
+            responses.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            kmr_common::consts::AID_SYSTEM
+        );
+    };
+    check_observer();
+    {
+        let _guard = ProcReadEuid::enter().unwrap();
+        assert_eq!(unsafe { libc::geteuid() }, kmr_common::consts::AID_ROOT);
+        check_observer();
+    }
+    assert_eq!(unsafe { libc::geteuid() }, kmr_common::consts::AID_SYSTEM);
+    let current = read_process_identity(std::process::id()).unwrap();
+    assert_eq!(current.uids[0], kmr_common::consts::AID_ROOT);
+    assert_eq!(unsafe { libc::geteuid() }, kmr_common::consts::AID_SYSTEM);
+    let error = read_process_identity(u32::MAX).unwrap_err();
+    assert!(format!("{error:#}").contains("initial proc identity read"));
+    assert_eq!(unsafe { libc::geteuid() }, kmr_common::consts::AID_SYSTEM);
+    let panic_result = std::panic::catch_unwind(|| {
+        let _guard = ProcReadEuid::enter().unwrap();
+        panic!("exercise credential restoration during unwind");
+    });
+    assert!(panic_result.is_err());
+    assert_eq!(unsafe { libc::geteuid() }, kmr_common::consts::AID_SYSTEM);
+    check_observer();
+    drop(request);
+    observer.join().unwrap();
+    set_thread_euid(original_euid).unwrap();
+}
+
+#[test]
 fn ordinary_or_invalid_callers_never_query_processes() {
     for (uid, pid) in [(10371, 42), (99001, 0), (99001, u32::MAX)] {
         assert!(resolve_packages_with_identity(

@@ -16,7 +16,10 @@ pub(super) fn running_processes_transaction() -> Result<u32> {
 }
 
 fn read_framework() -> Result<u32> {
-    let mut archive = zip::ZipArchive::new(File::open("/system/framework/framework.jar")?)?;
+    let file = File::open("/system/framework/framework.jar")
+        .context("cannot open installed framework.jar for ActivityManager metadata")?;
+    let mut archive = zip::ZipArchive::new(file)
+        .context("cannot read installed framework.jar ZIP for ActivityManager metadata")?;
     for index in 0..archive.len() {
         let mut file = archive.by_index(index)?;
         let name = file.name()?;
