@@ -1448,6 +1448,17 @@ Key descriptors, including `KEY_ID` and `GRANT`, do not change the selected
 backend. A caller must pass the filter and enable the relevant intercept route
 to use OMK, including when using a key shared by another app.
 
+Isolated and app-zygote processes use their host application's package identity
+for scoop and deny-list decisions. The host is resolved from ActivityManager's
+process records and checked against the caller's PID and isolated UID for each
+request. SDK sandbox processes, and PCC processes on Android 17, use Android's
+host-UID mapping for the same filtering decision.
+
+The original caller UID, PID, and SID are preserved for key access checks.
+An isolated process still needs a grant to use its host's keys; host membership
+does not confer key ownership. If the host cannot be resolved, the existing
+`allow_unknown_package` policy applies. Holding a grant does not bypass scoop.
+
 ### `[main]`
 
 #### `enabled`

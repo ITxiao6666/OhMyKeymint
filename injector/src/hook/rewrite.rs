@@ -80,17 +80,25 @@ fn evaluate_caller(
     caller: &CallerInfo,
     cfg: &config::InjectorConfig,
 ) -> crate::filter::FilterDecision {
+    evaluate_caller_with(caller, cfg, |caller| {
+        let _guard = BypassGuard::enter();
+        ipc::resolve_packages_for_caller(caller)
+    })
+}
+
+fn evaluate_caller_with(
+    caller: &CallerInfo,
+    cfg: &config::InjectorConfig,
+    resolve: impl FnOnce(&CallerInfo) -> (u32, PackageResolution),
+) -> crate::filter::FilterDecision {
     let uid = caller.uid as u32;
     let preflight = filter::evaluate(&cfg.scoop, &cfg.filter, uid, PackageResolution::Unknown);
     if matches!(preflight.reason, FilterReason::RejectedAndroidPackage | FilterReason::Disabled) {
         return preflight;
     }
 
-    let package_resolution = {
-        let _guard = BypassGuard::enter();
-        ipc::resolve_packages_for_caller(caller)
-    };
-    filter::evaluate(&cfg.scoop, &cfg.filter, uid, package_resolution)
+    let (package_uid, package_resolution) = resolve(caller);
+    filter::evaluate(&cfg.scoop, &cfg.filter, package_uid, package_resolution)
 }
 
 fn precompute_omk_service_mutator_reply(

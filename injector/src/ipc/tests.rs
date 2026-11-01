@@ -5,6 +5,7 @@ fn isolated_package_lookup_preserves_original_authorization_identity() {
     let caller = CallerInfo { uid: 99001, pid: 42, sid: "u:r:isolated_app:s0:c123,c456".into() };
     let packages = resolve_packages_for_caller_with(
         &caller,
+        Some(16),
         |uid| {
             assert_eq!(uid, 99001);
             PackageResolution::Unknown
@@ -16,18 +17,22 @@ fn isolated_package_lookup_preserves_original_authorization_identity() {
             Ok(vec!["com.example.owner".into()])
         },
     );
+    assert_eq!(packages.0, 99001);
     assert!(
-        matches!(packages, PackageResolution::Known(ref names) if names == &["com.example.owner"])
+        matches!(packages.1, PackageResolution::Known(ref names) if names == &["com.example.owner"])
     );
     let mut config = crate::config::InjectorConfig {
         scoop: vec!["com.example.owner".into()],
         ..Default::default()
     };
     assert!(
-        crate::filter::evaluate(&config.scoop, &config.filter, 99001, packages.clone()).allowed
+        crate::filter::evaluate(&config.scoop, &config.filter, packages.0, packages.1.clone())
+            .allowed
     );
     config.filter.deny_packages.push("com.example.owner".into());
-    assert!(!crate::filter::evaluate(&config.scoop, &config.filter, 99001, packages).allowed);
+    assert!(
+        !crate::filter::evaluate(&config.scoop, &config.filter, packages.0, packages.1).allowed
+    );
     assert_eq!(caller.uid, 99001);
 }
 
@@ -38,9 +43,11 @@ fn isolated_package_lookup_is_only_an_unknown_uid_fallback() {
         assert!(matches!(
             resolve_packages_for_caller_with(
                 &caller,
+                Some(16),
                 |_| PackageResolution::Known(vec!["com.already.known".into()]),
                 |_| panic!("known caller must not query AMS")
-            ),
+            )
+            .1,
             PackageResolution::Known(_)
         ));
     }
@@ -48,9 +55,11 @@ fn isolated_package_lookup_is_only_an_unknown_uid_fallback() {
     assert!(matches!(
         resolve_packages_for_caller_with(
             &caller,
+            Some(16),
             |_| PackageResolution::Unknown,
             |_| panic!("ordinary UID must not query AMS")
-        ),
+        )
+        .1,
         PackageResolution::Unknown
     ));
     caller.uid = 99001;
@@ -58,12 +67,46 @@ fn isolated_package_lookup_is_only_an_unknown_uid_fallback() {
         assert!(matches!(
             resolve_packages_for_caller_with(
                 &caller,
+                Some(16),
                 |_| PackageResolution::Unknown,
                 |_| if fail { Err(anyhow::anyhow!("query unavailable")) } else { Ok(Vec::new()) }
-            ),
+            )
+            .1,
             PackageResolution::Unknown
         ));
     }
+}
+
+#[test]
+fn package_uid_matches_android_process_uid_ranges() {
+    for version in 13..=17 {
+        for user in [0, 1, 10] {
+            let base = user * kmr_common::consts::AID_USER_OFFSET;
+            for app_id in [0, 1000, 9999, 10_000, 19_999, 40_000, 89_999] {
+                assert_eq!(
+                    non_isolated_package_uid(base + app_id, Some(version)),
+                    Some(base + app_id)
+                );
+            }
+            for app_id in [20_000, 20_123, 29_999] {
+                assert_eq!(
+                    non_isolated_package_uid(base + app_id, Some(version)),
+                    Some(base + app_id - 10_000)
+                );
+            }
+            for app_id in [30_000, 30_123, 39_999] {
+                assert_eq!(
+                    non_isolated_package_uid(base + app_id, Some(version)),
+                    Some(base + app_id - if version >= 17 { 20_000 } else { 0 })
+                );
+            }
+            for app_id in [90_000, 98_999, 99_000, 99_999] {
+                assert_eq!(non_isolated_package_uid(base + app_id, Some(version)), None);
+            }
+        }
+    }
+    assert_eq!(non_isolated_package_uid(20_123, Some(12)), Some(20_123));
+    assert_eq!(non_isolated_package_uid(20_123, None), Some(20_123));
 }
 
 #[test]

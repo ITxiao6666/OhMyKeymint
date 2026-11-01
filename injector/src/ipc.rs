@@ -269,39 +269,54 @@ pub fn resolve_packages_for_uid(uid: u32) -> PackageResolution {
     }
 }
 
-pub fn resolve_packages_for_caller(caller: &CallerInfo) -> PackageResolution {
-    resolve_packages_for_caller_with(caller, resolve_packages_for_uid, |caller| {
-        with_omk_once(|omk| Ok(omk.r#resolveIsolatedCallerPackages(Some(caller))?))
-    })
+pub fn resolve_packages_for_caller(caller: &CallerInfo) -> (u32, PackageResolution) {
+    resolve_packages_for_caller_with(
+        caller,
+        kmr_common::android_version::android_major_version(),
+        resolve_packages_for_uid,
+        |caller| with_omk_once(|omk| Ok(omk.r#resolveIsolatedCallerPackages(Some(caller))?)),
+    )
 }
 
 fn resolve_packages_for_caller_with(
     caller: &CallerInfo,
+    android_major: Option<i32>,
     resolve_uid: impl FnOnce(u32) -> PackageResolution,
     resolve_isolated: impl FnOnce(&CallerInfo) -> Result<Vec<String>>,
-) -> PackageResolution {
+) -> (u32, PackageResolution) {
     let Ok(uid) = u32::try_from(caller.uid) else {
-        return PackageResolution::Unknown;
+        return (0, PackageResolution::Unknown);
     };
-    let packages = resolve_uid(uid);
+    let package_uid = non_isolated_package_uid(uid, android_major).unwrap_or(uid);
+    let packages = resolve_uid(package_uid);
     if !matches!(packages, PackageResolution::Unknown)
         || !kmr_common::consts::is_isolated_uid(uid)
         || caller.pid <= 0
     {
-        return packages;
+        return (package_uid, packages);
     }
     // Only package attribution is resolved. Keep the kernel UID/PID/SID for
     // all subsequent key authorization and business requests.
     match resolve_isolated(caller) {
-        Ok(packages) if !packages.is_empty() => PackageResolution::Known(packages),
-        Ok(_) => PackageResolution::Unknown,
+        Ok(packages) if !packages.is_empty() => (uid, PackageResolution::Known(packages)),
+        Ok(_) => (uid, PackageResolution::Unknown),
         Err(error) => {
             debug!(
                 "isolated caller package lookup unavailable uid={} pid={}: {error:#}",
                 caller.uid, caller.pid
             );
-            PackageResolution::Unknown
+            (uid, PackageResolution::Unknown)
         }
+    }
+}
+
+fn non_isolated_package_uid(uid: u32, android_major: Option<i32>) -> Option<u32> {
+    // AOSP Process.getAppUidForSdkSandboxUid/getAppUidForPrivateComputeCoreUid.
+    match uid % kmr_common::consts::AID_USER_OFFSET {
+        90_000..=99_999 => None,
+        20_000..=29_999 if android_major.is_some_and(|version| version >= 13) => Some(uid - 10_000),
+        30_000..=39_999 if android_major.is_some_and(|version| version >= 17) => Some(uid - 20_000),
+        _ => Some(uid),
     }
 }
 
