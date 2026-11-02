@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">แสดงแถบนำทางเป็นแผงแบบลอย</string>
     <string name="settings_liquid_glass">กระจกเหลว</string>
     <string name="settings_liquid_glass_desc">เพิ่มมิติแบบกระจกโปร่งแสงให้พื้นผิว</string>
-    <string name="tools_soter_beta">ความเข้ากันได้กับ Tencent Soter (เบตา)</string>
-    <string name="tools_soter_beta_desc">ความเข้ากันได้แบบทดลองสำหรับ Tencent SoterServer ต้องใช้ Zygisk Next</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">เปิดความเข้ากันได้กับ Soter</string>
-    <string name="soter_beta_enabled_desc">ปิดไว้โดยค่าเริ่มต้น การเปลี่ยนแปลงจะบันทึกเมื่อแตะนำไปใช้เท่านั้น</string>
-    <string name="soter_beta_reboot">ติดตั้งและเปิดใช้งาน Zygisk Next แยกต่างหาก รีสตาร์ทอุปกรณ์หลังจากเปิดหรือปิดฟังก์ชันนี้ ยังไม่ได้ยืนยันความเข้ากันได้</string>
-    <string name="soter_beta_saved">บันทึกการตั้งค่า Soter เบตาแล้ว รีสตาร์ทอุปกรณ์เพื่อนำไปใช้ ยังไม่ได้ยืนยันความเข้ากันได้</string>
-    <string name="soter_beta_preview">ตัวอย่างเท่านั้น ไม่สามารถบันทึกการตั้งค่าอุปกรณ์ที่นี่ได้</string>
 </resources>

@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">Показувати навігацію як плаваючу панель</string>
     <string name="settings_liquid_glass">Рідке скло</string>
     <string name="settings_liquid_glass_desc">Додати поверхням глибини напівпрозорого скла</string>
-    <string name="tools_soter_beta">Сумісність із Tencent Soter (Бета)</string>
-    <string name="tools_soter_beta_desc">Експериментальна сумісність із Tencent SoterServer. Потрібен Zygisk Next.</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">Увімкнути сумісність із Soter</string>
-    <string name="soter_beta_enabled_desc">Типово вимкнено. Зміни зберігаються лише після натискання «Застосувати».</string>
-    <string name="soter_beta_reboot">Установіть та увімкніть Zygisk Next окремо. Після ввімкнення або вимкнення перезапустіть пристрій. Сумісність не перевірено.</string>
-    <string name="soter_beta_saved">Налаштування Soter Бета збережено. Перезапустіть пристрій для застосування. Сумісність не перевірено.</string>
-    <string name="soter_beta_preview">Лише попередній перегляд. Тут не можна зберегти налаштування пристрою.</string>
 </resources>

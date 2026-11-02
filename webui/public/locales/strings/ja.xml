@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">ナビゲーションをフローティングパネルとして表示します</string>
     <string name="settings_liquid_glass">リキッドガラス</string>
     <string name="settings_liquid_glass_desc">半透明のガラス効果で画面に奥行きを加えます</string>
-    <string name="tools_soter_beta">Tencent Soter 互換性（Beta）</string>
-    <string name="tools_soter_beta_desc">Tencent SoterServer 向けの実験的な互換機能です。Zygisk Next が必要です。</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">Soter 互換性を有効にする</string>
-    <string name="soter_beta_enabled_desc">初期状態では無効です。「適用」をタップした場合のみ変更が保存されます。</string>
-    <string name="soter_beta_reboot">Zygisk Next を別途インストールして有効にしてください。有効化・無効化の後は端末を再起動してください。互換性は未検証です。</string>
-    <string name="soter_beta_saved">Soter Beta 設定を保存しました。適用するには端末を再起動してください。互換性は未検証です。</string>
-    <string name="soter_beta_preview">プレビューのみです。ここでは端末の設定を保存できません。</string>
 </resources>

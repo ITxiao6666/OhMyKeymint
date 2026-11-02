@@ -29,8 +29,6 @@ import { isDev } from '../utils/dev'
 import HomeView, { type KeyboxStatus, type ModuleStatus, type TeeStatus } from './HomeView.vue'
 import PifFingerprintDialog from './PifFingerprintDialog.vue'
 import SettingsView from './SettingsView.vue'
-import SoterDialog from './SoterDialog.vue'
-import SoterHalDialog from './SoterHalDialog.vue'
 import TargetsView from './TargetsView.vue'
 import ToolsView, { type ToolEvent } from './ToolsView.vue'
 import FileBrowserSheet from './FileBrowserSheet.vue'
@@ -63,6 +61,7 @@ const securityPatch = ref<string | null>(null)
 const spoofedDevice = ref<string | null | undefined>(undefined)
 const securityPatchBusy = ref<'sync' | 'restore' | null>(null)
 const maintenanceBusy = ref<'gms' | 'rkp' | null>(null)
+const gmsConfirmOpen = ref(false)
 const rkpOpen = ref(false)
 const rkpError = ref('')
 const rkpIssueOpen = ref(false)
@@ -76,8 +75,6 @@ const rkpIssuanceBusy = computed(() => rkpIssueBusy.value || rkpListBusy.value)
 const rkpIssueError = ref('')
 const rkpIssuedArtifacts = ref<RkpIssuedArtifact[]>([])
 const pendingRkpImport = ref<RkpIssuedArtifact | null>(null)
-const soterOpen = ref(false)
-const soterHalOpen = ref(false)
 const pifOpen = ref(false)
 const keyboxOpen = ref(false)
 const selectedKeybox = ref<{ name: string, contents: Uint8Array } | null>(null)
@@ -85,8 +82,6 @@ const keyboxBusy = ref(false)
 const targetsView = ref<InstanceType<typeof TargetsView> | null>(null)
 const settingsView = ref<InstanceType<typeof SettingsView> | null>(null)
 const pifDialog = ref<InstanceType<typeof PifFingerprintDialog> | null>(null)
-const soterDialog = ref<InstanceType<typeof SoterDialog> | null>(null)
-const soterHalDialog = ref<InstanceType<typeof SoterHalDialog> | null>(null)
 
 const pageIds = ['home', 'tools', 'settings'] as const
 const navItems = computed(() => [
@@ -312,8 +307,6 @@ function onTargetsOverlayClose(): void {
 }
 
 function handleEscape(): void {
-  if (soterOpen.value && soterDialog.value?.busy) return
-  if (soterHalOpen.value && soterHalDialog.value?.busy) return
   if (rkpIssueOpen.value && rkpIssueBusy.value) return
   if (targetsOpen.value && targetsView.value?.dismissOverlay()) return
   if (history.size > 0) history.back()
@@ -429,7 +422,6 @@ async function refreshDiagnostics(): Promise<void> {
       keymint: { status: 'running', pid: 1234 },
       keystore2: { status: 'running', pid: 1240 },
       injector: { status: 'running', pid: 1250 },
-      soter: { status: 'configured', pid: null },
       tee: { status: 'available', version: 300, name: 'TEE KeyMint' },
       strongbox: { status: 'unavailable', version: null, name: null },
       rkp_tee: { status: 'available', pid: null },
@@ -518,6 +510,7 @@ async function clearGmsCache(): Promise<void> {
     }
     await cli.clearGmsCache()
     notify(i18n.t('gms_cache_cleared'))
+    gmsConfirmOpen.value = false
   } catch (error) {
     notify(error instanceof Error ? error.message : String(error), true)
   } finally {
@@ -638,10 +631,8 @@ function onTool(event: ToolEvent): void {
     case 'installKeybox': void chooseKeybox(); break
     case 'syncSecurityPatch': void syncPatch(false); break
     case 'restoreSecurityPatch': void syncPatch(true); break
-    case 'openSoterBeta': soterOpen.value = true; break
-    case 'openSoterHal': soterHalOpen.value = true; break
     case 'spoofPif': pifOpen.value = true; break
-    case 'clearGmsCache': void clearGmsCache(); break
+    case 'clearGmsCache': gmsConfirmOpen.value = true; break
     case 'repairRkp': rkpError.value = ''; rkpOpen.value = true; break
     case 'issueRkp': void openRkpIssue(); break
   }
@@ -731,36 +722,6 @@ watch(pifOpen, open => {
     })
   } else if (!open && overlayHistory.delete('pif-fingerprint')) history.consume('pif-fingerprint')
 })
-function trackSoterOverlay(): void {
-  const key = 'soter-beta'
-  if (!soterOpen.value || overlayHistory.has(key)) return
-  overlayHistory.add(key)
-  history.push(key, () => {
-    overlayHistory.delete(key)
-    if (soterDialog.value?.requestClose() === false) {
-      // Re-arm after the current popstate handler finishes so a busy dialog
-      // does not lose its back entry or close the page beneath it.
-      void nextTick(trackSoterOverlay)
-    }
-  })
-}
-watch(soterOpen, open => {
-  if (open) trackSoterOverlay()
-  else if (overlayHistory.delete('soter-beta')) history.consume('soter-beta')
-})
-function trackSoterHalOverlay(): void {
-  const key = 'soter-hal'
-  if (!soterHalOpen.value || overlayHistory.has(key)) return
-  overlayHistory.add(key)
-  history.push(key, () => {
-    overlayHistory.delete(key)
-    if (soterHalDialog.value?.requestClose() === false) void nextTick(trackSoterHalOverlay)
-  })
-}
-watch(soterHalOpen, open => {
-  if (open) trackSoterHalOverlay()
-  else if (overlayHistory.delete('soter-hal')) history.consume('soter-hal')
-})
 watch(keyboxOpen, open => {
   if (open && !overlayHistory.has('keybox')) {
     overlayHistory.add('keybox')
@@ -834,8 +795,6 @@ watch(rkpImportConfirmOpen, open => {
           @install-keybox="onTool('installKeybox')"
           @sync-security-patch="onTool('syncSecurityPatch')"
           @restore-security-patch="onTool('restoreSecurityPatch')"
-          @open-soter-beta="onTool('openSoterBeta')"
-          @open-soter-hal="onTool('openSoterHal')"
           @spoof-pif="onTool('spoofPif')"
           @clear-gms-cache="onTool('clearGmsCache')"
           @repair-rkp="onTool('repairRkp')"
@@ -915,6 +874,25 @@ watch(rkpImportConfirmOpen, open => {
       @notify="notify"
       @changed="refreshIdentity(true)"
     />
+    <MiuixDialog
+      :model-value="gmsConfirmOpen"
+      :title="i18n.t('gms_cache_confirm_title')"
+      :close-on-click-modal="maintenanceBusy !== 'gms'"
+      @update:model-value="value => { if (maintenanceBusy !== 'gms') gmsConfirmOpen = value }"
+    >
+      <div class="confirm-sheet" :aria-busy="maintenanceBusy === 'gms'">
+        <p>{{ i18n.t('gms_cache_confirm_warning') }}</p>
+        <div class="confirm-actions">
+          <MiuixButton :disabled="maintenanceBusy === 'gms'" @click="gmsConfirmOpen = false">
+            {{ i18n.t('functional_button_cancel') }}
+          </MiuixButton>
+          <MiuixButton type="primary" :disabled="maintenanceBusy !== null" @click="clearGmsCache">
+            <MiuixProgressIndicator v-if="maintenanceBusy === 'gms'" type="circular" :size="18" />
+            {{ i18n.t('gms_cache_confirm') }}
+          </MiuixButton>
+        </div>
+      </div>
+    </MiuixDialog>
     <MiuixDialog
       :model-value="rkpOpen"
       :title="i18n.t('tools_repair_rkp')"
@@ -1025,8 +1003,6 @@ watch(rkpImportConfirmOpen, open => {
         </div>
       </div>
     </MiuixDialog>
-    <SoterDialog ref="soterDialog" v-model="soterOpen" :cli="cli" @notify="notify" />
-    <SoterHalDialog ref="soterHalDialog" v-model="soterHalOpen" :cli="cli" @notify="notify" />
     <MiuixSnackbarHost />
   </div>
 </template>

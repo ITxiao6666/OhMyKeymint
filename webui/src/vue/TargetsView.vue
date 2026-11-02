@@ -31,7 +31,7 @@ import {
   type AppList,
   type SelectableAppEntry,
 } from '../app_list/app_list'
-import { type Cli, type SoterHalState } from '../cli'
+import { type Cli } from '../cli'
 import { i18n } from '../i18n'
 import { isDev } from '../utils/dev'
 import TargetAppRow from './TargetAppRow.vue'
@@ -86,94 +86,7 @@ const autoEnabled = ref(false)
 const autoStatus = ref<'loading' | 'ready' | 'error'>('loading')
 const autoBusy = ref(false)
 const autoError = ref('')
-const appSheetOpen = ref(false)
-const appSettingsEntry = ref<SelectableAppEntry | null>(null)
-const appSettingsStatus = ref<'loading' | 'ready' | 'error'>('loading')
-const appSettingsBusy = ref(false)
-const appSettingsError = ref('')
-const soterSelection = ref<Pick<SoterHalState, 'enabled' | 'remote_enabled' | 'app_enabled' | 'app_targets'> | null>(null)
-let appSettingsGeneration = 0
-let returnToSystemSheet = false
 let disposed = false
-
-const appSoterSelected = computed(() => !!appSettingsEntry.value
-  && soterSelection.value?.app_targets.includes(appSettingsEntry.value.targetKey) === true)
-const appSoterReady = computed(() => soterSelection.value?.app_enabled === true
-  && soterSelection.value.remote_enabled)
-function retainSoterSelection(state: SoterHalState): void {
-  soterSelection.value = {
-    enabled: state.enabled,
-    remote_enabled: state.remote_enabled,
-    app_enabled: state.app_enabled,
-    app_targets: [...state.app_targets],
-  }
-}
-
-async function loadAppSettings(): Promise<void> {
-  if (!appSheetOpen.value || appSettingsBusy.value) return
-  const currentGeneration = ++appSettingsGeneration
-  appSettingsStatus.value = 'loading'
-  appSettingsError.value = ''
-  try {
-    await afterPaint()
-    if (disposed || currentGeneration !== appSettingsGeneration || !appSheetOpen.value) return
-    if (isDev()) {
-      soterSelection.value ??= { enabled: false, remote_enabled: false, app_enabled: false, app_targets: [] }
-    } else {
-      const state = await props.cli.getSoterHal()
-      if (disposed || currentGeneration !== appSettingsGeneration || !appSheetOpen.value) return
-      retainSoterSelection(state)
-    }
-    appSettingsStatus.value = 'ready'
-  } catch {
-    if (disposed || currentGeneration !== appSettingsGeneration || !appSheetOpen.value) return
-    appSettingsStatus.value = 'error'
-    appSettingsError.value = translate('soter_app_load_error', 'Unable to read app SOTER settings. Check that the installed module is up to date.')
-  }
-}
-
-function openAppSettings(entry: SelectableAppEntry): void {
-  if (props.loading || appSettingsBusy.value) return
-  returnToSystemSheet = systemSheetOpen.value
-  systemSheetOpen.value = false
-  menuOpen.value = false
-  appSettingsEntry.value = entry
-  appSheetOpen.value = true
-  void loadAppSettings()
-}
-
-function closeAppSettings(): void {
-  if (appSettingsBusy.value) return
-  appSettingsGeneration++
-  appSheetOpen.value = false
-  if (returnToSystemSheet) systemSheetOpen.value = true
-  returnToSystemSheet = false
-}
-
-async function setAppSoter(enabled: boolean): Promise<void> {
-  const entry = appSettingsEntry.value
-  if (!entry || appSettingsBusy.value || appSettingsStatus.value !== 'ready' || isDev()) return
-  appSettingsBusy.value = true
-  appSettingsError.value = ''
-  try {
-    await afterPaint()
-    if (disposed) return
-    const state = await props.cli.setSoterAppTarget(entry.targetKey, enabled)
-    if (disposed) return
-    retainSoterSelection(state)
-    void showSnackbar({ message: translate('soter_app_saved', 'App SOTER selection saved') })
-  } catch (error) {
-    if (!disposed) {
-      appSettingsError.value = translate('soter_app_save_error', 'Unable to save this app SOTER selection. Retry to read the current setting.')
-      if (error instanceof Error && error.message) appSettingsError.value += ` ${error.message}`
-      // A failed read-back can follow a successful write. Do not leave a
-      // stale switch actionable until the actual device state is reloaded.
-      appSettingsStatus.value = 'error'
-    }
-  } finally {
-    appSettingsBusy.value = false
-  }
-}
 
 async function loadAutoTargets(): Promise<void> {
   autoStatus.value = 'loading'
@@ -255,7 +168,7 @@ function resetPull(): void {
 }
 
 function startPull(event: TouchEvent): void {
-  if (props.loading || selectingRecommended.value || menuOpen.value || systemSheetOpen.value || appSheetOpen.value
+  if (props.loading || selectingRecommended.value || menuOpen.value || systemSheetOpen.value
       || event.touches.length !== 1 || pageScroller.scrollTop > 0
       || (event.target instanceof Element && event.target.closest('input, button, [role="switch"]'))) {
     if (pullStart) resetPull()
@@ -323,7 +236,7 @@ watch(() => props.refreshing, refreshing => {
 })
 // A menu followed by the system sheet is one overlay in the parent's history.
 // Watching the combined state also avoids closing a second layer on Android Back.
-watch(() => menuOpen.value || systemSheetOpen.value || appSheetOpen.value, open => {
+watch(() => menuOpen.value || systemSheetOpen.value, open => {
   if (open) emit('overlay-open')
   else emit('overlay-close')
 })
@@ -336,6 +249,8 @@ const targetEntries = computed(() => {
   void revision.value
   return props.appList.getTargetEntries(searchQuery.value)
 })
+const selectedTargetEntries = computed(() => targetEntries.value.filter(entry => entry.selected))
+const unselectedTargetEntries = computed(() => targetEntries.value.filter(entry => !entry.selected))
 const systemEntries = computed(() => {
   void revision.value
   return props.appList.getSystemEntries(systemSearchQuery.value)
@@ -388,7 +303,8 @@ function batchedEntries(
   return computed(() => entries.value.slice(0, count.value))
 }
 
-const renderedTargetEntries = batchedEntries(targetEntries, computed(() => true))
+const renderedSelectedTargetEntries = batchedEntries(selectedTargetEntries, computed(() => true))
+const renderedUnselectedTargetEntries = batchedEntries(unselectedTargetEntries, computed(() => true))
 const renderedSystemEntries = batchedEntries(
   systemEntries,
   computed(() => systemSheetOpen.value),
@@ -478,10 +394,6 @@ function closeSystemApps(): void {
 }
 
 function dismissOverlay(): boolean {
-  if (appSheetOpen.value) {
-    closeAppSettings()
-    return true
-  }
   if (systemSheetOpen.value) {
     closeSystemApps()
     return true
@@ -495,7 +407,6 @@ function dismissOverlay(): boolean {
 
 onBeforeUnmount(() => {
   disposed = true
-  appSettingsGeneration++
   cancelAnimationFrame(pullFrame)
   unsubscribe()
 })
@@ -610,7 +521,7 @@ defineExpose({
           :model-value="autoEnabled"
           :disabled="autoBusy || autoStatus !== 'ready' || loading"
           :title="translate('app_targets_auto_title', 'Automatically add new apps')"
-          :summary="translate('app_targets_auto_desc', 'Add newly installed user apps in the background. Existing apps are not selected. Saved immediately.')"
+          :summary="translate('app_targets_auto_desc', 'Automatically select only the most recently installed user app. Other apps remain unselected.')"
           @update:model-value="setAutoTargets"
         >
           <template #start><MiuixIcon :icon="AddCircle" :size="23" /></template>
@@ -630,21 +541,43 @@ defineExpose({
       </div>
 
       <div v-else-if="targetEntries.length > 0" class="targets-list">
-        <template v-for="(entry, index) in renderedTargetEntries" :key="entry.targetKey">
-        <h3 v-if="showUserGroups && (index === 0 || renderedTargetEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
-          {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
-        </h3>
-        <TargetAppRow
-          :selected="entry.selected"
-          :disabled="loading || selectingRecommended"
-          :app-name="entry.appName"
-          :package-name="entry.packageName"
-          :settings-title="translate('soter_app_settings', 'App settings')"
-          @select="setSelected(entry, $event)"
-          @settings="openAppSettings(entry)"
-        />
-        </template>
-        <div v-if="renderedTargetEntries.length < targetEntries.length" class="app-list-batch-loading" role="status">
+        <section v-if="selectedTargetEntries.length" class="targets-selection-group">
+          <h2 class="targets-selection-heading">
+            {{ translate('app_targets_selected', 'Selected package names') }}
+            <span>{{ selectedTargetEntries.length }}</span>
+          </h2>
+          <template v-for="(entry, index) in renderedSelectedTargetEntries" :key="entry.targetKey">
+            <h3 v-if="showUserGroups && (index === 0 || renderedSelectedTargetEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
+              {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
+            </h3>
+            <TargetAppRow
+              :selected="true"
+              :disabled="loading || selectingRecommended"
+              :app-name="entry.appName"
+              :package-name="entry.packageName"
+              @select="setSelected(entry, $event)"
+            />
+          </template>
+        </section>
+        <section v-if="unselectedTargetEntries.length" class="targets-selection-group">
+          <h2 class="targets-selection-heading">
+            {{ translate('app_targets_unselected', 'Unselected package names') }}
+            <span>{{ unselectedTargetEntries.length }}</span>
+          </h2>
+          <template v-for="(entry, index) in renderedUnselectedTargetEntries" :key="entry.targetKey">
+            <h3 v-if="showUserGroups && (index === 0 || renderedUnselectedTargetEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
+              {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
+            </h3>
+            <TargetAppRow
+              :selected="false"
+              :disabled="loading || selectingRecommended"
+              :app-name="entry.appName"
+              :package-name="entry.packageName"
+              @select="setSelected(entry, $event)"
+            />
+          </template>
+        </section>
+        <div v-if="renderedSelectedTargetEntries.length + renderedUnselectedTargetEntries.length < targetEntries.length" class="app-list-batch-loading" role="status">
           <MiuixProgressIndicator type="circular" :size="24" />
           <span class="sr-only">{{ translate('home_status_loading', 'Checking') }}</span>
         </div>
@@ -658,7 +591,7 @@ defineExpose({
     </main>
 
     <MiuixFloatingActionButton
-      v-show="!systemSheetOpen && !appSheetOpen"
+      v-show="!systemSheetOpen"
       class="targets-apply"
       :disabled="loading || selectingRecommended || !applyEnabled"
       :aria-label="translate('functional_button_apply', 'Apply')"
@@ -713,9 +646,7 @@ defineExpose({
             :disabled="loading"
             :app-name="entry.appName"
             :package-name="entry.packageName"
-            :settings-title="translate('soter_app_settings', 'App settings')"
             @select="setSystemSelected(entry.targetKey, $event)"
-            @settings="openAppSettings(entry)"
           />
           </template>
           <div v-if="renderedSystemEntries.length < systemEntries.length" class="app-list-batch-loading" role="status">
@@ -731,52 +662,6 @@ defineExpose({
       </div>
     </MiuixBottomSheet>
 
-    <MiuixBottomSheet
-      v-if="appSettingsEntry"
-      :model-value="appSheetOpen"
-      :title="appSettingsEntry.appName"
-      :close-on-click-modal="!appSettingsBusy"
-      @update:model-value="value => { if (!value) closeAppSettings() }"
-    >
-      <template #start-action>
-        <MiuixIconButton
-          :disabled="appSettingsBusy"
-          :aria-label="translate('functional_button_cancel', 'Close')"
-          @click="closeAppSettings"
-        ><MiuixIcon :icon="Close" /></MiuixIconButton>
-      </template>
-      <div class="target-app-sheet" :aria-busy="appSettingsStatus === 'loading' || appSettingsBusy">
-        <p class="target-app-identity">{{ appSettingsEntry.packageName }}</p>
-        <p class="target-app-profile">{{ translate('app_target_user', 'User') }} {{ appSettingsEntry.userId }}</p>
-        <div v-if="appSettingsStatus === 'loading'" class="target-app-pending" role="status">
-          <MiuixProgressIndicator type="circular" :size="28" />
-          <span>{{ translate('home_status_loading', 'Checking') }}</span>
-        </div>
-        <template v-else-if="appSettingsStatus === 'ready'">
-          <MiuixSwitchPreference
-            :model-value="appSoterSelected && appSoterReady"
-            :title="translate('soter_app_enabled', 'Take over remote SOTER')"
-            :summary="translate('soter_app_enabled_desc', 'Opt in this app and automatically enable per-app remote forwarding. Independent of normal OMK selection; saved immediately.')"
-            :disabled="appSettingsBusy || isDev()"
-            @update:model-value="setAppSoter"
-          />
-          <p v-if="soterSelection?.enabled" class="target-app-note">
-            {{ translate('soter_app_global_effect', 'Global takeover replaces the stock HAL for all apps using it. If the relay is enabled, unselected apps may also use the remote relay.') }}
-          </p>
-          <p v-if="appSoterSelected && !appSoterReady" class="target-app-note target-app-note--warning" role="status">
-            {{ translate('soter_app_inactive', 'This app is saved, but remote SOTER is inactive. Turn on this switch to activate per-app forwarding.') }}
-          </p>
-          <div v-if="appSettingsBusy" class="target-app-pending" role="status">
-            <MiuixProgressIndicator type="circular" :size="22" />
-          </div>
-        </template>
-        <p v-if="appSettingsError" class="target-app-error" role="alert">{{ appSettingsError }}</p>
-        <MiuixButton v-if="appSettingsStatus === 'error'" @click="loadAppSettings">
-          {{ translate('functional_button_retry', 'Retry') }}
-        </MiuixButton>
-        <p v-if="isDev()" class="target-app-note">{{ translate('soter_hal_preview', 'Preview only. Device settings cannot be saved here.') }}</p>
-      </div>
-    </MiuixBottomSheet>
   </section>
 </template>
 
@@ -1034,13 +919,17 @@ defineExpose({
   gap: 12px;
 }
 
-.target-app-sheet { padding: 0 4px 22px; }
-.target-app-identity { margin: 0; overflow-wrap: anywhere; color: var(--m-color-on-surface-variant-summary); font-size: 14px; }
-.target-app-profile { margin: 6px 0 16px; color: var(--m-color-on-surface-variant-summary); font-size: 13px; }
-.target-app-note, .target-app-error { margin: 14px 0; font-size: 14px; line-height: 1.55; color: var(--m-color-on-surface-variant-summary); }
-.target-app-note--warning { color: var(--m-color-primary); }
-.target-app-error { color: var(--m-color-error); }
-.target-app-pending { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 64px; }
+.targets-selection-group { display: grid; gap: 10px; }
+.targets-selection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 12px 0;
+  color: var(--m-color-on-surface-variant-summary);
+  font-size: 15px;
+  font-weight: 600;
+}
+.targets-selection-heading span { font-variant-numeric: tabular-nums; }
 
 .targets-list :deep(.m-basic-component__row),
 .system-app-list :deep(.m-basic-component__row) {

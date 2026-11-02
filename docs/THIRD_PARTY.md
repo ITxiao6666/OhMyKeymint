@@ -109,72 +109,6 @@ That project is licensed under GPL-3.0. Oh My Keymint does not include or run
 Specter's WebUI or shell scripts. Its WebUI and Rust implementation are
 independent.
 
-## D-soter compatibility experiment
-
-The optional Tencent Soter compatibility (Beta) reply contract and public-key
-placeholder are adapted from [ajfkdk/D-soter](https://github.com/ajfkdk/D-soter),
-`module/jni/dsoter.cpp` at commit
-[`6148e02ea5977cb95b5a162a405fc915e39c01db`](https://github.com/ajfkdk/D-soter/commit/6148e02ea5977cb95b5a162a405fc915e39c01db),
-licensed under Apache-2.0. The Rust implementation in `pif-spoof/src/soter.rs`
-and `pif-spoof/src/soter/` implements all 13 reply contracts with a separate
-native Binder stub and bounded descriptor matching. Android 12/12L retain the
-NDK platform's standard AIDL header check. No upstream prebuilt library or C++
-runtime component is bundled.
-It shares only the existing Zygisk loader entry with PIF and does not alter
-KeyMint or injector routing. The fixed public key and zero-filled signatures
-are mock responses, not genuine attestation or payment credentials.
-
-The release includes this attribution in `THIRD_PARTY_LICENSES/D-soter.txt` and
-the Apache-2.0 terms in `AOSP.Apache-license-2.0.txt`.
-
-The Tencent Soter compatibility handler also incorporates the reply-state,
-session-signing, device-identity and extra-parameter corrections from
-`947409161/OhMyKeymint` commit `34d4fee68f07a637cf46c89391b05f08ecdc8200`.
-The commit's unrelated removal of per-application routing was not adopted;
-OMK's current scoop and per-method routing rules remain authoritative.
-
-## Qualcomm Soter software TA
-
-The Qualcomm Soter HAL software TA and Binder service are adapted from the
-`soter-ta` and `soterta-svc` components of
-[Andrea-lyz/ommega](https://github.com/Andrea-lyz/ommega), licensed under
-AGPL-3.0-or-later. The service is isolated behind
-`vendor.qti.hardware.soter.ISoter/default`, uses OMK's persistent data path,
-and retains the upstream remote-relay contract. It does not replace the OMK
-KeyMint route or the independent Tencent Soter compatibility experiment.
-The shared SOTER codec uses the project's BoringSSL build through the openssl
-Rust interface for RSA key generation, PKCS#8/SPKI conversion and RSA-PSS/SHA-256
-signing and verification. Its wire format uses SHA-256 MGF1 and a 20-byte salt.
-
-Relay package hints and per-instance SoterServer reconnection are adapted from
-[jiyin004-jpg/ommega](https://github.com/jiyin004-jpg/ommega), under the same
-AGPL-3.0-or-later license, reviewed at
-[`f86b7913829c379e112b46c71dd502ef534eb39e`](https://github.com/jiyin004-jpg/ommega/commit/f86b7913829c379e112b46c71dd502ef534eb39e).
-The relevant changes are
-[`c09567f2d1299c757a02a5a19dcf3dc154ad666a`](https://github.com/jiyin004-jpg/ommega/commit/c09567f2d1299c757a02a5a19dcf3dc154ad666a)
-and
-[`f5b2247e9b3240730a0b52d12f971a57ac98e352`](https://github.com/jiyin004-jpg/ommega/commit/f5b2247e9b3240730a0b52d12f971a57ac98e352).
-OMK retains explicit remote failure handling without local key fallback and
-does not automatically reset application preferences or remote key slots.
-The Rust Binder entry point's dual transaction layouts follow
-`6fdb8e1b4852b022cd37431d47a359b32230db0e`; native buffer replies and conditional
-ASK confirmation follow `91a896a8689e8ba8226aa05ba28e00b75c09d1c0`. The staged
-public-material diagnostics reference `ba75a57fd92749d6f52ad49065956dc5378c4af3`
-(`b-side/source/src/soter/flow.rs`). OMK resolves request layouts per call and
-keeps these SOTER diagnostics strictly read-only; the SOTER path does not import
-the upstream mutation, automatic reset or Keybox forwarding flows.
-
-The independent per-app native SOTER forwarding path references the HAL
-contracts in `a-side/source/ommega-injector/src/hook/soter.rs` and
-`parcel/reply.rs` at Ommega revision
-`c6172dc553543aa8eea1b7e03cd50c2ff6f1efb1` (AGPL-3.0-or-later).
-OMK uses its own ptrace loader and root broker with exact Binder caller scopes,
-owned HIDL reply buffers and no local fallback or guessed caller identity.
-The Zygisk Tencent Beta handler is separate and does not provide this transport.
-Structured forwarding diagnostics also reference that revision's `log_call`
-and root event reporting. OMK uses bounded, typed metadata on its existing
-private channel; it does not copy alias, key, session or challenge logging.
-
 ## Vendor RKP repair
 
 The optional **Fix RKP** action references the fixed vendor-tool invocation in
@@ -189,8 +123,8 @@ tool completion report, not proof of successful Google provisioning.
 
 The local RKP protocol, CBOR/DICE verification, native KeymasterUtils ABI and
 V1 Java bridge are adapted from
-[eltavine/Duck-ToolBox](https://github.com/eltavine/Duck-ToolBox/tree/7567a8e084d31b1a6da3541bf0e8e2692ee45e0a)
-at revision `7567a8e084d31b1a6da3541bf0e8e2692ee45e0a` (MIT).
+[eltavine/Duck-ToolBox](https://github.com/eltavine/Duck-ToolBox/tree/8d6a2470b1033c35946b72bb1f9bc56d8947dd63)
+through revision `8d6a2470b1033c35946b72bb1f9bc56d8947dd63` (MIT).
 Relevant upstream paths are `crates/duck-rkp-device/src/` and
 `crates/duck-rkp/src/{cbor,verify}`. The V1 PureSoft MAC/AIDL construction also
 derives from `LazyBonesLZY/rkp-v1-oracle` revision `b28480c` (MIT), as credited
@@ -200,6 +134,9 @@ OMK's implementation is in `src/local_rkp/`, `src/rkp_v1_bridge.rs`,
 `src/local_rkp_artifacts.rs` and `runtime/rkp/RkpV1Bridge.java`.
 
 OMK retains the device-backed V2 native, V1 AIDL and V1 native request paths.
+Native paths are enabled only when Qualcomm SoC evidence is present; MediaTek
+devices use the vendor-independent V1 AIDL bridge. The bridge discovers both
+`rkpdapp.apk` and `rkpdapp.google.apk` in the system RKP APEX.
 It provides explicit issuance/import confirmations, private OMK-local storage,
 bounded fixed-endpoint HTTP requests and strict issued-chain validation using
 OMK's existing Google root pins. It does not copy Duck's simulated-device

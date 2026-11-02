@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">Wyświetl nawigację jako pływający panel</string>
     <string name="settings_liquid_glass">Płynne szkło</string>
     <string name="settings_liquid_glass_desc">Dodaj powierzchniom głębię półprzezroczystego szkła</string>
-    <string name="tools_soter_beta">Zgodność z Tencent Soter (Beta)</string>
-    <string name="tools_soter_beta_desc">Eksperymentalna zgodność z Tencent SoterServer. Wymaga Zygisk Next.</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">Włącz zgodność z Soter</string>
-    <string name="soter_beta_enabled_desc">Domyślnie wyłączona. Zmiany są zapisywane dopiero po dotknięciu przycisku Zastosuj.</string>
-    <string name="soter_beta_reboot">Zainstaluj i włącz Zygisk Next osobno. Po włączeniu lub wyłączeniu uruchom urządzenie ponownie. Zgodność nie została zweryfikowana.</string>
-    <string name="soter_beta_saved">Ustawienie Soter Beta zapisane. Uruchom urządzenie ponownie, aby je zastosować. Zgodność nie została zweryfikowana.</string>
-    <string name="soter_beta_preview">Tylko podgląd. Nie można tutaj zapisywać ustawień urządzenia.</string>
 </resources>

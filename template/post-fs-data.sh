@@ -5,7 +5,6 @@ TARGET_DIR=/data/misc/keystore/omk
 # Keymint pins auto vb_key in data/vbmeta_state.toml. Preserve this device-local
 # snapshot across updates; it must not be seeded from the module template.
 LOG_DIR=$TARGET_DIR/logs
-SOTER_DIR=$TARGET_DIR/data/soterta
 TARGET_KEYBOX=$TARGET_DIR/keybox.xml
 TARGET_INJECTOR_CONFIG=$TARGET_DIR/injector.toml
 STATE_DIR=/data/adb/omk
@@ -21,15 +20,19 @@ mkdir -p "$LOG_DIR"
 chmod 0770 "$LOG_DIR"
 chown 1017:1017 "$LOG_DIR"
 
-# Qualcomm Soter relay configuration, ledger and watchdog status all live in
-# OMK's persistent data directory so the module overlay can be replaced safely.
-mkdir -p "$SOTER_DIR"
-chmod 0770 "$SOTER_DIR"
-chown 1017:1017 "$SOTER_DIR"
-
 mkdir -p "$STATE_DIR"
 rm -f "$STATE_DIR/keymint-daemon.pid" "$STATE_DIR/injector-daemon.pid"
 rm -f "$STATE_DIR/restart.keymint" "$STATE_DIR/restart.injector" "$STATE_DIR/restart.all"
+
+# Remove state from retired SOTER features and return the vendor HAL to init.
+pkill -9 -f 'soterta?-svc --mode=' 2>/dev/null || true
+pkill -9 -f 'soterta.sh' 2>/dev/null || true
+if [ -e "$TARGET_DIR/data/soterta/hal-taken-over" ] \
+  || [ "$(getprop init.svc.vendor.soter 2>/dev/null)" = "stopped" ]; then
+  start vendor.soter 2>/dev/null || true
+fi
+rm -f "$TARGET_DIR/data/soter_beta.conf"
+rm -rf "$TARGET_DIR/data/soterta"
 
 if [ ! -f "$TARGET_KEYBOX" ] && [ -f "$MODDIR/keybox.xml" ]; then
   cp "$MODDIR/keybox.xml" "$TARGET_KEYBOX"

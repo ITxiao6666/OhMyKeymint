@@ -221,7 +221,11 @@ fn find_aidl_apk() -> Result<PathBuf> {
             .into_iter()
             .flatten()
             .filter_map(std::result::Result::ok)
-            .map(|entry| entry.path().join("rkpdapp.apk"))
+            .flat_map(|entry| {
+                ["rkpdapp.apk", "rkpdapp.google.apk"]
+                    .into_iter()
+                    .map(move |name| entry.path().join(name))
+            })
             .collect::<Vec<_>>();
         entries.sort();
         if let Some(apk) = entries.into_iter().find(|path| trusted_system_apk(path)) {

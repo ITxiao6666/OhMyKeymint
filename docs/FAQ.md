@@ -190,6 +190,11 @@ name, removes duplicates, and atomically replaces the file while preserving
 its ownership and permissions. The injector then hot-reloads the valid file
 for new requests.
 
+The package page displays selected and unselected applications separately.
+When automatic selection is enabled, each background scan selects only the
+most recently installed new user application; any other newly observed apps
+remain unselected.
+
 If loading, parsing, validation, or writing fails, the WebUI reports the error
 and the existing file is not replaced. Saving is unavailable when the current
 list could not be loaded. The package selector refreshes installed apps when it
@@ -557,10 +562,6 @@ routed and unrouted comparison from the same app and build.
 ### Why do two detector apps disagree?
 
 They may be testing different systems. Key attestation, Play Integrity,
-Tencent Soter, app-specific root detection, and a displayed `sdkVersion` are
-not the same thing. Soter in particular is a separate framework and is not
-provided by OMK.
-
 Compare the exact test names instead of treating every "locked", "tampered",
 or "secure" label as the same result. Use OMK's routing and keymint logs to
 decide whether OMK handled the request.

@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">عرض شريط التنقل كلوحة عائمة</string>
     <string name="settings_liquid_glass">تأثير الزجاج السائل</string>
     <string name="settings_liquid_glass_desc">إضافة عمق زجاجي شفاف للأسطح</string>
-    <string name="tools_soter_beta">توافق Tencent Soter (تجريبي)</string>
-    <string name="tools_soter_beta_desc">توافق تجريبي مع Tencent SoterServer. يتطلب Zygisk Next.</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">تفعيل توافق Soter</string>
-    <string name="soter_beta_enabled_desc">معطّل افتراضيًا. لا تُحفظ التغييرات إلا بعد الضغط على تطبيق.</string>
-    <string name="soter_beta_reboot">ثبّت Zygisk Next وفعّله بشكل منفصل. أعد تشغيل الجهاز بعد التفعيل أو التعطيل. لم يتم التحقق من التوافق.</string>
-    <string name="soter_beta_saved">تم حفظ إعداد Soter التجريبي. أعد تشغيل الجهاز للتطبيق. لم يتم التحقق من التوافق.</string>
-    <string name="soter_beta_preview">معاينة فقط. لا يمكن حفظ إعدادات الجهاز هنا.</string>
 </resources>

@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { MiuixCheckboxPreference, MiuixIcon } from 'miuix-vue'
-import { All, More } from 'miuix-vue/icons'
+import { All } from 'miuix-vue/icons'
 
 const props = defineProps<{
   packageName: string
   appName: string
   selected: boolean
   disabled: boolean
-  settingsTitle: string
 }>()
 
 const emit = defineEmits<{
   select: [selected: boolean]
-  settings: []
 }>()
 
 // Keep image decoding feedback local to this row. Updating a shared icon map
@@ -48,16 +46,6 @@ watch(() => props.packageName, () => { iconLoaded.value = false })
         </span>
       </template>
     </MiuixCheckboxPreference>
-    <button
-      type="button"
-      class="target-app-settings"
-      :aria-label="`${settingsTitle}: ${appName}`"
-      :title="settingsTitle"
-      :disabled="disabled"
-      @click="emit('settings')"
-    >
-      <MiuixIcon :icon="More" :size="22" />
-    </button>
   </div>
 </template>
 
@@ -76,29 +64,10 @@ watch(() => props.packageName, () => { iconLoaded.value = false })
   min-width: 0;
   min-height: 74px;
   padding: 12px 14px;
-  padding-inline-end: 4px;
   border-radius: 0;
   overflow: hidden;
   background: transparent;
 }
-
-.target-app-settings {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 44px;
-  min-height: 48px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--m-color-on-surface-variant-summary);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.target-app-settings:active { background: color-mix(in srgb, var(--m-color-primary) 10%, transparent); }
-.target-app-settings:focus-visible { outline: 2px solid var(--m-color-primary); outline-offset: -4px; }
-.target-app-settings:disabled { opacity: .45; cursor: default; }
 
 .app-icon-frame {
   position: relative;

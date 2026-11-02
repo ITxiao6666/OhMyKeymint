@@ -12,6 +12,3 @@ jni = "0.21"
 libc = { version = "0.2", default-features = false }
 pif-common = { path = "../pif-common", version = "0.1.0" }
 zygisk-api = { path = "../third_party/zygisk-api", version = "0.0.2" }
-base64 = "0.23"
-num-bigint-dig = "0.8"
-sha2 = "0.10"

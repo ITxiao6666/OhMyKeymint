@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">Hiển thị thanh điều hướng dưới dạng bảng nổi</string>
     <string name="settings_liquid_glass">Kính lỏng</string>
     <string name="settings_liquid_glass_desc">Thêm chiều sâu kính mờ cho các bề mặt</string>
-    <string name="tools_soter_beta">Tương thích Tencent Soter (Beta)</string>
-    <string name="tools_soter_beta_desc">Khả năng tương thích thử nghiệm với Tencent SoterServer. Yêu cầu Zygisk Next.</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">Bật tương thích Soter</string>
-    <string name="soter_beta_enabled_desc">Mặc định tắt. Thay đổi chỉ được lưu sau khi nhấn Áp dụng.</string>
-    <string name="soter_beta_reboot">Cài đặt và bật Zygisk Next riêng. Khởi động lại thiết bị sau khi bật hoặc tắt. Khả năng tương thích chưa được xác minh.</string>
-    <string name="soter_beta_saved">Đã lưu cài đặt Soter Beta. Khởi động lại thiết bị để áp dụng. Khả năng tương thích chưa được xác minh.</string>
-    <string name="soter_beta_preview">Chỉ xem trước. Không thể lưu cài đặt thiết bị tại đây.</string>
 </resources>

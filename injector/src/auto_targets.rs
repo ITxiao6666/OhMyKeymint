@@ -42,6 +42,7 @@ pub(crate) struct Status {
 #[derive(Default)]
 struct Snapshot {
     users: BTreeMap<u32, Option<BTreeSet<String>>>,
+    installed_at: BTreeMap<(u32, String), u128>,
 }
 
 fn read_state(path: &Path) -> Result<State> {
@@ -136,7 +137,7 @@ fn set_enabled_at_path(
 /// Reconcile only successful user snapshots. An unreadable/locked profile must
 /// not forget its baseline or cause its existing apps to be added on recovery.
 fn reconcile(state: &mut State, snapshot: Snapshot) -> Vec<String> {
-    let mut added = Vec::new();
+    let mut newest: Option<(u128, String)> = None;
     state.users.retain(|user, _| snapshot.users.contains_key(user));
     for (user, current) in snapshot.users {
         let Some(current) = current else {
@@ -144,11 +145,24 @@ fn reconcile(state: &mut State, snapshot: Snapshot) -> Vec<String> {
             continue;
         };
         if let Some(Some(previous)) = state.users.get(&user) {
-            added.extend(current.difference(previous).map(|package| format!("{package}@{user}")));
+            for package in current.difference(previous) {
+                let target = format!("{package}@{user}");
+                let installed = snapshot
+                    .installed_at
+                    .get(&(user, package.clone()))
+                    .copied()
+                    .unwrap_or_default();
+                if newest
+                    .as_ref()
+                    .is_none_or(|candidate| (installed, &target) > (candidate.0, &candidate.1))
+                {
+                    newest = Some((installed, target));
+                }
+            }
         }
         state.users.insert(user, Some(current));
     }
-    added
+    newest.into_iter().map(|(_, target)| target).collect()
 }
 
 fn poll() -> Result<()> {
@@ -208,6 +222,7 @@ fn parse_users(output: &str) -> Result<BTreeSet<u32>> {
     Ok(users)
 }
 
+#[cfg(test)]
 fn parse_packages(output: &str) -> Result<BTreeSet<String>> {
     output
         .lines()
@@ -225,15 +240,51 @@ fn parse_packages(output: &str) -> Result<BTreeSet<String>> {
         .collect()
 }
 
+fn parse_package_paths(output: &str) -> Result<BTreeMap<String, PathBuf>> {
+    output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let value = line
+                .trim()
+                .strip_prefix("package:")
+                .ok_or_else(|| anyhow!("unexpected PackageManager output"))?;
+            let (path, name) = value
+                .rsplit_once('=')
+                .ok_or_else(|| anyhow!("PackageManager output has no APK path"))?;
+            if path.is_empty()
+                || !path.starts_with('/')
+                || !matches!(config::parse_scoop_target(name), Some(ScoopTarget::Package(_)))
+            {
+                bail!("invalid installed package entry");
+            }
+            Ok((name.to_owned(), PathBuf::from(path)))
+        })
+        .collect()
+}
+
 fn discover() -> Result<Snapshot> {
     let output = run_command(&["user", "list"])?;
     let users = parse_users(&output)?;
     let mut snapshot = Snapshot::default();
     for user in users {
         let output =
-            run_command(&["package", "list", "packages", "-3", "--user", &user.to_string()]);
-        let packages = output.and_then(|output| parse_packages(&output)).ok();
-        snapshot.users.insert(user, packages);
+            run_command(&["package", "list", "packages", "-3", "-f", "--user", &user.to_string()]);
+        let entries = output.and_then(|output| parse_package_paths(&output)).ok();
+        if let Some(entries) = entries {
+            for (package, path) in &entries {
+                let installed_at = fs::metadata(path)
+                    .and_then(|metadata| metadata.modified())
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or_default();
+                snapshot.installed_at.insert((user, package.clone()), installed_at);
+            }
+            snapshot.users.insert(user, Some(entries.into_keys().collect()));
+        } else {
+            snapshot.users.insert(user, None);
+        }
     }
     if snapshot.users.values().all(Option::is_none) {
         bail!("no Android user package snapshot is available");
@@ -372,7 +423,14 @@ mod tests {
     }
 
     fn snapshot(names: &[&str]) -> Snapshot {
-        Snapshot { users: BTreeMap::from([(0, packages(names))]) }
+        Snapshot {
+            users: BTreeMap::from([(0, packages(names))]),
+            installed_at: names
+                .iter()
+                .enumerate()
+                .map(|(index, name)| ((0, (*name).to_string()), index as u128 + 1))
+                .collect(),
+        }
     }
 
     #[test]
@@ -494,7 +552,7 @@ mod tests {
             users: BTreeMap::from([(0, packages(&["com.old"]))]),
             ..State::default()
         };
-        let scan = || Snapshot { users: BTreeMap::from([(0, packages(&["com.old", "com.new"]))]) };
+        let scan = || snapshot(&["com.old", "com.new"]);
         assert_eq!(reconcile(&mut state, scan()), ["com.new@0"]);
         assert!(reconcile(&mut state, scan()).is_empty());
     }
@@ -506,8 +564,10 @@ mod tests {
             users: BTreeMap::from([(0, packages(&["com.old"])), (10, None)]),
             ..State::default()
         };
-        let first =
-            Snapshot { users: BTreeMap::from([(0, None), (10, packages(&["com.profile"]))]) };
+        let first = Snapshot {
+            users: BTreeMap::from([(0, None), (10, packages(&["com.profile"]))]),
+            ..Snapshot::default()
+        };
         assert!(reconcile(&mut state, first).is_empty());
         assert_eq!(state.users[&0], packages(&["com.old"]));
         let second = Snapshot {
@@ -515,6 +575,7 @@ mod tests {
                 (0, packages(&["com.old"])),
                 (10, packages(&["com.profile", "com.new"])),
             ]),
+            ..Snapshot::default()
         };
         assert_eq!(reconcile(&mut state, second), ["com.new@10"]);
     }
@@ -526,15 +587,40 @@ mod tests {
             users: BTreeMap::from([(0, packages(&["com.app"]))]),
             ..State::default()
         };
-        assert!(reconcile(&mut state, Snapshot { users: BTreeMap::from([(0, packages(&[]))]) })
-            .is_empty());
+        assert!(reconcile(
+            &mut state,
+            Snapshot { users: BTreeMap::from([(0, packages(&[]))]), ..Snapshot::default() }
+        )
+        .is_empty());
         assert_eq!(
             reconcile(
                 &mut state,
-                Snapshot { users: BTreeMap::from([(0, packages(&["com.app"]))]) }
+                Snapshot {
+                    users: BTreeMap::from([(0, packages(&["com.app"]))]),
+                    ..Snapshot::default()
+                }
             ),
             ["com.app@0"]
         );
+    }
+
+    #[test]
+    fn simultaneous_installs_add_only_the_latest_package() {
+        let mut state = State {
+            enabled: true,
+            users: BTreeMap::from([(0, packages(&["com.old"]))]),
+            ..State::default()
+        };
+        let current = packages(&["com.old", "com.first", "com.latest"]);
+        let snapshot = Snapshot {
+            users: BTreeMap::from([(0, current)]),
+            installed_at: BTreeMap::from([
+                ((0, "com.first".to_string()), 100),
+                ((0, "com.latest".to_string()), 200),
+            ]),
+        };
+        assert_eq!(reconcile(&mut state, snapshot), ["com.latest@0"]);
+        assert_eq!(state.users[&0], packages(&["com.old", "com.first", "com.latest"]));
     }
 
     #[test]
@@ -548,5 +634,10 @@ mod tests {
         assert!(parse_packages("package:com.app@0").is_err());
         assert_eq!(parse_packages("package:com.app\npackage:com.app\n").unwrap().len(), 1);
         assert!(parse_packages("").unwrap().is_empty());
+        assert_eq!(
+            parse_package_paths("package:/data/app/example/base.apk=com.app\n").unwrap(),
+            BTreeMap::from([("com.app".to_string(), PathBuf::from("/data/app/example/base.apk"))])
+        );
+        assert!(parse_package_paths("package:com.app").is_err());
     }
 }

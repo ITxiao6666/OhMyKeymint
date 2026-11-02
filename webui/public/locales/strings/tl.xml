@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">Ipakita ang navigation bilang lumulutang na panel</string>
     <string name="settings_liquid_glass">Liquid glass</string>
     <string name="settings_liquid_glass_desc">Magdagdag ng translucent na lalim ng salamin sa mga surface</string>
-    <string name="tools_soter_beta">Pagiging tugma sa Tencent Soter (Beta)</string>
-    <string name="tools_soter_beta_desc">Eksperimental na pagiging tugma sa Tencent SoterServer. Kailangan ang Zygisk Next.</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">Paganahin ang pagiging tugma sa Soter</string>
-    <string name="soter_beta_enabled_desc">Naka-off bilang default. Mase-save lamang ang mga pagbabago pagkatapos pindutin ang Ilapat.</string>
-    <string name="soter_beta_reboot">Hiwalay na i-install at paganahin ang Zygisk Next. I-restart ang device pagkatapos itong i-on o i-off. Hindi pa nabeberipika ang pagiging tugma.</string>
-    <string name="soter_beta_saved">Na-save ang setting ng Soter Beta. I-restart ang device para mailapat. Hindi pa nabeberipika ang pagiging tugma.</string>
-    <string name="soter_beta_preview">Preview lamang. Hindi maaaring i-save ang mga setting ng device dito.</string>
 </resources>

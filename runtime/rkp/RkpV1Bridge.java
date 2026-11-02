@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Eltavine (尉迟栩澜)
-// Derived from Duck-ToolBox commit 7567a8e084d31b1a6da3541bf0e8e2692ee45e0a.
+// Derived from Duck-ToolBox through commit 8d6a2470b1033c35946b72bb1f9bc56d8947dd63.
 // SPDX-License-Identifier: MIT
 //
 // MIT License

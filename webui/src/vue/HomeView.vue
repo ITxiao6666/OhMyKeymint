@@ -131,7 +131,6 @@ const serviceRows = computed(() => {
   if (!props.diagnostics) return []
   return [
     { id: 'keymint', label: tr('home_diag_keymint', 'OMK KeyMint'), value: props.diagnostics.keymint },
-    { id: 'soter', label: tr('home_diag_soter', 'Soter'), value: props.diagnostics.soter },
   ]
 })
 

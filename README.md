@@ -19,7 +19,7 @@ Zygisk 相关功能需另行安装并启用 Zygisk Next。
 
 - 应用包名、多用户及应用独立安全补丁配置。
 - RSA / EC Keybox 导入与证书链信息查看。
-- 安全补丁同步与恢复、Pixel PIF 配置 Soter HAL、本地软件 TA、远程中继及 Tencent Soter
+- 安全补丁同步与恢复、Pixel PIF 配置及本机 RKP Keybox 签发
 - 运行状态诊断、主题与语言设置。
 
 Keybox 至少需要一个完整的 RSA 或 EC 条目，私钥必须与证书链匹配。

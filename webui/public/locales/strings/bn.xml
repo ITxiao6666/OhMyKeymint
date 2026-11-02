@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">নেভিগেশন বারটি ভাসমান প্যানেল হিসেবে দেখান</string>
     <string name="settings_liquid_glass">লিকুইড গ্লাস</string>
     <string name="settings_liquid_glass_desc">পৃষ্ঠগুলোতে স্বচ্ছ কাচের গভীরতা যোগ করুন</string>
-    <string name="tools_soter_beta">Tencent Soter সামঞ্জস্য (বেটা)</string>
-    <string name="tools_soter_beta_desc">Tencent SoterServer-এর জন্য পরীক্ষামূলক সামঞ্জস্য। Zygisk Next প্রয়োজন।</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">Soter সামঞ্জস্য চালু করুন</string>
-    <string name="soter_beta_enabled_desc">ডিফল্টভাবে বন্ধ। প্রয়োগ করুন চাপার পরেই পরিবর্তন সংরক্ষিত হবে।</string>
-    <string name="soter_beta_reboot">Zygisk Next আলাদাভাবে ইনস্টল ও চালু করুন। চালু বা বন্ধ করার পরে ডিভাইস পুনরায় চালু করুন। সামঞ্জস্য যাচাই করা হয়নি।</string>
-    <string name="soter_beta_saved">Soter বেটা সেটিং সংরক্ষিত হয়েছে। প্রয়োগ করতে ডিভাইস পুনরায় চালু করুন। সামঞ্জস্য যাচাই করা হয়নি।</string>
-    <string name="soter_beta_preview">শুধু প্রিভিউ। এখানে ডিভাইসের সেটিং সংরক্ষণ করা যাবে না।</string>
 </resources>

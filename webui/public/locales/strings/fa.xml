@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">نمایش پیمایش به‌صورت یک پنل شناور</string>
     <string name="settings_liquid_glass">شیشهٔ مایع</string>
     <string name="settings_liquid_glass_desc">افزودن عمق شیشه‌ای نیمه‌شفاف به سطوح</string>
-    <string name="tools_soter_beta">سازگاری Tencent Soter (بتا)</string>
-    <string name="tools_soter_beta_desc">سازگاری آزمایشی با Tencent SoterServer. به Zygisk Next نیاز دارد.</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">فعال‌سازی سازگاری Soter</string>
-    <string name="soter_beta_enabled_desc">به‌طور پیش‌فرض غیرفعال است. تغییرات فقط پس از لمس اعمال ذخیره می‌شوند.</string>
-    <string name="soter_beta_reboot">Zygisk Next را جداگانه نصب و فعال کنید. پس از فعال یا غیرفعال کردن، دستگاه را راه‌اندازی مجدد کنید. سازگاری تأیید نشده است.</string>
-    <string name="soter_beta_saved">تنظیم Soter بتا ذخیره شد. برای اعمال، دستگاه را راه‌اندازی مجدد کنید. سازگاری تأیید نشده است.</string>
-    <string name="soter_beta_preview">فقط پیش‌نمایش است. تنظیمات دستگاه را نمی‌توان اینجا ذخیره کرد.</string>
 </resources>

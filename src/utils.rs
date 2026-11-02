@@ -15,11 +15,6 @@ pub fn get_current_time_in_milliseconds() -> i64 {
     unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut current_time) };
     current_time.tv_sec * 1000 + (current_time.tv_nsec / 1_000_000)
 }
-pub(crate) fn refresh_soter_host() -> Result<()> {
-    stop_processes_matching(|name| name == b"com.tencent.soter.soterserver")
-        .context("Soter settings were saved, but SoterServer could not be refreshed; restart the service before using the new mode")
-}
-
 /// Stop matching Android processes without setting the package's force-stop
 /// flag. Android may rebind services normally with their updated configuration.
 pub(crate) fn stop_processes_matching(matches: impl Fn(&[u8]) -> bool) -> Result<()> {
@@ -77,14 +72,14 @@ mod tests {
     fn refresh_stops_all_exact_hosts_without_stopping_other_processes() {
         let proc_root = tempfile::tempdir().unwrap();
         for (pid, name) in [
-            ("0", "com.tencent.soter.soterserver"),
-            ("1", "com.tencent.soter.soterserver"),
-            ("201", "com.tencent.soter.soterserver"),
-            ("202", "com.tencent.soter.soterserver"),
-            ("203", "com.tencent.soter.soterserver:other"),
-            ("204", "com.tencent.soter.soterserver.extra"),
-            ("205", "com.tencent.mm"),
-            ("self", "com.tencent.soter.soterserver"),
+            ("0", "target"),
+            ("1", "target"),
+            ("201", "target"),
+            ("202", "target"),
+            ("203", "target:other"),
+            ("204", "target.extra"),
+            ("205", "other"),
+            ("self", "target"),
         ] {
             let directory = proc_root.path().join(pid);
             fs::create_dir(&directory).unwrap();
@@ -93,7 +88,7 @@ mod tests {
         let mut stopped = Vec::new();
         stop_processes_in(
             proc_root.path(),
-            |name| name == b"com.tencent.soter.soterserver",
+            |name| name == b"target",
             |pid| {
                 stopped.push(pid);
                 Ok(())

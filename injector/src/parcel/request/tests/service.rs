@@ -41,3 +41,40 @@ fn service_request_accepts_trailing_payload() {
     };
     assert_eq!(key.alias.as_deref(), Some("alias"));
 }
+
+#[test]
+fn service_key_descriptor_accepts_every_nonzero_presence_marker() {
+    use rsbinder::Parcelable;
+
+    let key = KeyDescriptor {
+        domain: crate::android::system::keystore2::Domain::Domain::APP,
+        nspace: 0,
+        alias: Some("alias".to_string()),
+        blob: None,
+    };
+    for presence in [1, 2, -1, i32::MAX] {
+        let parsed = parse_service_request_with_payload(
+            crate::android::system::keystore2::IKeystoreService::transactions::r#getKeyEntry,
+            |parcel| {
+                parcel.write(&presence).unwrap();
+                key.write_to_parcel(parcel).unwrap();
+            },
+        )
+        .expect("every nonzero Java typed-object marker should parse");
+        let ParsedServiceRequest::GetKeyEntry { key } = parsed else {
+            panic!("getKeyEntry request should parse as GetKeyEntry");
+        };
+        assert_eq!(key.alias.as_deref(), Some("alias"));
+    }
+}
+
+#[test]
+fn service_key_descriptor_rejects_null_presence_marker() {
+    assert_status_code(
+        parse_service_request_with_payload(
+            crate::android::system::keystore2::IKeystoreService::transactions::r#getKeyEntry,
+            |parcel| parcel.write(&0i32).unwrap(),
+        ),
+        rsbinder::StatusCode::UnexpectedNull,
+    );
+}

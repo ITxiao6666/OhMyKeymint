@@ -12,8 +12,65 @@ const MAX_REQUEST: usize = 0x9000;
 
 pub(super) fn available() -> bool {
     cfg!(all(target_os = "android", target_arch = "aarch64"))
+        && qualcomm_soc()
         && std::path::Path::new(LIBRARY).is_file()
         && std::path::Path::new(DEVICE).exists()
+}
+
+fn qualcomm_soc() -> bool {
+    [
+        "ro.soc.manufacturer",
+        "ro.vendor.soc.manufacturer",
+        "ro.soc.model",
+        "ro.vendor.soc.model",
+        "ro.vendor.qti.soc_model",
+        "ro.hardware",
+        "ro.boot.hardware",
+        "ro.board.platform",
+        "ro.product.board",
+    ]
+    .into_iter()
+    .filter_map(|property| rsproperties::get::<String>(property).ok())
+    .any(|value| identifies_qualcomm(&value))
+}
+
+fn identifies_qualcomm(value: &str) -> bool {
+    let normalized = value
+        .trim()
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_uppercase();
+    if matches!(
+        normalized.as_str(),
+        "QTI"
+            | "QCOM"
+            | "QUALCOMM"
+            | "QUALCOMM INC"
+            | "QUALCOMM INCORPORATED"
+            | "QUALCOMM TECHNOLOGIES"
+            | "QUALCOMM TECHNOLOGIES INC"
+            | "QUALCOMM TECHNOLOGIES INCORPORATED"
+            | "QUALCOMM TECHNOLOGIES LTD"
+            | "SNAPDRAGON"
+    ) {
+        return true;
+    }
+    let (part, suffix) = normalized.split_once('-').unwrap_or((&normalized, ""));
+    if suffix.len() > 4 || !suffix.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        return false;
+    }
+    ["MSM", "APQ", "SDM", "SM", "QCM", "QCS"].into_iter().any(|prefix| {
+        let Some(number) = part.strip_prefix(prefix) else {
+            return false;
+        };
+        let digits = number.bytes().take_while(u8::is_ascii_digit).count();
+        let expected = if matches!(prefix, "SM" | "QCM" | "QCS") { 4..=4 } else { 3..=4 };
+        expected.contains(&digits)
+            && number.len() - digits <= 2
+            && number[digits..].bytes().all(|byte| byte.is_ascii_uppercase())
+    })
 }
 
 pub(super) fn exchange(request: &[u8]) -> Result<Vec<u8>> {
@@ -262,6 +319,17 @@ mod android {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qualcomm_detection_accepts_bounded_vendor_and_soc_identifiers() {
+        for value in ["QTI", "Qualcomm Technologies, Inc.", "SM8650", "QCM6490", "MSM8998"] {
+            assert!(identifies_qualcomm(value), "{value}");
+        }
+        for value in ["MediaTek", "MT6878", "SM-S928B", "fake-SM8650", "SM865000"] {
+            assert!(!identifies_qualcomm(value), "{value}");
+        }
+    }
+
     #[test]
     fn worker_rejects_arbitrary_and_truncated_vendor_commands() {
         for invalid in [

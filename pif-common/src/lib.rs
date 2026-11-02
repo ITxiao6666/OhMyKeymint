@@ -2,10 +2,6 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-pub mod soter;
-#[cfg(feature = "soter-crypto")]
-pub mod soter_blob;
-
 pub const MAX_CATALOG_BYTES: usize = 64 * 1024;
 pub const MAX_CATALOG_ENTRIES: usize = 64;
 pub const MAX_PROP_BYTES: usize = 4 * 1024;

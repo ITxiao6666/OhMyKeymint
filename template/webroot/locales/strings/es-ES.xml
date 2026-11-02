@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">Mostrar la navegación como un panel flotante</string>
     <string name="settings_liquid_glass">Cristal líquido</string>
     <string name="settings_liquid_glass_desc">Añadir profundidad de cristal translúcido a las superficies</string>
-    <string name="tools_soter_beta">Compatibilidad con Tencent Soter (Beta)</string>
-    <string name="tools_soter_beta_desc">Compatibilidad experimental con Tencent SoterServer. Requiere Zygisk Next.</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">Activar compatibilidad con Soter</string>
-    <string name="soter_beta_enabled_desc">Desactivada de forma predeterminada. Los cambios solo se guardan al pulsar Aplicar.</string>
-    <string name="soter_beta_reboot">Instala y activa Zygisk Next por separado. Reinicia el dispositivo después de activar o desactivar esta función. La compatibilidad no se ha verificado.</string>
-    <string name="soter_beta_saved">Ajuste de Soter Beta guardado. Reinicia el dispositivo para aplicarlo. La compatibilidad no se ha verificado.</string>
-    <string name="soter_beta_preview">Solo vista previa. Aquí no se pueden guardar los ajustes del dispositivo.</string>
 </resources>

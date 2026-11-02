@@ -159,12 +159,4 @@
     <string name="settings_floating_bottom_bar_desc">Εμφάνιση της πλοήγησης ως αιωρούμενο πλαίσιο</string>
     <string name="settings_liquid_glass">Υγρό γυαλί</string>
     <string name="settings_liquid_glass_desc">Προσθήκη ημιδιαφανούς γυάλινου βάθους στις επιφάνειες</string>
-    <string name="tools_soter_beta">Συμβατότητα Tencent Soter (Beta)</string>
-    <string name="tools_soter_beta_desc">Πειραματική συμβατότητα με το Tencent SoterServer. Απαιτεί Zygisk Next.</string>
-    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
-    <string name="soter_beta_enabled">Ενεργοποίηση συμβατότητας Soter</string>
-    <string name="soter_beta_enabled_desc">Απενεργοποιημένη από προεπιλογή. Οι αλλαγές αποθηκεύονται μόνο αφού πατήσετε Εφαρμογή.</string>
-    <string name="soter_beta_reboot">Εγκαταστήστε και ενεργοποιήστε το Zygisk Next ξεχωριστά. Επανεκκινήστε τη συσκευή μετά την ενεργοποίηση ή απενεργοποίηση. Η συμβατότητα δεν έχει επαληθευτεί.</string>
-    <string name="soter_beta_saved">Η ρύθμιση Soter Beta αποθηκεύτηκε. Επανεκκινήστε τη συσκευή για εφαρμογή. Η συμβατότητα δεν έχει επαληθευτεί.</string>
-    <string name="soter_beta_preview">Μόνο προεπισκόπηση. Οι ρυθμίσεις της συσκευής δεν μπορούν να αποθηκευτούν εδώ.</string>
 </resources>
