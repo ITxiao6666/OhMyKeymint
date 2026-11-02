@@ -210,3 +210,49 @@ fn package_user_target_applies_to_shared_uid_with_deny_priority() {
         FilterReason::RejectedByDenylist
     );
 }
+
+#[test]
+fn engineer_mode_requires_exact_uid_sid_process_and_scope() {
+    let package = "com.oplus.engineermode";
+    let sid = "u:r:engineermode_app:s0";
+    let scope = vec![package.to_owned()];
+    let config = FilterConfig::default();
+
+    for uid in [1000, 101_000] {
+        let decision = evaluate_system_app(&scope, &config, uid, sid, package).unwrap();
+        assert!(decision.allowed);
+        assert_eq!(decision.packages, scope);
+    }
+    for uid in [0, 1001, 1017, 2000, 10_000] {
+        assert!(evaluate_system_app(&scope, &config, uid, sid, package).is_none());
+    }
+    for (wrong_sid, wrong_process) in [
+        ("u:r:system_server:s0", package),
+        ("u:r:system_app:s0", package),
+        (sid, "com.oplus.other"),
+        (sid, "com.oplus.engineermode:remote"),
+        (sid, "/system/bin/com.oplus.engineermode"),
+    ] {
+        assert!(evaluate_system_app(&scope, &config, 1000, wrong_sid, wrong_process).is_none());
+    }
+
+    let decision = evaluate_system_app(&[], &config, 1000, sid, package).unwrap();
+    assert_eq!(decision.reason, FilterReason::RejectedNotInScope);
+    assert!(!decision.allowed);
+}
+
+#[test]
+fn engineer_mode_binding_keeps_denylist_and_can_be_disabled() {
+    let package = "com.oplus.engineermode";
+    let sid = "u:r:engineermode_app:s0";
+    let scope = vec![package.to_owned()];
+    let mut config = FilterConfig::default();
+    config.deny_packages.push(package.to_owned());
+    let decision = evaluate_system_app(&scope, &config, 1000, sid, package).unwrap();
+    assert_eq!(decision.reason, FilterReason::RejectedByDenylist);
+    assert!(!decision.allowed);
+
+    config.deny_packages.clear();
+    config.system_app_contexts.clear();
+    assert!(evaluate_system_app(&scope, &config, 1000, sid, package).is_none());
+}

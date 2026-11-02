@@ -981,6 +981,7 @@ scoop = [
   com.google.android.gms
   com.android.vending
   com.eltavine.duckdetector
+  com.oplus.engineermode
 ]
 
 [main]
@@ -1002,6 +1003,9 @@ deny_packages = []
 block_android_package = true
 # Reject callers whose package name cannot be found. Keep false.
 allow_unknown_package = false
+# Exact shared-system-UID application process -> Binder SELinux context.
+# Both this binding and a scoop entry are required.
+system_app_contexts = { "com.oplus.engineermode" = "u:r:engineermode_app:s0" }
 
 [intercept]
 # Route each named KeyStore operation to OMK for an allowed caller.
@@ -1239,6 +1243,20 @@ still rejected when `block_android_package = true`.
 
 This setting is not an "all apps" switch. Keep it `false` unless a maintainer
 has confirmed that a supported app cannot be resolved normally.
+
+#### `system_app_contexts`
+
+This map is a narrowly scoped exception for an application that runs under the
+shared Android system UID. A caller is accepted only when its full process name,
+Binder SELinux SID and an entry in `scoop` all match. The default contains only
+`com.oplus.engineermode = "u:r:engineermode_app:s0"`, allowing supported Oplus
+EngineerMode builds to use OMK for Attestation Key requests. Other UID-1000
+processes, including `system_server`, remain on System.
+
+An explicit empty map disables the exception. Do not add a binding without
+verifying the exact process name, UID and Binder SID on the target firmware.
+Changing this map is hot-reloaded with the rest of `injector.toml`; it does not
+migrate keys between System and OMK.
 
 ### `[intercept]`
 

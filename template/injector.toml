@@ -12,6 +12,7 @@ scoop = [
   com.google.android.gms
   com.android.vending
   com.eltavine.duckdetector
+  com.oplus.engineermode
 ]
 
 [main]
@@ -27,6 +28,10 @@ enabled = true
 deny_packages = []
 block_android_package = true
 allow_unknown_package = false
+# Exact UID-1000 application process -> Binder SELinux context. Both this
+# binding and a scoop entry are required. Other shared-UID/core processes stay
+# on System. An explicit empty map disables this exception.
+system_app_contexts = { "com.oplus.engineermode" = "u:r:engineermode_app:s0" }
 
 [intercept]
 get_security_level = true

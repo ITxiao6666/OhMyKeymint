@@ -93,7 +93,25 @@ fn evaluate_caller_with(
 ) -> crate::filter::FilterDecision {
     let uid = caller.uid as u32;
     let preflight = filter::evaluate(&cfg.scoop, &cfg.filter, uid, PackageResolution::Unknown);
-    if matches!(preflight.reason, FilterReason::RejectedAndroidPackage | FilterReason::Disabled) {
+    if preflight.reason == FilterReason::RejectedAndroidPackage {
+        if cfg.filter.system_app_contexts.values().any(|sid| !sid.is_empty() && sid == &caller.sid)
+        {
+            let decision = i32::try_from(caller.pid)
+                .ok()
+                .filter(|pid| *pid > 0)
+                .and_then(|pid| std::fs::read(format!("/proc/{pid}/cmdline")).ok())
+                .and_then(|cmdline| {
+                    let process =
+                        std::str::from_utf8(cmdline.split(|byte| *byte == 0).next()?).ok()?;
+                    filter::evaluate_system_app(&cfg.scoop, &cfg.filter, uid, &caller.sid, process)
+                });
+            if let Some(decision) = decision {
+                return decision;
+            }
+        }
+        return preflight;
+    }
+    if preflight.reason == FilterReason::Disabled {
         return preflight;
     }
 

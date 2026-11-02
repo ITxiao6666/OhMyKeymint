@@ -41,6 +41,10 @@ fn config_defaults_and_log_levels_match_contract() {
     assert_eq!(config.main.log_level_filter(), LevelFilter::Debug);
     assert!(config.filter.block_android_package);
     assert!(!config.filter.allow_unknown_package);
+    assert_eq!(
+        config.filter.system_app_contexts.get("com.oplus.engineermode").map(String::as_str),
+        Some("u:r:engineermode_app:s0")
+    );
     assert!(config.intercept.get_security_level);
     assert!(config.intercept.get_key_entry);
     assert!(config.intercept.update_subcomponent);
@@ -554,6 +558,7 @@ fn template_scope_matches_default_scope() {
     let template = include_str!("../../../template/injector.toml");
     let parsed = parse_config(template).expect("template injector config should parse");
     assert_eq!(parsed.scoop, default_scoop());
+    assert_eq!(parsed.filter.system_app_contexts, FilterConfig::default().system_app_contexts);
 }
 
 #[test]

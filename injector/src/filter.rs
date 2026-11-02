@@ -1,5 +1,5 @@
 use crate::config::{parse_scoop_target, FilterConfig, ScoopTarget};
-use kmr_common::consts::{AID_APP_START, AID_USER_OFFSET};
+use kmr_common::consts::{AID_APP_START, AID_SYSTEM, AID_USER_OFFSET};
 
 #[cfg(test)]
 mod tests;
@@ -91,4 +91,37 @@ pub fn evaluate(
     };
 
     FilterDecision { allowed: reason == FilterReason::Allowed, reason, packages }
+}
+
+/// Allow one explicitly configured shared-system-UID application without
+/// allowing every UID-1000 process. Both the exact argv[0] package and Binder
+/// SID must match, and list/deny rules remain authoritative.
+pub fn evaluate_system_app(
+    scoop: &[String],
+    config: &FilterConfig,
+    uid: u32,
+    sid: &str,
+    process: &str,
+) -> Option<FilterDecision> {
+    if uid % AID_USER_OFFSET != AID_SYSTEM {
+        return None;
+    }
+    let domain = sid.strip_prefix("u:r:")?.split_once(':')?.0;
+    if !domain.ends_with("_app")
+        || !valid_package_process(process)
+        || config.system_app_contexts.get(process).map(String::as_str) != Some(sid)
+    {
+        return None;
+    }
+    let mut app_filter = config.clone();
+    app_filter.block_android_package = false;
+    Some(evaluate(scoop, &app_filter, uid, PackageResolution::Known(vec![process.to_owned()])))
+}
+
+fn valid_package_process(process: &str) -> bool {
+    process.contains('.')
+        && process.split('.').all(|part| {
+            !part.is_empty()
+                && part.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        })
 }

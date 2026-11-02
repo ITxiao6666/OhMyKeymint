@@ -2,6 +2,11 @@ allow keystore system_file unix_dgram_socket { getattr read recvfrom }
 allow system_file keystore unix_dgram_socket sendto
 allow keystore system_file file { execute getattr map read receive }
 
+# Permit only the verified EngineerMode application domain to expose argv[0]
+# for exact UID-1000 caller binding. Core system domains remain blocked.
+allow keystore engineermode_app dir search
+allow keystore engineermode_app file { getattr open read }
+
 allow { platform_app system_app } system_file file { execute getattr map read receive }
 
 allow crash_dump keystore process *
