@@ -161,7 +161,7 @@
     <string name="settings_liquid_glass_desc">Oberflächen einen transparenten Glaseffekt verleihen</string>
     <string name="tools_soter_beta">Tencent-Soter-Kompatibilität (Beta)</string>
     <string name="tools_soter_beta_desc">Experimentelle Kompatibilität mit Tencent SoterServer. Erfordert Zygisk Next.</string>
-    <string name="soter_beta_warning">Beta software test only: uses a publicly known test key and fixed test CPU ID for dynamically signed key exports. Key state resets when Tencent SoterServer restarts. It provides no fingerprint, TEE or payment authentication and does not change KeyMint.</string>
+    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
     <string name="soter_beta_enabled">Soter-Kompatibilität aktivieren</string>
     <string name="soter_beta_enabled_desc">Standardmäßig deaktiviert. Änderungen werden erst nach Tippen auf Anwenden gespeichert.</string>
     <string name="soter_beta_reboot">Zygisk Next separat installieren und aktivieren. Nach dem Aktivieren oder Deaktivieren das Gerät neu starten. Die Kompatibilität wurde nicht bestätigt.</string>

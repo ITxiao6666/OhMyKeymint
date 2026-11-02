@@ -161,7 +161,7 @@
     <string name="settings_liquid_glass_desc">반투명 유리 효과로 화면에 깊이감을 더합니다</string>
     <string name="tools_soter_beta">Tencent Soter 호환성 (베타)</string>
     <string name="tools_soter_beta_desc">Tencent SoterServer용 실험적 호환 기능입니다. Zygisk Next가 필요합니다.</string>
-    <string name="soter_beta_warning">Beta software test only: uses a publicly known test key and fixed test CPU ID for dynamically signed key exports. Key state resets when Tencent SoterServer restarts. It provides no fingerprint, TEE or payment authentication and does not change KeyMint.</string>
+    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
     <string name="soter_beta_enabled">Soter 호환성 사용</string>
     <string name="soter_beta_enabled_desc">기본적으로 꺼져 있습니다. 적용을 눌러야 변경 사항이 저장됩니다.</string>
     <string name="soter_beta_reboot">Zygisk Next를 별도로 설치하고 활성화하세요. 기능을 켜거나 끈 후 기기를 다시 시작하세요. 호환성은 검증되지 않았습니다.</string>

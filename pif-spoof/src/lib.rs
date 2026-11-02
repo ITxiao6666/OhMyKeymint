@@ -26,6 +26,10 @@ use zygisk_api::{
 
 use libc::{c_char, c_void};
 
+#[path = "soter/attk.rs"]
+mod attk;
+#[path = "soter/ids.rs"]
+mod ids;
 #[cfg(target_arch = "aarch64")]
 mod property_area;
 mod soter;
@@ -240,7 +244,7 @@ impl ZygiskModule for PifSpoofModule {
         mut env: JNIEnv<'a>,
         _args: &'a AppSpecializeArgs<'a>,
     ) {
-        soter::activate();
+        soter::activate(&env);
         let Some((profile, target)) =
             self.profile.lock().ok().and_then(|mut current| current.take())
         else {

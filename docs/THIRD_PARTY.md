@@ -127,6 +127,12 @@ are mock responses, not genuine attestation or payment credentials.
 The release includes this attribution in `THIRD_PARTY_LICENSES/D-soter.txt` and
 the Apache-2.0 terms in `AOSP.Apache-license-2.0.txt`.
 
+The Tencent Soter compatibility handler also incorporates the reply-state,
+session-signing, device-identity and extra-parameter corrections from
+`947409161/OhMyKeymint` commit `34d4fee68f07a637cf46c89391b05f08ecdc8200`.
+The commit's unrelated removal of per-application routing was not adopted;
+OMK's current scoop and per-method routing rules remain authoritative.
+
 ## Qualcomm Soter software TA
 
 The Qualcomm Soter HAL software TA and Binder service are adapted from the

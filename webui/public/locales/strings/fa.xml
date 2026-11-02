@@ -161,7 +161,7 @@
     <string name="settings_liquid_glass_desc">افزودن عمق شیشه‌ای نیمه‌شفاف به سطوح</string>
     <string name="tools_soter_beta">سازگاری Tencent Soter (بتا)</string>
     <string name="tools_soter_beta_desc">سازگاری آزمایشی با Tencent SoterServer. به Zygisk Next نیاز دارد.</string>
-    <string name="soter_beta_warning">Beta software test only: uses a publicly known test key and fixed test CPU ID for dynamically signed key exports. Key state resets when Tencent SoterServer restarts. It provides no fingerprint, TEE or payment authentication and does not change KeyMint.</string>
+    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
     <string name="soter_beta_enabled">فعال‌سازی سازگاری Soter</string>
     <string name="soter_beta_enabled_desc">به‌طور پیش‌فرض غیرفعال است. تغییرات فقط پس از لمس اعمال ذخیره می‌شوند.</string>
     <string name="soter_beta_reboot">Zygisk Next را جداگانه نصب و فعال کنید. پس از فعال یا غیرفعال کردن، دستگاه را راه‌اندازی مجدد کنید. سازگاری تأیید نشده است.</string>

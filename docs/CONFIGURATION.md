@@ -419,8 +419,12 @@ process refresh. The spoof is process-local: it does not call `resetprop`,
 change global Android properties, or change values under OMK's `[device]`
 section.
 
-**Fix Tencent Soter Server (Testing)** is an optional software test implementation
-of the D-soter Binder reply contract. Its switch is disabled by default and is
+**Fix Tencent Soter Server (Testing)** is an optional software implementation
+of the D-soter Binder reply contract. It creates independent per-process ASK
+and AuthKey pairs, signs export and finish results with the matching software
+parent, derives a stable software identity from the device serial sources, and
+matches the vendor missing-key, session and fingerprint-parameter reply shapes.
+Its switch is disabled by default and is
 independent of PIF, `scoop`,
 and all KeyMint routing and key storage. Applying the switch atomically stores
 one strict `0` or `1` byte in
@@ -738,17 +742,15 @@ represented as `4f4d4b2d534f46542d544553542d3031` in exported JSON. Key exports
 use the shared length-prefixed JSON codec and an RSA-PSS/SHA-256 signature with
 a 20-byte salt and SHA-256 MGF1, using BoringSSL through its Rust interface.
 The software TA generates RSA-2048 keys with exponent 65537 and stores unencrypted
-PKCS#8 private PEM and SPKI public PEM; loading preserves the existing key identity.
-Signatures are generated over each exported JSON body, including
-the requested UID, a positive monotonically increasing per-UID counter, and
-the auth-key alias where applicable. Exports identify this implementation with
-`software_test: true` and `key_source: "public_test_fixture"`.
-
-Signing sessions have distinct IDs and use a bounded in-memory table. No
-fingerprint capability is provided: `finishSign` returns `-26` and empty data
-for an available session, or `-1000` for an unknown or consumed session. Extra
-fingerprint parameters return a present parcelable with a null value rather
-than a fabricated sensor type or position.
+PKCS#8 private DER and SPKI public DER; loading preserves the existing key identity.
+Signatures are generated over each exported JSON body, including the requested
+UID, a positive monotonically increasing per-UID counter, and the auth-key alias
+where applicable. Signing sessions have distinct IDs, are consumed once, and
+use a bounded in-memory table. `finishSign` signs the challenge-bound result
+with the selected AuthKey. Missing keys return `-6`, and unknown or consumed
+sessions return `-1000`. The supported `fingerprint_type` extra parameter
+reports the vendor-compatible under-screen value; unsupported parameters remain
+null.
 
 Diagnostics use the `OhMyKeymint-Soter` logcat tag. Loading, disabled state,
 companion failures and hook installation are logged separately. Each method
@@ -758,9 +760,9 @@ logged. To inspect an affected device after rebooting and invoking its Soter
 client, run `adb logcat -d -s OhMyKeymint-Soter:I`. An installation message alone
 does not establish that requests reached the handler.
 
-The exported signatures are valid only under the publicly known software test
-key. They do not establish hardware key provenance, authorize fingerprints,
-repair payments, or supply Play Integrity verdicts. Real TEE, KeyMint and
+The ATTK fixture is public and all ASK/AuthKey material is generated in the
+application process. The replies do not establish hardware key provenance,
+restore a damaged TEE, or supply Play Integrity verdicts. Real TEE, KeyMint and
 vendor HAL paths remain unchanged. Saving a switch confirms only that the
 preference was saved, not that device compatibility was verified. The feature
 is experimental; no supported-OS-wide validation is implied. Disabling and

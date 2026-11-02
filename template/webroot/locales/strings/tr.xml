@@ -161,7 +161,7 @@
     <string name="settings_liquid_glass_desc">Yüzeylere yarı saydam cam derinliği ekle</string>
     <string name="tools_soter_beta">Tencent Soter uyumluluğu (Beta)</string>
     <string name="tools_soter_beta_desc">Tencent SoterServer için deneysel uyumluluk. Zygisk Next gerektirir.</string>
-    <string name="soter_beta_warning">Beta software test only: uses a publicly known test key and fixed test CPU ID for dynamically signed key exports. Key state resets when Tencent SoterServer restarts. It provides no fingerprint, TEE or payment authentication and does not change KeyMint.</string>
+    <string name="soter_beta_warning">Testing only: simulates vendor SOTER replies with per-process software keys and a device-derived identifier. It does not restore hardware TEE provenance and compatibility is not guaranteed.</string>
     <string name="soter_beta_enabled">Soter uyumluluğunu etkinleştir</string>
     <string name="soter_beta_enabled_desc">Varsayılan olarak kapalıdır. Değişiklikler yalnızca Uygula'ya dokunduktan sonra kaydedilir.</string>
     <string name="soter_beta_reboot">Zygisk Next'i ayrıca yükleyip etkinleştirin. Etkinleştirdikten veya devre dışı bıraktıktan sonra cihazı yeniden başlatın. Uyumluluk doğrulanmadı.</string>
