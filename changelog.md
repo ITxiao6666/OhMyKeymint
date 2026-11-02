@@ -1,5 +1,1 @@
-- 移除 Tencent Soter、微信支付指纹修复和远程 SOTER 接管功能
-- 同步本机 RKP Keybox 签发兼容，支持更多系统 RKP APK 路径
-- 自动添加仅选择最新安装的应用，包名页面区分已选择与未选择
-- 修复 Java Parcel 非零对象标记导致的 OMK/System 路由分裂
-- 清除 GMS 缓存增加二次确认，防止误触
+适配 Oplus/OnePlus 工程模式 Attestation Key 请求，通过精确 UID、进程名和 Binder SELinux SID 绑定允许已选中的 EngineerMode 使用 OMK，其他共享系统 UID 进程保持原厂路由。
