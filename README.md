@@ -21,6 +21,7 @@ Zygisk 相关功能需另行安装并启用 Zygisk Next。
 - RSA / EC Keybox 导入与证书链信息查看。
 - 安全补丁同步与恢复、Pixel PIF 配置及本机 RKP Keybox 签发
 - 运行状态诊断、主题与语言设置。
+- SOTER 本地随机身份、按应用选择与 32/36 位 CPU-ID 覆盖。
 
 Keybox 至少需要一个完整的 RSA 或 EC 条目，私钥必须与证书链匹配。
 仅含 EC 条目时，RSA 密钥的认证证书也使用该 EC 私钥和证书链签名。

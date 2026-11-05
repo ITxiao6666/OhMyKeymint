@@ -254,12 +254,9 @@ the registered TEE and StrongBox KeyMint services and the matching
 optional StrongBox service is shown as unregistered. These checks do not issue
 an attestation challenge, contact an RKP provisioning server, or certify
 hardware-backed operation. A vendor KeyMint process is not used as evidence
-that OMK itself is running. The Keybox inspector shows public
-certificate-chain metadata (algorithm and chain length) and each certificate's
-subject, validity dates, and serial number without exposing private
-keys or relay credentials. The expandable chain view presents the root first,
-uses the current interface language for date formatting, and keeps dates in
-UTC. A diagnostic read failure is reported in the UI and does not change runtime
+that OMK itself is running. The current-device-status card shows service state
+only, without Keybox certificate-chain details or a separate inspector request.
+A diagnostic read failure is reported in the UI and does not change runtime
 routing.
 
 The injector daemon waits for keystore2 to appear and retries injection after
@@ -1390,6 +1387,78 @@ the two global runtime properties and the defaults snapshot described above.
 Persistent native save paths validate the complete candidate before writing and
 use atomic replacement. Successful saves enter the applicable watcher hot-reload
 path.
+
+## Oplus engineering key-state display
+
+The existing Zygisk payload has an independent compatibility hook for the exact
+com.oplus.engineermode main process. If a supplied app-data directory belongs
+to another package, the hook is not installed. This behavior does not depend
+on PIF profiles, KeyMint package selection or the local SOTER master switch.
+No engineering hook is installed in subprocesses or other applications.
+
+After specialization it obtains
+vendor.oplus.hardware.cryptoeng.ICryptoeng/default through ServiceManager.
+Only synchronous BinderProxy.transactNative code 1 calls on that exact Binder
+object, with non-null request and reply Parcels, receive a synthetic status 0
+and four zero bytes. Other Binders, methods and one-way calls retain their
+original behavior. An unavailable service leaves the application unchanged;
+JNI reply failures propagate as errors rather than reporting success.
+
+This only changes the engineering application's displayed key-state result.
+It does not repair, install or verify a hardware Attestation Key and cannot
+establish TEE health. It requires Zygisk and a new engineering-app process
+using the updated module. No new persistent state is created.
+
+## Local SOTER identities
+
+Tools > Local SOTER identities manages a separate local software identity
+store. Add generates a random 16-byte-format device ID (eight leading zero
+hex characters and 24 random hex characters) and a new RSA-2048 ATTK using
+BoringSSL. Each identity has an independent ledger with per-UID ASK/AuthKey
+material, counters and sessions. No private key is returned to the WebUI.
+Fresh installations have no predefined identity. Each user creates random
+identities explicitly with Add; opening this page does not generate one.
+
+Use the app row's SOTER settings to assign an identity to one exact
+package@Android-user target, independently of KeyMint scoop selection. A
+32- or 36-character hexadecimal CPU-ID override is optional. Device ID replies
+return the decoded 16/18 bytes; ASK/AuthKey exports use the same hex value.
+Changing an app's CPU-ID clears only that caller's ASK/AuthKey and sessions
+within that identity; counters are preserved. Unselected apps use stock SOTER.
+Shared UID packages must agree on their complete identity and override policy;
+ambiguous shared UIDs are not taken over.
+
+The master switch defaults off. Turning it off retains local identities and app
+assignments, while newly observed requests use the original SOTER path.
+Configuration errors do not select another identity. Local keys are software
+keys, and CPU-ID is a SOTER protocol field, not a physical CPU modification.
+Factory ATTK provisioning operations remain native. The current local broker
+does not supply verifiable biometric evidence, so finishSign returns -26. This
+identity implementation cannot currently complete fingerprint-payment signing.
+
+The native root supervisor injects only the exact ARM64
+com.tencent.soter.soterserver process and intercepts supported vendor HAL
+requests during the selected app's Binder call. This requires a working
+Tencent service and a supported vendor AIDL/HIDL path. A saved switch or
+generated identity does not establish device support or payment acceptance.
+
+All new SOTER data is root-owned under
+/data/misc/keystore/omk/data/soter/ with directory mode 0700 and file mode
+0600. identities.json stores public identity metadata and app policy. Each
+opaque identity ID names a private JSON ledger. Adding an identity is explicit;
+opening the dialog creates no files. No remote relay, imported factory private
+keys or application-preference clearing is part of this feature.
+
+Each identity has a Delete action with explicit confirmation. Deletion removes
+its private ledger (including keys and sessions) and all app assignments to that
+identity; those apps return to stock SOTER. Other identities and KeyMint Keybox
+data are unchanged. Deletion cannot be undone. Policy is revoked before the
+private ledger is unlinked; an unlink failure is reported and can be retried.
+
+Root helper commands are --webui-get-soter-local and
+--webui-set-soter-local-base64. The latter accepts a bounded Base64 JSON
+change: enabled, add, remove (identity ID), or app. Master state, identity creation and app saves
+are independent changes serialized with the private directory lock.
 
 ## Local RKP Keybox issuance
 

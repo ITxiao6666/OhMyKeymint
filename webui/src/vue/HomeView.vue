@@ -1,17 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import {
-  MiuixBasicComponent,
   MiuixButton,
   MiuixCard,
   MiuixIcon,
   MiuixProgressIndicator,
   MiuixTopAppBar,
 } from 'miuix-vue'
-import { ExpandMore, Info } from 'miuix-vue/icons'
+import { Info } from 'miuix-vue/icons'
 import type {
   DiagnosticsState,
-  KeyboxInspector,
   KeyboxLevel,
   KeyboxRevocationStatus,
   KeyboxSource,
@@ -27,7 +25,6 @@ const props = defineProps<{
   keyboxSource: KeyboxSource
   keyboxLevel: KeyboxLevel
   keyboxRevocation: KeyboxRevocationStatus
-  keyboxInspector: KeyboxInspector | null
   diagnostics: DiagnosticsState | null
   diagnosticsStatus: 'loading' | 'ready' | 'error'
   teeStatus: TeeStatus
@@ -38,15 +35,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   refreshDiagnostics: []
 }>()
-
-const expandedKeyboxChains = ref(new Set<string>())
-
-function toggleKeyboxChain(algorithm: string): void {
-  const expanded = new Set(expandedKeyboxChains.value)
-  if (expanded.has(algorithm)) expanded.delete(algorithm)
-  else expanded.add(algorithm)
-  expandedKeyboxChains.value = expanded
-}
 
 function tr(key: string, fallback: string, ...args: unknown[]): string {
   const value = i18n.t(key, ...args)
@@ -112,21 +100,6 @@ const teeState = computed(() => ({
   error: { label: tr('home_status_error', 'Needs attention'), tone: 'error' },
 })[props.teeStatus])
 
-const keyboxChains = computed(() => {
-  const inspector = props.keyboxInspector
-  if (!inspector) return []
-  return [inspector.rsa, inspector.ec]
-    .filter((chain): chain is NonNullable<typeof chain> => chain !== null)
-    .map(chain => ({
-      ...chain,
-      certificates: [...chain.certificates].reverse().map(certificate => ({
-        ...certificate,
-        validFromLabel: certificateDate(certificate.valid_from),
-        validUntilLabel: certificateDate(certificate.valid_until),
-      })),
-    }))
-})
-
 const serviceRows = computed(() => {
   if (!props.diagnostics) return []
   return [
@@ -163,29 +136,6 @@ function diagnosticStatusLabel(status: string, hardware = false): string {
 
 function diagnosticTone(status: string): string {
   return status === 'error' ? 'error' : 'muted'
-}
-
-// Language selection reloads the WebUI; one formatter serves this view.
-const certificateDateFormatter = new Intl.DateTimeFormat(i18n.lang, {
-  timeZone: 'UTC',
-  year: 'numeric',
-  month: 'long',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hourCycle: 'h23',
-})
-
-function certificateDate(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  const parts = certificateDateFormatter.formatToParts(date)
-  if (i18n.lang.startsWith('zh')) {
-    const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find(value => value.type === type)?.value ?? ''
-    return `${part('year')}年${date.getUTCMonth() + 1}月${part('day')}日 ${part('hour')}:${part('minute')}:${part('second')} UTC`
-  }
-  return `${parts.map(part => part.value).join('')} UTC`
 }
 
 </script>
@@ -229,8 +179,7 @@ function certificateDate(value: string): string {
     <MiuixCard class="diagnostics-card" press-feedback="none">
       <header class="diagnostics-heading">
         <div>
-          <h2>{{ tr('home_diagnostics_title', 'Device diagnostics') }}</h2>
-          <span>{{ tr('home_diagnostics_desc', 'Runtime services and installed Keybox details') }}</span>
+          <h2>{{ tr('home_diagnostics_title', 'Current device status') }}</h2>
         </div>
         <MiuixButton
           type="default"
@@ -271,72 +220,6 @@ function certificateDate(value: string): string {
           </dd>
         </div>
       </dl>
-      <p class="diagnostics-muted diagnostics-note">{{ tr('tools_diagnostics_note', 'HAL and RKP checks query registered AIDL services. Availability does not verify hardware-backed attestation or remote provisioning.') }}</p>
-
-      <div class="keybox-inspector">
-        <h3>{{ tr('home_keybox_inspector', 'Keybox certificates') }}</h3>
-        <p v-if="!keyboxInspector" class="diagnostics-muted">
-          {{ tr('home_keybox_inspector_unavailable', 'Certificate details unavailable') }}
-        </p>
-        <p v-else-if="keyboxChains.length === 0" class="diagnostics-muted">
-          {{ tr('home_keybox_inspector_empty', 'No certificate chains found') }}
-        </p>
-        <div v-else class="keybox-chains">
-          <div v-for="chain in keyboxChains" :key="chain.algorithm" class="keybox-chain">
-            <MiuixBasicComponent
-              :title="chain.algorithm"
-              :summary="tr('home_keybox_chain_length', '%s certificates', chain.chain_length)"
-              clickable
-              :aria-expanded="expandedKeyboxChains.has(chain.algorithm)"
-              :aria-controls="`keybox-chain-details-${chain.algorithm}`"
-              @click="toggleKeyboxChain(chain.algorithm)"
-            >
-              <template #end>
-                <MiuixIcon
-                  class="keybox-chain__expand"
-                  :class="{ 'is-expanded': expandedKeyboxChains.has(chain.algorithm) }"
-                  :icon="ExpandMore"
-                  :size="22"
-                />
-              </template>
-            </MiuixBasicComponent>
-            <div
-              :id="`keybox-chain-details-${chain.algorithm}`"
-              class="keybox-chain__collapse"
-              :class="{ 'is-expanded': expandedKeyboxChains.has(chain.algorithm) }"
-              :aria-hidden="!expandedKeyboxChains.has(chain.algorithm)"
-            >
-              <div class="keybox-certificates">
-                <article
-                  v-for="(certificate, index) in chain.certificates"
-                  :key="`${chain.algorithm}-${certificate.serial}-${index}`"
-                  class="keybox-certificate"
-                >
-                  <h4>{{ tr('home_keybox_certificate_number', 'Certificate %s', index + 1) }}</h4>
-                  <dl class="keybox-certificate__details">
-                    <div>
-                      <dt>{{ tr('home_keybox_subject', 'Subject') }}</dt>
-                      <dd>{{ certificate.subject }}</dd>
-                    </div>
-                    <div>
-                      <dt>{{ tr('home_keybox_valid_from', 'Not before') }}</dt>
-                      <dd>{{ certificate.validFromLabel }}</dd>
-                    </div>
-                    <div>
-                      <dt>{{ tr('home_keybox_valid_until', 'Not after') }}</dt>
-                      <dd>{{ certificate.validUntilLabel }}</dd>
-                    </div>
-                    <div>
-                      <dt>{{ tr('home_keybox_serial', 'Serial number') }}</dt>
-                      <dd>{{ certificate.serial }}</dd>
-                    </div>
-                  </dl>
-                </article>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </MiuixCard>
 
   </section>

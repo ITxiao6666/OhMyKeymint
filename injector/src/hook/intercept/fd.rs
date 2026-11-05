@@ -369,6 +369,9 @@ impl Drop for BinderIoctlGuard {
         drop(state);
         drop(registry);
         if let Some(connection) = retired {
+            if crate::hook::soter::enabled() {
+                crate::hook::soter::retire_connection(connection);
+            }
             retire_binder_connection_publications(connection);
         }
         unsafe {

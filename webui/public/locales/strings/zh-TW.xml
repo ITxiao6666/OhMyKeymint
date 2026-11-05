@@ -193,4 +193,20 @@
     <string name="rkp_repair_warning">僅限相容的驍龍裝置。原廠工具可能永久修改 persist/TEE，失敗或逾時也可能已寫入，不保證可還原或修復成功。正常裝置勿用，請勿盲目重試。</string>
     <string name="rkp_repair_confirm">確定</string>
     <string name="rkp_tool_completed">原廠工具回報執行完成；RKP憑證下發與金鑰認證效果仍需另外驗證。</string>
+    <string name="soter_local_title">SOTER 本機身分</string>
+    <string name="soter_local_delete">刪除</string>
+    <string name="soter_local_delete_confirm">確定刪除</string>
+    <string name="soter_local_delete_warning">將永久刪除此身分的金鑰及簽章工作階段，關聯 APP 恢復原廠 SOTER。其他身分與 Keybox 不受影響，刪除後無法恢復。</string>
+    <string name="soter_local_tool_desc">新增本機隨機身分，依 APP 設定 CPU-ID。</string>
+    <string name="soter_local_desc">本機隨機簽章憑證和 CPU-ID，可用於檢測器測試，不支援指紋支付驗證。</string>
+    <string name="soter_local_enabled">啟用 SOTER</string>
+    <string name="soter_local_enabled_desc">僅作用於個別分配身分的 APP，關閉後恢復原廠 SOTER 路徑。</string>
+    <string name="soter_local_random">本機隨機身分</string>
+    <string name="soter_local_add">新增本機隨機身分</string>
+    <string name="soter_local_stock">保持原廠 SOTER</string>
+    <string name="soter_cpu_override">CPU-ID 偽裝（選填）</string>
+    <string name="soter_cpu_placeholder">留空使用所選身分的 CPU-ID</string>
+    <string name="soter_cpu_invalid">CPU-ID 必須為 32 或 36 位十六進位字元。</string>
+    <string name="soter_local_empty">請先在工具 → SOTER 本機身分中新增隨機身分。</string>
+    <string name="soter_local_inactive">SOTER 總開關未啟用，請在工具中開啟後生效。</string>
 </resources>

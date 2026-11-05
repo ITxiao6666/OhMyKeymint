@@ -19,6 +19,7 @@ pub mod ipc;
 pub mod legacy;
 pub mod logging;
 pub mod parcel;
+mod soter_watch;
 pub mod sys;
 pub mod tracker;
 pub mod utils;
@@ -177,6 +178,17 @@ fn handle_webui_config_command() -> Option<Result<String, String>> {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--soter-watch") {
+        if std::env::args().count() != 2 {
+            std::process::exit(2);
+        }
+        logging::init_logger_fallback(LevelFilter::Info);
+        if let Err(error) = soter_watch::run() {
+            error!("Local SOTER supervisor failed: {error:#}");
+            std::process::exit(2);
+        }
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--auto-targets-watch") {
         if std::env::args().count() != 2 {
             eprintln!("--auto-targets-watch does not accept arguments");
@@ -299,6 +311,23 @@ pub extern "C" fn entry(handle: *const c_void) -> bool {
         return false;
     }
     true
+}
+
+/// # Safety
+/// The root injector transfers two distinct owned connected socket descriptors.
+#[no_mangle]
+pub unsafe extern "C" fn soter_entry(_handle: *const c_void, auth: i32, calls: i32) -> bool {
+    use std::os::{fd::FromRawFd, unix::net::UnixStream};
+    logging::init_logger_fallback(LevelFilter::Info);
+    let auth = UnixStream::from_raw_fd(auth);
+    let calls = UnixStream::from_raw_fd(calls);
+    match hook::soter::initialize(auth, calls) {
+        Ok(()) => true,
+        Err(error) => {
+            error!("Local SOTER initialization failed: {error:#}");
+            false
+        }
+    }
 }
 
 #[cfg(test)]

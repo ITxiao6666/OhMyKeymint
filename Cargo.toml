@@ -1,6 +1,6 @@
 [package]
 name = "OhMyKeymint"
-version = "1.3.5"
+version = "1.4.2"
 edition = "2021"
 license-file = "LICENSE.md"
 
@@ -9,6 +9,7 @@ name = "keymint"
 path = "src/main.rs"
 
 [dependencies]
+soter-ta = { path = "soter-ta", version = "0.1.0" }
 kmr-derive = { path = "derive", version = "0.1.0" }
 kmr-common = { path = "common", version = "0.1.0" }
 kmr-crypto-boring = { path = "boringssl", version = "0.1.0" }
@@ -77,6 +78,7 @@ members = [
   "injector",
   "pif-common",
   "pif-spoof",
+  "soter-ta",
 ]
 
 [patch.crates-io]

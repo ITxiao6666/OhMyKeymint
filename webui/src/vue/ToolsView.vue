@@ -19,6 +19,7 @@ export type ToolEvent =
   | 'clearGmsCache'
   | 'repairRkp'
   | 'issueRkp'
+  | 'openSoterLocal'
 
 type BusyPatch = 'sync' | 'restore' | null
 
@@ -37,6 +38,7 @@ const emit = defineEmits<{
   clearGmsCache: []
   repairRkp: []
   issueRkp: []
+  openSoterLocal: []
 }>()
 
 function runTool(event: ToolEvent): void {
@@ -49,6 +51,7 @@ function runTool(event: ToolEvent): void {
     case 'clearGmsCache': emit('clearGmsCache'); break
     case 'repairRkp': emit('repairRkp'); break
     case 'issueRkp': emit('issueRkp'); break
+    case 'openSoterLocal': emit('openSoterLocal'); break
   }
 }
 
@@ -70,6 +73,12 @@ const groups = [
   {
     title: tr('tools_key_management', 'Key management'),
     items: [
+      {
+        event: 'openSoterLocal' as const,
+        icon: BankCards,
+        title: tr('soter_local_title', 'Local SOTER identities'),
+        summary: tr('soter_local_tool_desc', 'Create random local identities and set app CPU-ID overrides.'),
+      },
       {
         event: 'installKeybox' as const,
         icon: Replace,

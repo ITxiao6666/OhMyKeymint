@@ -114,7 +114,7 @@
     <string name="home_spoofed_device">伪装设备指纹</string>
     <string name="home_module_status">模块状态</string>
     <string name="home_status_loading">正在检查</string>
-    <string name="home_diagnostics_title">设备诊断</string>
+    <string name="home_diagnostics_title">当前设备状态</string>
     <string name="home_diagnostics_desc">运行服务和已安装的 Keybox 详情</string>
     <string name="home_diagnostics_error">无法加载诊断信息</string>
     <string name="home_diag_keymint">OMK KeyMint</string>
@@ -263,4 +263,20 @@
     <string name="rkp_import_confirm">替换当前Keybox</string>
     <string name="rkp_import_running">正在校验并导入选中的Keybox…</string>
     <string name="rkp_import_completed">已导入暂存的RKP Keybox。</string>
+    <string name="soter_local_title">SOTER 本地身份</string>
+    <string name="soter_local_tool_desc">添加本地随机身份，按 APP 配置 CPU-ID 伪装。</string>
+    <string name="soter_local_desc">本地随机签名证书和 CPU-ID，可用于检测器测试，不支持指纹支付认证。</string>
+    <string name="soter_local_enabled">启用 SOTER</string>
+    <string name="soter_local_enabled_desc">仅作用于单独分配身份的 APP，关闭后恢复原厂 SOTER 路径。</string>
+    <string name="soter_local_random">本地随机身份</string>
+    <string name="soter_local_add">添加本地随机身份</string>
+    <string name="soter_local_delete">删除</string>
+    <string name="soter_local_delete_confirm">确定删除</string>
+    <string name="soter_local_delete_warning">将永久删除此身份的密钥和签名会话，关联 APP 恢复原厂 SOTER。其他身份及 Keybox 不受影响，删除后无法恢复。</string>
+    <string name="soter_local_stock">保持原厂 SOTER</string>
+    <string name="soter_cpu_override">CPU-ID 伪装（可选）</string>
+    <string name="soter_cpu_placeholder">留空使用所选身份的 CPU-ID</string>
+    <string name="soter_cpu_invalid">CPU-ID 必须为 32 或 36 位十六进制字符。</string>
+    <string name="soter_local_empty">请先在工具 → SOTER 本地身份中添加随机身份。</string>
+    <string name="soter_local_inactive">SOTER 总开关未启用，请在工具中开启后生效。</string>
 </resources>

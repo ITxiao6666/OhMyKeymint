@@ -143,6 +143,30 @@ OMK's existing Google root pins. It does not copy Duck's simulated-device
 issuance, seed/identity storage, arbitrary endpoint selection or automatic
 import behavior. The Java bridge contains no network or private-key logic.
 
+## SOTER local identities and CPU-ID overrides
+
+The native HAL hook and local state machine derive from Ommega
+(AGPL-3.0-or-later), including c6172dc553543aa8eea1b7e03cd50c2ff6f1efb1.
+The local random identity policy references Andrea-lyz/ommega commits
+4721358e and 55e7dec9, reviewed through
+9583e028 (master on November 5, 2026). Each local identity owns random CPU-ID
+and signing material. OMK uses its existing BoringSSL Rust interfaces.
+
+Per-application CPU-ID mapping and support for both 32 and 36 hex characters
+are adapted from the user-provided tricky-soter-service-1.9.2 source,
+soter/src/hook/soter_local.rs and soter/src/local_support.rs, under
+AGPL-3.0-or-later. OMK resolves package/user policy in the privileged broker,
+keeps new files in its private data directory, and does not copy the source's
+factory-key imports, C++ host, preference deletion or
+remote forwarding. Attribution is shipped in
+THIRD_PARTY_LICENSES/SOTER-local.txt.
+
+The app-local Oplus EngineerMode cryptoeng display hook references
+host/module.cpp in the same user-provided source (AGPL-3.0-or-later). OMK
+implements it in Rust inside the existing Zygisk payload, without a new
+companion protocol or native runtime component. It synthesizes the selected
+engineering display response only; it does not provision hardware keys.
+
 ## Native HTTPS client
 
 The security-patch and PIF fingerprint WebUI actions use the Rust

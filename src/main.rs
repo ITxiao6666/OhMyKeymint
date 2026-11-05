@@ -878,6 +878,39 @@ fn handle_local_rkp_command(
 }
 
 fn main() {
+    if let Some(command) = std::env::args().nth(1).filter(|value| {
+        value == "--webui-get-soter-local" || value == "--webui-set-soter-local-base64"
+    }) {
+        let result = (|| -> Result<String, String> {
+            if unsafe { libc::geteuid() } != 0 {
+                return Err("SOTER management requires root".into());
+            }
+            let args: Vec<String> = std::env::args().skip(2).collect();
+            if command == "--webui-get-soter-local" && args.is_empty() {
+                return soter_ta::identities::public_json();
+            }
+            if command == "--webui-set-soter-local-base64"
+                && args.len() == 1
+                && args[0].len() <= 8192
+            {
+                let raw = BASE64_STANDARD
+                    .decode(&args[0])
+                    .map_err(|_| "Invalid SOTER request encoding")?;
+                let change = serde_json::from_slice::<soter_ta::identities::Change>(&raw)
+                    .map_err(|_| "Invalid SOTER management request")?;
+                return soter_ta::identities::change(change);
+            }
+            Err("Invalid SOTER command arguments".into())
+        })();
+        match result {
+            Ok(value) => println!("{value}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
     if let Some(result) = handle_webui_diagnostics_command()
         .or_else(|| handle_webui_app_patch_command(std::env::args().skip(1)))
         .or_else(|| handle_local_rkp_command(std::env::args().skip(1)))

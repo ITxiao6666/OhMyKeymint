@@ -44,6 +44,16 @@ pub(super) use fd::{
 };
 pub(super) use ioctl::new_ioctl;
 
+pub(super) fn native_submission(fd: c_int, reply: bool, expects_reply: bool) {
+    ioctl::read::record_transaction_completion(fd, reply, expects_reply, None);
+}
+pub(super) fn native_read(fd: c_int, command: u32) {
+    ioctl::read::observe_native_completion(fd, command);
+}
+pub(super) fn native_pending(connection: BinderStateKey) -> bool {
+    PENDING_TRANSACTION_COMPLETIONS
+        .with(|pending| pending.borrow().get(&connection).is_some_and(|queue| !queue.is_empty()))
+}
 mod fd;
 mod ioctl;
 #[cfg(test)]
@@ -399,6 +409,9 @@ fn binder_state_key(fd: c_int) -> BinderStateKey {
 }
 
 fn reset_current_thread_binder_state(connection: BinderStateKey) {
+    if super::soter::enabled() {
+        super::soter::reset_thread(connection);
+    }
     ioctl::abort_prepared_bc_replies_for_connection(connection);
     clear_binder_fd_thread_state(connection);
     PENDING_IOCTL_COPYBACKS.with(|pending| {
@@ -420,6 +433,9 @@ fn forget_current_thread_binder_fd(fd: c_int, retired: Option<BinderStateKey>) {
     if let Some(connection) = retired {
         reset_current_thread_binder_state(connection);
         if binder_connection_cleanup_ready(connection) {
+            if super::soter::enabled() {
+                super::soter::retire_connection(connection);
+            }
             retire_binder_connection_publications(connection);
         }
     }

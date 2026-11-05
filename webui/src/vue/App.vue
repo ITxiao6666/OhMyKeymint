@@ -15,7 +15,6 @@ import { afterPaint, AppList, type AppListSnapshot } from '../app_list/app_list'
 import {
   Cli,
   type DiagnosticsState,
-  type KeyboxInspector,
   type KeyboxRevocationStatus,
   type RkpIssuedArtifact,
   type RkpProtocol,
@@ -29,6 +28,7 @@ import { isDev } from '../utils/dev'
 import HomeView, { type KeyboxStatus, type ModuleStatus, type TeeStatus } from './HomeView.vue'
 import PifFingerprintDialog from './PifFingerprintDialog.vue'
 import SettingsView from './SettingsView.vue'
+import SoterIdentityDialog from './SoterIdentityDialog.vue'
 import TargetsView from './TargetsView.vue'
 import ToolsView, { type ToolEvent } from './ToolsView.vue'
 import FileBrowserSheet from './FileBrowserSheet.vue'
@@ -53,7 +53,6 @@ const keyboxStatus = ref<KeyboxStatus>('loading')
 const keyboxSource = ref<'google_hardware' | 'google_remote' | 'unknown'>('unknown')
 const keyboxLevel = ref<'tee' | 'strongbox' | 'unknown'>('unknown')
 const keyboxRevocation = ref<KeyboxRevocationStatus>('not_checked')
-const keyboxInspector = shallowRef<KeyboxInspector | null>(null)
 const diagnostics = shallowRef<DiagnosticsState | null>(null)
 const diagnosticsStatus = ref<'loading' | 'ready' | 'error'>('loading')
 const teeStatus = ref<TeeStatus>('loading')
@@ -76,6 +75,8 @@ const rkpIssueError = ref('')
 const rkpIssuedArtifacts = ref<RkpIssuedArtifact[]>([])
 const pendingRkpImport = ref<RkpIssuedArtifact | null>(null)
 const pifOpen = ref(false)
+const soterLocalOpen = ref(false)
+const soterLocalDialog = ref<InstanceType<typeof SoterIdentityDialog> | null>(null)
 const keyboxOpen = ref(false)
 const selectedKeybox = ref<{ name: string, contents: Uint8Array } | null>(null)
 const keyboxBusy = ref(false)
@@ -307,6 +308,7 @@ function onTargetsOverlayClose(): void {
 }
 
 function handleEscape(): void {
+  if (soterLocalOpen.value) { soterLocalDialog.value?.requestClose(); return }
   if (rkpIssueOpen.value && rkpIssueBusy.value) return
   if (targetsOpen.value && targetsView.value?.dismissOverlay()) return
   if (history.size > 0) history.back()
@@ -358,25 +360,6 @@ async function refreshIdentity(force = false): Promise<void> {
     keyboxSource.value = 'google_remote'
     keyboxLevel.value = 'tee'
     keyboxRevocation.value = 'not_listed'
-    keyboxInspector.value = {
-      valid: true,
-      bundled: false,
-      rsa: null,
-      ec: {
-        algorithm: 'EC',
-        chain_length: 3,
-        serials: ['01', '02', '03'],
-        leaf_subject: 'CN=Demo keybox',
-        leaf_issuer: 'CN=Demo issuer',
-        valid_from: '2026-01-01T00:00:00Z',
-        valid_until: '2036-01-01T00:00:00Z',
-        certificates: [
-          { serial: '01', subject: 'CN=Demo keybox', issuer: 'CN=Demo issuer', valid_from: '2026-01-01T00:00:00Z', valid_until: '2036-01-01T00:00:00Z' },
-          { serial: '02', subject: 'CN=Demo issuer', issuer: 'CN=Demo root', valid_from: '2025-01-01T00:00:00Z', valid_until: '2040-01-01T00:00:00Z' },
-          { serial: '03', subject: 'CN=Demo root', issuer: 'CN=Demo root', valid_from: '2024-01-01T00:00:00Z', valid_until: '2044-01-01T00:00:00Z' },
-        ],
-      },
-    }
     teeStatus.value = 'normal'
     securityPatch.value = '2026-08-01'
     spoofedDevice.value = 'Google Pixel 9 Pro'
@@ -433,11 +416,9 @@ async function refreshDiagnostics(): Promise<void> {
   }
 
   await afterPaint()
-  const [inspector, state] = await Promise.allSettled([
-    cli.getKeyboxInspector(),
+  const [state] = await Promise.allSettled([
     cli.getDiagnostics(),
   ])
-  if (inspector.status === 'fulfilled') keyboxInspector.value = inspector.value
   if (state.status === 'fulfilled') {
     diagnostics.value = state.value
     diagnosticsStatus.value = 'ready'
@@ -635,6 +616,7 @@ function onTool(event: ToolEvent): void {
     case 'clearGmsCache': gmsConfirmOpen.value = true; break
     case 'repairRkp': rkpError.value = ''; rkpOpen.value = true; break
     case 'issueRkp': void openRkpIssue(); break
+    case 'openSoterLocal': soterLocalOpen.value = true; break
   }
 }
 
@@ -722,6 +704,25 @@ watch(pifOpen, open => {
     })
   } else if (!open && overlayHistory.delete('pif-fingerprint')) history.consume('pif-fingerprint')
 })
+watch(soterLocalOpen, open => {
+  if (open && !overlayHistory.has('soter-local')) {
+    overlayHistory.add('soter-local')
+    history.push('soter-local', () => {
+      overlayHistory.delete('soter-local')
+      if (soterLocalDialog.value?.requestClose() === false) {
+        void nextTick(() => {
+          if (soterLocalOpen.value) {
+            overlayHistory.add('soter-local')
+            history.push('soter-local', () => {
+              overlayHistory.delete('soter-local')
+              soterLocalDialog.value?.requestClose()
+            })
+          }
+        })
+      }
+    })
+  } else if (!open && overlayHistory.delete('soter-local')) history.consume('soter-local')
+})
 watch(keyboxOpen, open => {
   if (open && !overlayHistory.has('keybox')) {
     overlayHistory.add('keybox')
@@ -776,7 +777,6 @@ watch(rkpImportConfirmOpen, open => {
           :keybox-source="keyboxSource"
           :keybox-level="keyboxLevel"
           :keybox-revocation="keyboxRevocation"
-          :keybox-inspector="keyboxInspector"
           :diagnostics="diagnostics"
           :diagnostics-status="diagnosticsStatus"
           :tee-status="teeStatus"
@@ -799,6 +799,7 @@ watch(rkpImportConfirmOpen, open => {
           @clear-gms-cache="onTool('clearGmsCache')"
           @repair-rkp="onTool('repairRkp')"
           @issue-rkp="onTool('issueRkp')"
+          @open-soter-local="onTool('openSoterLocal')"
         />
       </Transition>
       <Transition name="page-switch">
@@ -1004,5 +1005,6 @@ watch(rkpImportConfirmOpen, open => {
       </div>
     </MiuixDialog>
     <MiuixSnackbarHost />
+    <SoterIdentityDialog ref="soterLocalDialog" v-model="soterLocalOpen" :cli="cli" />
   </div>
 </template>

@@ -17,6 +17,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rustc-link-arg-bin=inject=-Wl,--export-dynamic-symbol=entry");
+    println!("cargo:rustc-link-arg-bin=inject=-Wl,--export-dynamic-symbol=soter_entry");
 
     let build_target = std::env::var("TARGET").unwrap_or_else(|_| "unknown-target".to_string());
     let package_version =

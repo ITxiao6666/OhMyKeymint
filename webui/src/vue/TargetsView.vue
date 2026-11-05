@@ -35,6 +35,7 @@ import { type Cli } from '../cli'
 import { i18n } from '../i18n'
 import { isDev } from '../utils/dev'
 import TargetAppRow from './TargetAppRow.vue'
+import SoterIdentityDialog from './SoterIdentityDialog.vue'
 
 interface Props {
   appList: AppList
@@ -86,6 +87,15 @@ const autoEnabled = ref(false)
 const autoStatus = ref<'loading' | 'ready' | 'error'>('loading')
 const autoBusy = ref(false)
 const autoError = ref('')
+const identityOpen = ref(false)
+const identityTarget = ref('')
+const identityDialog = ref<InstanceType<typeof SoterIdentityDialog> | null>(null)
+function openIdentity(entry: SelectableAppEntry): void {
+  systemSheetOpen.value = false
+  menuOpen.value = false
+  identityTarget.value = entry.targetKey
+  identityOpen.value = true
+}
 let disposed = false
 
 async function loadAutoTargets(): Promise<void> {
@@ -236,7 +246,7 @@ watch(() => props.refreshing, refreshing => {
 })
 // A menu followed by the system sheet is one overlay in the parent's history.
 // Watching the combined state also avoids closing a second layer on Android Back.
-watch(() => menuOpen.value || systemSheetOpen.value, open => {
+watch(() => menuOpen.value || systemSheetOpen.value || identityOpen.value, open => {
   if (open) emit('overlay-open')
   else emit('overlay-close')
 })
@@ -394,6 +404,7 @@ function closeSystemApps(): void {
 }
 
 function dismissOverlay(): boolean {
+  if (identityOpen.value) { identityDialog.value?.requestClose(); return true }
   if (systemSheetOpen.value) {
     closeSystemApps()
     return true
@@ -556,6 +567,7 @@ defineExpose({
               :app-name="entry.appName"
               :package-name="entry.packageName"
               @select="setSelected(entry, $event)"
+              @settings="openIdentity(entry)"
             />
           </template>
         </section>
@@ -574,6 +586,7 @@ defineExpose({
               :app-name="entry.appName"
               :package-name="entry.packageName"
               @select="setSelected(entry, $event)"
+              @settings="openIdentity(entry)"
             />
           </template>
         </section>
@@ -591,7 +604,7 @@ defineExpose({
     </main>
 
     <MiuixFloatingActionButton
-      v-show="!systemSheetOpen"
+      v-show="!systemSheetOpen && !identityOpen"
       class="targets-apply"
       :disabled="loading || selectingRecommended || !applyEnabled"
       :aria-label="translate('functional_button_apply', 'Apply')"
@@ -647,6 +660,7 @@ defineExpose({
             :app-name="entry.appName"
             :package-name="entry.packageName"
             @select="setSystemSelected(entry.targetKey, $event)"
+            @settings="openIdentity(entry)"
           />
           </template>
           <div v-if="renderedSystemEntries.length < systemEntries.length" class="app-list-batch-loading" role="status">
@@ -662,6 +676,7 @@ defineExpose({
       </div>
     </MiuixBottomSheet>
 
+    <SoterIdentityDialog ref="identityDialog" v-model="identityOpen" :cli="cli" :target="identityTarget" />
   </section>
 </template>
 

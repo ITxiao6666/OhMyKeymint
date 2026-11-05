@@ -314,34 +314,6 @@ button { touch-action: manipulation; }
 .diagnostics-service dd[data-tone='ok'] { color: var(--m-color-primary); }
 .diagnostics-service dd[data-tone='error'] { color: var(--m-color-error); }
 .diagnostics-service dd small { display: block; margin-top: 2px; color: var(--m-color-on-surface-variant-summary); font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
-.diagnostics-note { padding: 12px 2px 0; line-height: 1.5; }
-.keybox-inspector { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--m-color-outline-variant); }
-.keybox-inspector h3 { margin: 0 0 8px; color: var(--m-color-on-surface); font-size: 14px; line-height: 1.35; }
-.diagnostics-muted { margin: 0; color: var(--m-color-on-surface-variant-summary); font-size: 13px; }
-.keybox-chains { display: grid; gap: 7px; }
-.keybox-chain { min-width: 0; overflow: hidden; border-radius: 12px; background: transparent; }
-.keybox-chain .m-basic-component { min-height: 58px; padding: 10px 12px; }
-.keybox-chain .m-basic-component--clickable::after { content: none; }
-.keybox-chain .m-basic-component--clickable:focus-visible .keybox-chain__expand { box-shadow: 0 0 0 2px var(--m-color-primary); border-radius: 4px; }
-.keybox-chain .m-basic-component__center { min-width: 0; }
-.keybox-chain .m-basic-component__center .m-text:first-child { font-size: 15px; line-height: 1.4; }
-.keybox-chain .m-basic-component__center .m-text:last-child { font-size: 13px; line-height: 1.4; }
-.keybox-chain__expand { color: var(--m-color-on-surface-variant-summary); transition: transform 180ms ease; }
-.keybox-chain__expand.is-expanded { transform: rotate(180deg); }
-.keybox-chain__collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 200ms ease, opacity 160ms ease; }
-.keybox-chain__collapse.is-expanded { grid-template-rows: 1fr; opacity: 1; }
-.keybox-certificates { min-width: 0; min-height: 0; overflow: hidden; padding: 0 12px 12px; }
-.keybox-certificate { min-width: 0; padding: 10px 0; border-top: 1px solid var(--m-color-outline-variant); }
-.keybox-certificate:first-child { padding-top: 2px; border-top: 0; }
-.keybox-certificate h4 { margin: 0 0 8px; color: var(--m-color-on-surface); font-size: 14px; line-height: 1.4; }
-.keybox-certificate__details { min-width: 0; margin: 0; }
-.keybox-certificate__details > div { display: grid; grid-template-columns: minmax(54px, auto) minmax(0, 1fr); gap: 4px 8px; min-width: 0; padding: 0 0 6px; }
-.keybox-certificate__details > div:last-child { padding-bottom: 0; }
-.keybox-certificate__details dt { color: var(--m-color-on-surface-variant-summary); font-size: 13px; line-height: 1.5; }
-.keybox-certificate__details dd { margin: 0; overflow-wrap: anywhere; color: var(--m-color-on-surface); font-size: 14px; line-height: 1.5; }
-@media (prefers-reduced-motion: reduce) {
-  .keybox-chain__expand, .keybox-chain__collapse { transition: none; }
-}
 .preference-section { margin-top: 4px; }
 .preference-section > .m-small-title,
 .settings-section > .m-small-title { padding: 10px 19px 8px; }

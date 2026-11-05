@@ -26,6 +26,7 @@ use zygisk_api::{
 
 use libc::{c_char, c_void};
 
+mod engineer;
 #[cfg(target_arch = "aarch64")]
 mod property_area;
 
@@ -125,6 +126,9 @@ impl ZygiskModule for PifSpoofModule {
     ) {
         let process = read_java_string(&mut env, args.nice_name);
         let data_dir = read_java_string(&mut env, args.app_data_dir);
+        if engineer::selected(process.as_deref(), data_dir.as_deref()) {
+            return;
+        }
         let Some(target) = target_process(process.as_deref(), data_dir.as_deref()) else {
             api.set_option(ZygiskOption::DlCloseModuleLibrary);
             return;
@@ -211,10 +215,16 @@ impl ZygiskModule for PifSpoofModule {
 
     fn post_app_specialize<'a>(
         &self,
-        _api: ZygiskApi<'a, V4>,
+        mut api: ZygiskApi<'a, V4>,
         mut env: JNIEnv<'a>,
-        _args: &'a AppSpecializeArgs<'a>,
+        args: &'a AppSpecializeArgs<'a>,
     ) {
+        let process = read_java_string(&mut env, args.nice_name);
+        let data_dir = read_java_string(&mut env, args.app_data_dir);
+        if engineer::selected(process.as_deref(), data_dir.as_deref()) {
+            engineer::install(&mut api, &mut env);
+            return;
+        }
         let Some((profile, target)) =
             self.profile.lock().ok().and_then(|mut current| current.take())
         else {

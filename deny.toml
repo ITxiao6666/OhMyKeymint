@@ -49,6 +49,10 @@ allow = ["AGPL-3.0-or-later"]
 
 # Mozilla root certificate data used by the existing HTTPS clients.
 [[licenses.exceptions]]
+crate = "soter-ta"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
 crate = "webpki-roots"
 allow = ["CDLA-Permissive-2.0"]
 

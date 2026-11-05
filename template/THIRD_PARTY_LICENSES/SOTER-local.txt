@@ -1,0 +1,23 @@
+SOTER local identity and native HAL compatibility
+
+Derived from Andrea-lyz/ommega and jiyin004-jpg/ommega.
+Authors: jiyin004, Andrea-lyz and upstream contributors.
+License: GNU Affero General Public License, version 3 or later.
+Native wire reference: c6172dc553543aa8eea1b7e03cd50c2ff6f1efb1.
+Per-identity random material policy: 4721358e / 55e7dec9.
+Reviewed through Andrea-lyz/ommega 9583e028 on 2026-11-05.
+Source: https://github.com/Andrea-lyz/ommega
+
+CPU-ID mapping and 32/36-character validation also reference the
+user-provided tricky-soter-service-1.9.2 project, soter/src/hook/soter_local.rs
+and soter/src/local_support.rs (AGPL-3.0-or-later).
+No private key material is bundled. Software identity data is generated on
+the device only after an explicit user action.
+
+OMK modifications: Rust-only root broker, BoringSSL signing, per-user app
+selection, isolated local ledgers, owner-only persistence and MIUIX WebUI.
+
+The independent Oplus EngineerMode cryptoeng display hook also references
+host/module.cpp in tricky-soter-service-1.9.2 (AGPL-3.0-or-later).
+OMK implements the exact-Binder/code-1 response hook in Rust within its
+existing Zygisk payload. This is display compatibility, not key provisioning.

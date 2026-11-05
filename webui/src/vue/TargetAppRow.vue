@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { MiuixCheckboxPreference, MiuixIcon } from 'miuix-vue'
-import { All } from 'miuix-vue/icons'
+import { All, More } from 'miuix-vue/icons'
 
 const props = defineProps<{
   packageName: string
@@ -12,6 +12,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [selected: boolean]
+  settings: []
 }>()
 
 // Keep image decoding feedback local to this row. Updating a shared icon map
@@ -46,6 +47,10 @@ watch(() => props.packageName, () => { iconLoaded.value = false })
         </span>
       </template>
     </MiuixCheckboxPreference>
+    <button type="button" class="target-app-settings" :disabled="disabled"
+      :aria-label="'SOTER: ' + appName" @click="emit('settings')">
+      <MiuixIcon :icon="More" :size="22" />
+    </button>
   </div>
 </template>
 
@@ -68,6 +73,12 @@ watch(() => props.packageName, () => { iconLoaded.value = false })
   overflow: hidden;
   background: transparent;
 }
+
+.target-app-settings { flex: none; width: 44px; border: 0; background: transparent;
+  color: var(--m-color-on-surface-variant-summary); display: grid; place-items: center;
+  -webkit-tap-highlight-color: transparent; }
+.target-app-settings:active { background: color-mix(in srgb, var(--m-color-primary) 10%, transparent); }
+.target-app-settings:focus-visible { outline: 2px solid var(--m-color-primary); outline-offset: -4px; }
 
 .app-icon-frame {
   position: relative;

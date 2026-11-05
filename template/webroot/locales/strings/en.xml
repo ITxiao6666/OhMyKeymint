@@ -114,7 +114,7 @@
     <string name="home_spoofed_device">Spoofed device fingerprint</string>
     <string name="home_module_status">Module status</string>
     <string name="home_status_loading">Checking</string>
-    <string name="home_diagnostics_title">Device diagnostics</string>
+    <string name="home_diagnostics_title">Current device status</string>
     <string name="home_diagnostics_desc">Runtime services and installed Keybox details</string>
     <string name="home_diagnostics_error">Unable to load diagnostics</string>
     <string name="home_diag_keymint">OMK KeyMint</string>
@@ -263,4 +263,20 @@
     <string name="rkp_import_confirm">Replace active Keybox</string>
     <string name="rkp_import_running">Validating and importing the selected Keybox…</string>
     <string name="rkp_import_completed">The staged RKP Keybox was imported.</string>
+    <string name="soter_local_title">Local SOTER identities</string>
+    <string name="soter_local_delete">Delete</string>
+    <string name="soter_local_delete_confirm">Confirm deletion</string>
+    <string name="soter_local_delete_warning">Permanently delete this identity's keys and signing sessions. Assigned apps return to stock SOTER. Other identities and Keybox are unchanged. This cannot be undone.</string>
+    <string name="soter_local_tool_desc">Create random local identities and configure per-app CPU-ID.</string>
+    <string name="soter_local_desc">Local random signing certificates and CPU-ID for detector testing. Fingerprint-payment authentication is not supported.</string>
+    <string name="soter_local_enabled">Enable SOTER</string>
+    <string name="soter_local_enabled_desc">Applies only to apps with an assigned identity. Turning off restores their original SOTER path.</string>
+    <string name="soter_local_random">Local random identity</string>
+    <string name="soter_local_add">Add local random identity</string>
+    <string name="soter_local_stock">Original SOTER</string>
+    <string name="soter_cpu_override">CPU-ID override (optional)</string>
+    <string name="soter_cpu_placeholder">Blank uses the selected identity's CPU-ID</string>
+    <string name="soter_cpu_invalid">CPU-ID must be 32 or 36 hexadecimal characters.</string>
+    <string name="soter_local_empty">Add a local identity from Tools > Local SOTER identities first.</string>
+    <string name="soter_local_inactive">SOTER is disabled. Enable it in Tools for this assignment to take effect.</string>
 </resources>

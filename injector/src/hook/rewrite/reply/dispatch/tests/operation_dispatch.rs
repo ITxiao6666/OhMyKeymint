@@ -292,7 +292,7 @@ fn synthetic_unexpected_null_parse_errors_are_status_replies() {
 
     let security_level_target = LocalBinderTarget { ptr: 0x2238, cookie: 0x6682 };
     let mut invalid_key_request = request_parcel(identify::KEYSTORE_SECURITY_LEVEL_INTERFACE);
-    invalid_key_request.write(&2i32).unwrap();
+    invalid_key_request.write(&0i32).unwrap();
     let (invalid_key_tr, _invalid_key_data) = transaction_for_parcel(
         security_level_target,
         crate::android::system::keystore2::IKeystoreSecurityLevel::transactions::r#deleteKey,

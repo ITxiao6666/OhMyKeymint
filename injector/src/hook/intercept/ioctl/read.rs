@@ -460,3 +460,22 @@ fn complete_failed_transaction_submission(fd: c_int, cmd_nr: u32) {
         );
     }
 }
+
+/// Share the existing completion/terminal-failure state machine with the
+/// SOTER-only role without dispatching Keystore rewrites or service discovery.
+pub(in crate::hook::intercept) fn observe_native_completion(fd: c_int, cmd: u32) {
+    if cmd == BR_TRANSACTION_COMPLETE_CMD {
+        complete_transaction_submission(fd);
+    } else if matches!(
+        _ioc_nr(cmd),
+        BR_DEAD_REPLY_NR
+            | BR_FAILED_REPLY_NR
+            | BR_FROZEN_REPLY_NR
+            | BR_ONEWAY_SPAM_SUSPECT_NR
+            | BR_TRANSACTION_PENDING_FROZEN_NR
+    ) {
+        complete_failed_transaction_submission(fd, _ioc_nr(cmd));
+    } else if _ioc_nr(cmd) == BR_REPLY_NR && _ioc_dir(cmd) == 2 {
+        complete_sync_transaction(fd, SyncTransactionState::AwaitingReply);
+    }
+}
