@@ -109,6 +109,7 @@ chmod 755 "$BINDIR/keymint" "$BINDIR/inject"
 
 ui_print "- Extracting Zygisk PIF payload"
 extract "$ZIPFILE" "zygisk/$ZYGISK_ABI.so" "$MODPATH"
+extract "$ZIPFILE" "libs/$ZYGISK_ABI/libomk_engineer.so" "$MODPATH"
 [ -f "$MODPATH/zygisk/$ZYGISK_ABI.so" ] || abort "! Missing Zygisk PIF payload"
 chmod 755 "$MODPATH/zygisk/$ZYGISK_ABI.so"
 

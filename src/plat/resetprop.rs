@@ -739,14 +739,28 @@ fn start_injector_monitor(command: &'static str, name: &'static str) {
     let module_binary =
         std::path::PathBuf::from(format!("/data/adb/modules/oh_my_keymint/libs/{abi}/inject"));
     if let Err(error) = std::thread::Builder::new().name(name.into()).spawn(move || loop {
-        let binary = sibling.as_ref().filter(|path| path.is_file()).unwrap_or(&module_binary);
-        match Command::new(binary)
-            .uid(kmr_common::consts::AID_ROOT)
-            .arg(command)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .spawn()
-        {
+        // This parent has system EUID and cannot stat /data/adb/omk. Let the
+        // root child attempt the sibling executable instead of misclassifying
+        // its inaccessible parent directory as a missing hot-update binary.
+        let spawn = |binary: &std::path::Path| {
+            Command::new(binary)
+                .uid(kmr_common::consts::AID_ROOT)
+                .arg(command)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .spawn()
+        };
+        let child = match sibling.as_deref() {
+            Some(path) => spawn(path).or_else(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    spawn(&module_binary)
+                } else {
+                    Err(error)
+                }
+            }),
+            None => spawn(&module_binary),
+        };
+        match child {
             Ok(mut child) => {
                 let _ = child.wait();
             }

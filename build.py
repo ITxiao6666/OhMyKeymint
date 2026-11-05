@@ -247,6 +247,13 @@ def copy_zygisk_payload(library: Path, abi: str, stage_dir: Path) -> None:
     destination = payload_dir / f"{abi}.so"
     shutil.copy2(library, destination)
     print(f"Copied {library} to {destination}")
+    bridge_root = TARGET_ROOT / "engineer-bridge" / ABI_TO_TARGET[abi]
+    bridge = bridge_root / "native/libomk_engineer.so"
+    if not bridge.is_file():
+        raise FileNotFoundError(f"Engineer bridge is missing: {bridge}")
+    bridge_dest = stage_dir / "libs" / abi / "libomk_engineer.so"
+    shutil.copy2(bridge, bridge_dest)
+    shutil.copytree(bridge_root / "licenses", stage_dir / "THIRD_PARTY_LICENSES/engineer", dirs_exist_ok=True)
 
 
 def copy_template_files(stage_dir: Path) -> None:

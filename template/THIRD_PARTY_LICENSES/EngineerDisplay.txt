@@ -1,0 +1,22 @@
+Oplus EngineerMode app-local display bridge
+
+OMK C++/Java bridge: LSPlant integration and in-memory callback, selected only
+by the current OMK configuration. This is not hardware key provisioning.
+
+LSPlant: https://github.com/LSPosed/LSPlant
+Revision: 06bd3412d639d6b0d76fe6c7388066fe44e8963d
+Copyright 2022 LSPosed. LGPL-3.0-or-later.
+DexBuilder: https://github.com/LSPosed/DexBuilder
+Revision: ac7fb2230954ee311808bad469b0db501f31bfb8
+parallel-hashmap: https://github.com/greg7mdp/parallel-hashmap
+Revision: 0cd57d29a959256ed66b2afdd1009928fc625d09
+Dobby Android prefab: https://github.com/vvb2060/dobby-android
+Artifact: io.github.vvb2060.ndk:dobby:1.2, Apache-2.0.
+LLVM libcxx prefab: https://github.com/LSPosed/libcxx
+Artifact: org.lsposed.libcxx:libcxx:30.0.16248370,
+Apache-2.0 WITH LLVM-exception.
+
+Dependency licenses are shipped in THIRD_PARTY_LICENSES/engineer/.
+Pinned source and binary archive hashes and the complete source-build glue
+are in scripts/build_engineer_bridge.py and runtime/engineer/ in this source
+distribution. No private keys or factory material are included in this bridge.

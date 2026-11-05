@@ -127,6 +127,7 @@ impl ZygiskModule for PifSpoofModule {
         let process = read_java_string(&mut env, args.nice_name);
         let data_dir = read_java_string(&mut env, args.app_data_dir);
         if engineer::selected(process.as_deref(), data_dir.as_deref()) {
+            engineer::prepare(&mut api, u32::try_from(*args.uid).unwrap_or(u32::MAX));
             return;
         }
         let Some(target) = target_process(process.as_deref(), data_dir.as_deref()) else {
@@ -1457,6 +1458,7 @@ fn read_java_string(env: &mut JNIEnv<'_>, value: &JString<'_>) -> Option<String>
 fn read_profile_from_companion(
     stream: &mut std::os::unix::net::UnixStream,
 ) -> std::io::Result<Option<PifProfile>> {
+    stream.write_all(&[1])?;
     stream.set_read_timeout(Some(IPC_TIMEOUT))?;
     let mut length = [0u8; 4];
     stream.read_exact(&mut length)?;
@@ -1478,6 +1480,20 @@ fn read_profile_from_companion(
 }
 
 fn companion(stream: &mut std::os::unix::net::UnixStream) {
+    if stream.set_read_timeout(Some(IPC_TIMEOUT)).is_err() {
+        return;
+    }
+    let mut operation = [0];
+    if stream.read_exact(&mut operation).is_err() {
+        return;
+    }
+    if operation == [2] {
+        engineer::serve_selection(stream);
+        return;
+    }
+    if operation != [1] {
+        return;
+    }
     let payload = load_profile_for_companion().unwrap_or_else(|error| {
         log_android(&format!("PIF companion rejected profile: {error}"));
         Vec::new()

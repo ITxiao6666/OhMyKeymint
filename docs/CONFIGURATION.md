@@ -1390,17 +1390,24 @@ path.
 
 ## Oplus engineering key-state display
 
-The existing Zygisk payload has an independent compatibility hook for the exact
-com.oplus.engineermode main process. If a supplied app-data directory belongs
-to another package, the hook is not installed. This behavior does not depend
-on PIF profiles, KeyMint package selection or the local SOTER master switch.
-No engineering hook is installed in subprocesses or other applications.
+The existing Zygisk payload loads an app-local Java display bridge only in the
+exact com.oplus.engineermode main process. Other app-data directories and
+subprocesses are excluded. LSPlant hooks SecurityInterface.isGoogleKeyImport
+before Instrumentation.callApplicationOnCreate, using the real app ClassLoader.
+The root companion
+queries the injector's current parsed configuration for every status check.
+An explicitly selected package, package@user or UID with enabled main/filter
+and permitted system-app/deny policy returns true for this display check.
+When unselected, disabled, denied or unreadable, it invokes the original Java
+check. The companion never returns private configuration or key material.
+The local SOTER switch and PIF profiles do not control this display bridge.
 
 After specialization it obtains
 vendor.oplus.hardware.cryptoeng.ICryptoeng/default through ServiceManager.
 Only synchronous BinderProxy.transactNative code 1 calls on that exact Binder
 object, with non-null request and reply Parcels, receive a synthetic status 0
-and four zero bytes. Other Binders, methods and one-way calls retain their
+and four zero bytes only while that same app-selection policy permits the
+override. Other Binders, methods and one-way calls retain their
 original behavior. An unavailable service leaves the application unchanged;
 JNI reply failures propagate as errors rather than reporting success.
 
@@ -1408,6 +1415,19 @@ This only changes the engineering application's displayed key-state result.
 It does not repair, install or verify a hardware Attestation Key and cannot
 establish TEE health. It requires Zygisk and a new engineering-app process
 using the updated module. No new persistent state is created.
+The Java callback DEX is embedded in the bridge library and loaded
+through InMemoryDexClassLoader. libomk_engineer.so contains LSPlant and the
+pinned Dobby/LLVM C++ runtime and is loaded through the module directory FD
+before app specialization. The engineering application domain may use only its
+inherited Zygisk Unix stream via the module policy; SELinux remains enforcing.
+It changes no APK or global KeyMint validation.
+Changing selection takes effect on the next check without reinstalling the
+bridge; installing a new bridge requires refreshing the Zygisk module image.
+Building the bridge requires NDK r30, CMake 3.28 or newer with Ninja, JDK 9 or
+newer with javac --release 8, and Android Build Tools 35.0.0. The normal Cargo
+build invokes scripts/build_engineer_bridge.py; the module packager includes
+the resulting native library and dependency licenses. Initial dependency
+downloads are checksum-verified and subsequent builds use the target cache.
 
 ## Local SOTER identities
 
@@ -1441,6 +1461,9 @@ com.tencent.soter.soterserver process and intercepts supported vendor HAL
 requests during the selected app's Binder call. This requires a working
 Tencent service and a supported vendor AIDL/HIDL path. A saved switch or
 generated identity does not establish device support or payment acceptance.
+Private transport sockets retain the target SoterServer's SELinux MLS range
+and categories with the system_file socket type. Socket creation context is
+thread-local and restored after each operation; SELinux stays enforcing.
 
 All new SOTER data is root-owned under
 /data/misc/keystore/omk/data/soter/ with directory mode 0700 and file mode

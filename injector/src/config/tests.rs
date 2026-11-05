@@ -605,3 +605,21 @@ fn replace_save_retry_only_retries_read_failures() {
 fn parse_config(contents: &str) -> Result<InjectorConfig, String> {
     parse_versioned_config(contents, true).map(|(config, _)| config)
 }
+#[test]
+fn engineer_display_tracks_explicit_user_selection_and_deny_rules() {
+    let mut config = super::InjectorConfig {
+        scoop: vec!["com.oplus.engineermode@0".into()],
+        ..Default::default()
+    };
+    assert!(super::engineer_display_allowed(&config, 1000));
+    assert!(!super::engineer_display_allowed(&config, 101000));
+    config.scoop.clear();
+    assert!(!super::engineer_display_allowed(&config, 1000));
+    config.scoop.push("com.oplus.engineermode".into());
+    assert!(super::engineer_display_allowed(&config, 101000));
+    config.filter.deny_packages.push("com.oplus.engineermode".into());
+    assert!(!super::engineer_display_allowed(&config, 1000));
+    config.filter.deny_packages.clear();
+    config.main.enabled = false;
+    assert!(!super::engineer_display_allowed(&config, 1000));
+}

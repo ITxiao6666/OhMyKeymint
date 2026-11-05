@@ -121,6 +121,11 @@ fn inject_role(pid: Pid, channels: Option<[i32; 2]>) -> Result<()> {
         crate::soter_watch::identity(pid.as_raw()).as_ref() != Some(expected)
     }) {
         Err(anyhow!("SOTER process identity changed before attachment"))
+    } else if channels.is_some() {
+        (|| {
+            let context = crate::soter_watch::socket_context(pid.as_raw())?;
+            selinux::with_sockcreate_con(&context, || do_inject(pid, &self_path, channels))
+        })()
     } else {
         do_inject(pid, &self_path, channels)
     };
@@ -296,8 +301,10 @@ fn do_inject(pid: Pid, self_path: &std::path::Path, channels: Option<[i32; 2]>) 
         payload_identifier,
         utils::sha256_file(self_path).unwrap_or_else(|_| "<unavailable>".to_string())
     );
-    if let Err(error) = selinux::set_sockcreate_con("u:object_r:system_file:s0") {
-        warn!("sockcreate context setup failed: {error:#}");
+    if channels.is_none() {
+        if let Err(error) = selinux::set_sockcreate_con("u:object_r:system_file:s0") {
+            warn!("sockcreate context setup failed: {error:#}");
+        }
     }
 
     let fd_handoff_addrs = RemoteFdHandoffAddrs {

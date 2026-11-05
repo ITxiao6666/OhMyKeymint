@@ -167,6 +167,16 @@ implements it in Rust inside the existing Zygisk payload, without a new
 companion protocol or native runtime component. It synthesizes the selected
 engineering display response only; it does not provision hardware keys.
 
+The optional app-local Java status bridge uses LSPlant (LGPL-3.0-or-later),
+revision 06bd3412d639d6b0d76fe6c7388066fe44e8963d, and its pinned DexBuilder
+and parallel-hashmap sources. The native inline backend is the upstream
+LSPlant test dependency io.github.vvb2060.ndk:dobby:1.2 (Apache-2.0), with
+org.lsposed.libcxx:libcxx:30.0.16248370 (Apache-2.0 WITH LLVM-exception).
+scripts/build_engineer_bridge.py pins source revisions and archive SHA-256
+digests. Dependencies are cached under target and are never fetched on-device.
+The generated callback and C++ glue only replace the selected engineering
+application's display result, not hardware-key state or attestation validation.
+
 ## Native HTTPS client
 
 The security-patch and PIF fingerprint WebUI actions use the Rust

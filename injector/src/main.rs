@@ -97,6 +97,13 @@ fn handle_webui_config_command() -> Option<Result<String, String>> {
     let command = args.next()?;
 
     match command.as_str() {
+        "--webui-engineer-selected" => {
+            let uid = args.next().and_then(|value| value.parse::<u32>().ok());
+            if unsafe { libc::geteuid() } != 0 || args.next().is_some() || uid.is_none() {
+                return Some(Err("Engineer display selection requires root and one UID".into()));
+            }
+            Some(config::engineer_display_selected(uid.unwrap()).map(|value| value.to_string()))
+        }
         "--webui-get-auto-targets" => {
             if args.next().is_some() {
                 return Some(Err("--webui-get-auto-targets does not accept arguments".into()));

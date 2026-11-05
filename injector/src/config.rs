@@ -386,6 +386,28 @@ pub fn read_scoop_for_webui() -> Result<Vec<String>, String> {
     read_scoop_from_path(&config_path())
 }
 
+/// Read the current explicit EngineerMode selection without seeding state.
+pub(crate) fn engineer_display_selected(uid: u32) -> Result<bool, String> {
+    if uid % 100000 != 1000 {
+        return Ok(false);
+    }
+    let config = load_from_path(&config_path(), false).map_err(|error| format!("{error:?}"))?;
+    Ok(engineer_display_allowed(&config, uid))
+}
+
+fn engineer_display_allowed(config: &InjectorConfig, uid: u32) -> bool {
+    config.main.enabled
+        && config.filter.enabled
+        && crate::filter::evaluate_system_app(
+            &config.scoop,
+            &config.filter,
+            uid,
+            "u:r:engineermode_app:s0",
+            "com.oplus.engineermode",
+        )
+        .is_some_and(|decision| decision.allowed)
+}
+
 pub fn replace_scoop_for_webui(packages: Vec<String>) -> Result<(), String> {
     replace_scoop_at_path(&config_path(), packages)
 }
