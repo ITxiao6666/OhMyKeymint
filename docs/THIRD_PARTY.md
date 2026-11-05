@@ -145,6 +145,11 @@ import behavior. The Java bridge contains no network or private-key logic.
 
 ## SOTER local identities and CPU-ID overrides
 
+The EngineerMode gen_unique_id policy rule is adapted from Andrea-lyz/ommega
+commit 9583e028449f8d2c5cfef97f6f86d42aa840c738 (AGPL-3.0-or-later),
+by Yunzhe Liao / Andrea-lyz. It grants only the engineering app domain the
+existing unique-ID attestation permission; it does not bypass KeyMint checks.
+
 The native HAL hook and local state machine derive from Ommega
 (AGPL-3.0-or-later), including c6172dc553543aa8eea1b7e03cd50c2ff6f1efb1.
 The local random identity policy references Andrea-lyz/ommega commits

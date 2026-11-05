@@ -1421,6 +1421,11 @@ pinned Dobby/LLVM C++ runtime and is loaded through the module directory FD
 before app specialization. The engineering application domain may use only its
 inherited Zygisk Unix stream via the module policy; SELinux remains enforcing.
 It changes no APK or global KeyMint validation.
+The module policy grants engineermode_app the keystore2_key gen_unique_id
+permission required by the engineering application's INCLUDE_UNIQUE_ID
+attestation test. The standard unique-ID permission gate remains intact;
+ordinary app domains do not receive this permission. Policy is installed with
+the module, independently of its app-local display override selection.
 Changing selection takes effect on the next check without reinstalling the
 bridge; installing a new bridge requires refreshing the Zygisk module image.
 Building the bridge requires NDK r30, CMake 3.28 or newer with Ninja, JDK 9 or

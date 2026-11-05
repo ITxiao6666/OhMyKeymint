@@ -15,6 +15,10 @@ allow keystore engineermode_app file { getattr open read }
 # The exact EngineerMode process keeps its inherited Zygisk companion channel.
 allow engineermode_app zygote unix_stream_socket { getattr read write getopt setopt shutdown }
 
+# EngineerMode INCLUDE_UNIQUE_ID attestation (Attestation Key ID Modify).
+# Ommega 9583e028: keep the standard permission gate, grant only this domain.
+allow engineermode_app keystore keystore2_key gen_unique_id
+
 allow crash_dump keystore process *
 
 allow keystore default_android_service service_manager find

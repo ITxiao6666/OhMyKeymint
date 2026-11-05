@@ -6,6 +6,8 @@ License: GNU Affero General Public License, version 3 or later.
 Native wire reference: c6172dc553543aa8eea1b7e03cd50c2ff6f1efb1.
 Per-identity random material policy: 4721358e / 55e7dec9.
 Reviewed through Andrea-lyz/ommega 9583e028 on 2026-11-05.
+EngineerMode gen_unique_id policy rule: 9583e028449f8d2c5cfef97f6f86d42aa840c738,
+Yunzhe Liao / Andrea-lyz, AGPL-3.0-or-later.
 Source: https://github.com/Andrea-lyz/ommega
 
 CPU-ID mapping and 32/36-character validation also reference the
