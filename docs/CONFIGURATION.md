@@ -479,8 +479,8 @@ version = 3
 backend = "injector"
 # KeyMint log detail: off, error, warn, info, debug, or trace.
 log_level = "debug"
-# Insecure biometric compatibility switch. Keep false for normal use.
-force_skip_system_biometric_hat_verification = false
+# Insecure biometric compatibility switch. Set false to require System MAC verification.
+force_skip_system_biometric_hat_verification = true
 # Extra random wait per software TA call: inclusive [minimum, maximum] in ms.
 # These defaults also apply when fields are absent; [0, 0] disables a category.
 ta_operation_delay_ms = [9, 21]
@@ -572,10 +572,12 @@ cannot verify biometric authentication tokens correctly. When `true`, OMK
 accepts a token whose structure is valid without asking System KeyMint to
 verify its authentication code.
 
-Keep it `false` unless a maintainer is diagnosing a confirmed device-specific
-problem. It does not hide root and is not a general fix for fingerprint or
-lock-screen failures. A valid save applies to new checks without restarting
-keymint.
+The default is `true`, including when the field is omitted from `[main]`.
+An explicit `false` requires System KeyMint MAC verification. This compatibility
+default weakens authentication-token verification; use `false` when System
+KeyMint can verify the device's tokens. It does not hide root and is not a
+general fix for fingerprint or lock-screen failures. A valid save applies to
+new checks without restarting keymint.
 
 #### TA delay ranges
 

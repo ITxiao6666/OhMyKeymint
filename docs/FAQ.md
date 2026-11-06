@@ -613,9 +613,10 @@ preserves the System reply for other callers. A stalled synchronous RPC can stil
 wait without a separate timeout. Authentication and lock-state checks apply when
 the operation runs.
 
-Authenticate in the way the app requests and retry promptly. Keep
-`force_skip_system_biometric_hat_verification` at `false` unless a maintainer
-is diagnosing a confirmed device-specific compatibility problem.
+Authenticate in the way the app requests and retry promptly. The compatibility
+setting `force_skip_system_biometric_hat_verification` defaults to `true` and
+skips System KeyMint MAC verification. Set it explicitly to `false` when System
+KeyMint can verify the device's tokens, to retain that verification boundary.
 
 ### Why do logs show `KEY_NOT_FOUND`, RSA errors, or repeated failures?
 

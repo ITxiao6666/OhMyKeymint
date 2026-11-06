@@ -21,8 +21,6 @@ use std::vec;
 fn test_asymmetric_invalid_purposes() {
     for (algorithm, invalid_purpose) in [
         (Algorithm::Rsa, KeyPurpose::AgreeKey),
-        (Algorithm::Ec, KeyPurpose::Encrypt),
-        (Algorithm::Ec, KeyPurpose::Decrypt),
         (Algorithm::Ec, KeyPurpose::WrapKey),
         (Algorithm::MlDsa, KeyPurpose::Encrypt),
         (Algorithm::MlDsa, KeyPurpose::Decrypt),
@@ -103,6 +101,29 @@ fn test_ec_valid_purposes() {
             check_ec_params(EcCurve::P256, &params, SecurityLevel::TrustedEnvironment).unwrap(),
             purposes.first().copied()
         );
+    }
+}
+
+#[test]
+fn test_ec_compatibility_purposes_allow_signing_in_either_order() {
+    for compatibility_purpose in [KeyPurpose::Encrypt, KeyPurpose::Decrypt] {
+        for purposes in
+            [[KeyPurpose::Sign, compatibility_purpose], [compatibility_purpose, KeyPurpose::Sign]]
+        {
+            let params = [
+                KeyParam::EcCurve(EcCurve::P256),
+                KeyParam::Purpose(purposes[0]),
+                KeyParam::Purpose(purposes[1]),
+            ];
+            assert_eq!(
+                check_ec_params(EcCurve::P256, &params, SecurityLevel::TrustedEnvironment).unwrap(),
+                Some(purposes[0])
+            );
+            assert!(matches!(
+                check_ec_gen_params(&params, SecurityLevel::TrustedEnvironment).unwrap(),
+                KeyGenInfo::NistEc(crate::crypto::ec::NistCurve::P256)
+            ));
+        }
     }
 }
 
