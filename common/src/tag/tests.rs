@@ -117,12 +117,65 @@ fn test_ec_compatibility_purposes_allow_signing_in_either_order() {
             ];
             assert_eq!(
                 check_ec_params(EcCurve::P256, &params, SecurityLevel::TrustedEnvironment).unwrap(),
-                Some(purposes[0])
+                Some(KeyPurpose::Sign)
             );
             assert!(matches!(
                 check_ec_gen_params(&params, SecurityLevel::TrustedEnvironment).unwrap(),
                 KeyGenInfo::NistEc(crate::crypto::ec::NistCurve::P256)
             ));
+        }
+    }
+}
+
+#[test]
+fn test_ec_redundant_encryption_purposes_have_narrow_scope() {
+    for curve in [EcCurve::P224, EcCurve::P256, EcCurve::P384, EcCurve::P521, EcCurve::Curve25519] {
+        for extra in [KeyPurpose::Encrypt, KeyPurpose::Decrypt] {
+            for purposes in [
+                vec![extra],
+                vec![KeyPurpose::Verify, extra],
+                vec![extra, KeyPurpose::AttestKey],
+                vec![KeyPurpose::AttestKey, extra],
+                vec![extra, KeyPurpose::AgreeKey],
+                vec![KeyPurpose::Sign, extra, KeyPurpose::AgreeKey],
+                vec![KeyPurpose::Sign, extra],
+                vec![extra, KeyPurpose::Sign],
+            ] {
+                let params: Vec<_> = purposes.iter().copied().map(KeyParam::Purpose).collect();
+                let result = check_ec_params(curve, &params, SecurityLevel::TrustedEnvironment);
+                if curve == EcCurve::P256
+                    && purposes.contains(&KeyPurpose::Sign)
+                    && !purposes.contains(&KeyPurpose::AgreeKey)
+                {
+                    assert_eq!(result.unwrap(), Some(KeyPurpose::Sign));
+                } else {
+                    let error = result.expect_err("unsupported EC purpose combination accepted");
+                    assert!(matches!(
+                        error.kind(),
+                        crate::ErrorKind::Hal(ErrorCode::IncompatiblePurpose, _)
+                    ));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_curve25519_verify_does_not_select_the_key_type() {
+    for private_purpose in [KeyPurpose::Sign, KeyPurpose::AttestKey, KeyPurpose::AgreeKey] {
+        for purposes in
+            [[KeyPurpose::Verify, private_purpose], [private_purpose, KeyPurpose::Verify]]
+        {
+            let params = [
+                KeyParam::EcCurve(EcCurve::Curve25519),
+                KeyParam::Purpose(purposes[0]),
+                KeyParam::Purpose(purposes[1]),
+            ];
+            let info = check_ec_gen_params(&params, SecurityLevel::TrustedEnvironment).unwrap();
+            match private_purpose {
+                KeyPurpose::AgreeKey => assert!(matches!(info, KeyGenInfo::X25519)),
+                _ => assert!(matches!(info, KeyGenInfo::Ed25519)),
+            }
         }
     }
 }

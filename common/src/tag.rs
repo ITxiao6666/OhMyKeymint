@@ -584,7 +584,9 @@ fn check_ec_import_params(
         KeyFormat::Raw if get_ec_curve(params)? == EcCurve::Curve25519 => {
             // Raw key import must specify the curve (and the only valid option is Curve25519
             // currently).
-            if primary_purpose(params)? == KeyPurpose::AgreeKey {
+            if check_ec_params(EcCurve::Curve25519, params, sec_level)?
+                == Some(KeyPurpose::AgreeKey)
+            {
                 (ec.import_raw_x25519_key(key_data, params)?, EcCurve::Curve25519)
             } else {
                 (ec.import_raw_ed25519_key(key_data, params)?, EcCurve::Curve25519)
@@ -595,7 +597,9 @@ fn check_ec_import_params(
             let curve = match &key {
                 KeyMaterial::Ec(curve, CurveType::Nist, _) => *curve,
                 KeyMaterial::Ec(EcCurve::Curve25519, CurveType::EdDsa, _) => {
-                    if primary_purpose(params)? == KeyPurpose::AgreeKey {
+                    if check_ec_params(EcCurve::Curve25519, params, sec_level)?
+                        == Some(KeyPurpose::AgreeKey)
+                    {
                         return Err(km_err!(
                             IncompatiblePurpose,
                             "can't use EdDSA key for key agreement"
@@ -604,7 +608,9 @@ fn check_ec_import_params(
                     EcCurve::Curve25519
                 }
                 KeyMaterial::Ec(EcCurve::Curve25519, CurveType::Xdh, _) => {
-                    if primary_purpose(params)? != KeyPurpose::AgreeKey {
+                    if check_ec_params(EcCurve::Curve25519, params, sec_level)?
+                        != Some(KeyPurpose::AgreeKey)
+                    {
                         return Err(km_err!(IncompatiblePurpose, "can't use XDH key for signing"));
                     }
                     EcCurve::Curve25519
@@ -697,6 +703,7 @@ fn check_ec_params(
     let mut seen_attest = false;
     let mut seen_sign = false;
     let mut seen_agree = false;
+    let mut seen_compatibility_purpose = false;
     let mut primary_purpose = None;
     for param in params {
         if let KeyParam::Purpose(purpose) = param {
@@ -705,7 +712,10 @@ fn check_ec_params(
                 KeyPurpose::AgreeKey => seen_agree = true,
                 KeyPurpose::AttestKey => seen_attest = true,
                 KeyPurpose::Verify => {}
-                KeyPurpose::Decrypt | KeyPurpose::Encrypt => {}
+                KeyPurpose::Decrypt | KeyPurpose::Encrypt => {
+                    seen_compatibility_purpose = true;
+                    continue;
+                }
                 _ => {
                     return Err(km_err!(
                         IncompatiblePurpose,
@@ -713,10 +723,20 @@ fn check_ec_params(
                     ));
                 }
             }
-            if primary_purpose.is_none() {
+            if primary_purpose.is_none() || primary_purpose == Some(KeyPurpose::Verify) {
                 primary_purpose = Some(*purpose);
             }
         }
+    }
+    // Tolerate redundant encryption flags only for ordinary P-256 signing keys.
+    // They are not cryptographic operations and must not select the key type.
+    if seen_compatibility_purpose
+        && (curve != EcCurve::P256 || !seen_sign || seen_attest || seen_agree)
+    {
+        return Err(km_err!(
+            IncompatiblePurpose,
+            "redundant EC encryption purposes require a P-256 signing key"
+        ));
     }
     // Keys with Purpose::ATTEST_KEY must have no other purpose.
     if seen_attest && (seen_sign || seen_agree) {

@@ -83,6 +83,19 @@ Key generation and imports delete unpublished TA key blobs on a best-effort
 basis when storage or publication fails. Cleanup failure does not replace the
 original operation error.
 
+## EC signing compatibility
+
+P-256 signing keys may include redundant `Encrypt` and `Decrypt` purposes
+alongside `Sign` (and optionally `Verify`). Those purposes do not select the
+key type or enable EC encryption/decryption operations. Generation and import
+apply the same checks regardless of parameter order. This exception does not
+apply to encryption-only requests, other curves, key-agreement combinations,
+or attestation keys. Curve25519 selects signing/attestation versus agreement
+from its private-key purpose, independently of an accompanying `Verify` tag.
+
+SID, operation challenge, authentication-token MAC and authentication timeouts
+remain enforced when the key's authorization policy requires them.
+
 ## App patch-level profiles
 
 Optional `config.toml` profiles set the patch levels reported and bound into
@@ -569,15 +582,31 @@ package names, signing-certificate bytes, challenges, tokens, or key material.
 
 This is an insecure compatibility switch for a device whose System KeyMint
 cannot verify biometric authentication tokens correctly. When `true`, OMK
-accepts a token whose structure is valid without asking System KeyMint to
-verify its authentication code.
+accepts a directly submitted, structurally valid fingerprint-only token without
+asking System KeyMint to verify its authentication code. Password, combined
+and unknown authenticator types do not receive this exception.
 
 The default is `true`, including when the field is omitted from `[main]`.
-An explicit `false` requires System KeyMint MAC verification. This compatibility
-default weakens authentication-token verification; use `false` when System
+An explicit `false` requires System KeyMint MAC verification for direct tokens.
+This compatibility default weakens authentication-token verification; use `false` when System
 KeyMint can verify the device's tokens. It does not hide root and is not a
 general fix for fingerprint or lock-screen failures. A valid save applies to
 new checks without restarting keymint.
+
+Tokens mirrored after successful System `addAuthToken` ingestion follow the
+separate existing mirror path regardless of this switch. A successful System
+ingestion is not itself proof of a valid hardware MAC. The switch cannot fix
+a failure in EC key creation, mirrored token delivery or key-specific SID,
+challenge, timeout and local-MAC checks.
+
+Logs distinguish `event=auth_token_received` sources (`direct` or
+`system_mirror`), `event=auth_token_verification` modes (`system_mirror`,
+`biometric_compatibility` or `system_mac`), and `event=auth_token_rejected`
+stages (`shape`, `system_mac` or `localization`). A mirror localization failure
+logs `event=auth_token_dropped stage=localization` and preserves System success.
+`event=auth_token_cached stage=localized` confirms local token
+ingestion, not a successful application signature or payment. Token ingestion
+does not log raw MACs, full challenges or secure user/authenticator IDs.
 
 #### TA delay ranges
 

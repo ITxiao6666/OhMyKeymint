@@ -1864,6 +1864,210 @@ pub(crate) mod tests {
         .error_code
     }
     #[test]
+    fn p256_compatibility_keys_sign_only_with_valid_operation_authentication() {
+        use kmr_wire::keymint::{
+            Algorithm, DateTime, Digest, EcCurve, HardwareAuthToken as WireAuthToken,
+            HardwareAuthenticatorType, KeyFormat, KeyPurpose,
+        };
+        use openssl::{ec::EcGroup, ec::EcKey, hash::MessageDigest, nid::Nid, pkey::PKey};
+
+        let mut ta = test_ta();
+        assert_eq!(set_boot_info(&mut ta), 0);
+        assert_eq!(
+            ta.process_req(PerformOpReq::SetHalInfo(SetHalInfoRequest {
+                os_version: 150000,
+                os_patchlevel: 202506,
+                vendor_patchlevel: 20250605,
+            }))
+            .error_code,
+            0
+        );
+        let hmac_key = [0x65; 32];
+        ta.set_device_hmac_key(&hmac_key).unwrap();
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
+        let import_key = PKey::from_ec_key(EcKey::generate(&group).unwrap()).unwrap();
+        let input = b"P-256 compatibility authentication regression";
+
+        for import in [false, true] {
+            for extra in [KeyPurpose::Encrypt, KeyPurpose::Decrypt] {
+                for purposes in [[extra, KeyPurpose::Sign], [KeyPurpose::Sign, extra]] {
+                    let params = vec![
+                        KeyParam::Algorithm(Algorithm::Ec),
+                        KeyParam::EcCurve(EcCurve::P256),
+                        KeyParam::Purpose(purposes[0]),
+                        KeyParam::Purpose(purposes[1]),
+                        KeyParam::Digest(Digest::Sha256),
+                        KeyParam::UserSecureId(13),
+                        KeyParam::UserAuthType(HardwareAuthenticatorType::Fingerprint as u32),
+                        KeyParam::CertificateNotBefore(DateTime { ms_since_epoch: 0 }),
+                        KeyParam::CertificateNotAfter(DateTime {
+                            ms_since_epoch: 2_000_000_000_000,
+                        }),
+                    ];
+                    let response = if import {
+                        ta.process_req(PerformOpReq::DeviceImportKey(ImportKeyRequest {
+                            key_params: params,
+                            key_format: KeyFormat::Pkcs8,
+                            key_data: import_key.private_key_to_pkcs8().unwrap(),
+                            attestation_key: None,
+                        }))
+                    } else {
+                        ta.process_req(PerformOpReq::DeviceGenerateKey(GenerateKeyRequest {
+                            key_params: params,
+                            attestation_key: None,
+                        }))
+                    };
+                    assert_eq!(response.error_code, 0, "{response:?}");
+                    let created = match response.rsp {
+                        Some(PerformOpRsp::DeviceGenerateKey(response)) => response.ret,
+                        Some(PerformOpRsp::DeviceImportKey(response)) => response.ret,
+                        response => panic!("unexpected key creation response: {response:?}"),
+                    };
+                    let cert = openssl::x509::X509::from_der(
+                        &created.certificate_chain[0].encoded_certificate,
+                    )
+                    .unwrap();
+                    let public = cert.public_key().unwrap();
+
+                    for variant in 0..6 {
+                        let begin = ta.process_req(PerformOpReq::DeviceBegin(BeginRequest {
+                            purpose: KeyPurpose::Sign,
+                            key_blob: created.key_blob.clone(),
+                            params: vec![KeyParam::Digest(Digest::Sha256)],
+                            auth_token: None,
+                        }));
+                        assert_eq!(begin.error_code, 0, "{begin:?}");
+                        let operation = match begin.rsp {
+                            Some(PerformOpRsp::DeviceBegin(response)) => response.ret,
+                            response => panic!("unexpected begin: {response:?}"),
+                        };
+                        let mut token = WireAuthToken {
+                            challenge: operation.challenge,
+                            user_id: 11,
+                            authenticator_id: 13,
+                            authenticator_type: HardwareAuthenticatorType::Fingerprint,
+                            timestamp: kmr_wire::secureclock::Timestamp { milliseconds: 1 },
+                            mac: vec![],
+                        };
+                        if variant == 2 {
+                            token.user_id = 17;
+                            token.authenticator_id = 19;
+                        }
+                        if variant == 3 {
+                            token.challenge = operation.challenge.wrapping_add(1);
+                        }
+                        if variant == 5 {
+                            token.authenticator_type = HardwareAuthenticatorType::Password;
+                        }
+                        token.mac = kmr_common::crypto::hmac_sha256(
+                            &BoringHmac,
+                            &hmac_key,
+                            &kmr_ta::hardware_auth_token_mac_input(&token).unwrap(),
+                        )
+                        .unwrap();
+                        if variant == 4 {
+                            token.mac[0] ^= 1;
+                        }
+                        let finish = ta.process_req(PerformOpReq::OperationFinish(FinishRequest {
+                            op_handle: operation.op_handle,
+                            input: Some(input.to_vec()),
+                            signature: None,
+                            auth_token: (variant != 1).then_some(token),
+                            timestamp_token: None,
+                            confirmation_token: None,
+                        }));
+                        if variant == 0 {
+                            assert_eq!(finish.error_code, 0, "{finish:?}");
+                            let signature = match finish.rsp {
+                                Some(PerformOpRsp::OperationFinish(response)) => response.ret,
+                                response => panic!("unexpected finish: {response:?}"),
+                            };
+                            let mut verifier =
+                                openssl::sign::Verifier::new(MessageDigest::sha256(), &public)
+                                    .unwrap();
+                            verifier.update(input).unwrap();
+                            assert!(verifier.verify(&signature).unwrap());
+                        } else {
+                            assert_eq!(
+                                finish.error_code,
+                                ErrorCode::KEY_USER_NOT_AUTHENTICATED.0,
+                                "auth variant {variant}: {finish:?}"
+                            );
+                        }
+                    }
+                    let unsupported = ta.process_req(PerformOpReq::DeviceBegin(BeginRequest {
+                        purpose: extra,
+                        key_blob: created.key_blob,
+                        params: vec![],
+                        auth_token: None,
+                    }));
+                    assert_ne!(unsupported.error_code, 0, "EC encryption must stay unsupported");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn curve25519_import_classifies_private_purpose_independently_of_verify() {
+        use kmr_common::{crypto::CurveType, crypto::KeyMaterial, tag};
+        use kmr_wire::keymint::{Algorithm, EcCurve, KeyFormat, KeyPurpose, SecurityLevel};
+
+        let crypto = test_crypto();
+        for agree in [false, true] {
+            let key = if agree {
+                openssl::pkey::PKey::generate_x25519().unwrap()
+            } else {
+                openssl::pkey::PKey::generate_ed25519().unwrap()
+            };
+            let purpose = if agree { KeyPurpose::AgreeKey } else { KeyPurpose::Sign };
+            for purposes in [[KeyPurpose::Verify, purpose], [purpose, KeyPurpose::Verify]] {
+                for format in [KeyFormat::Raw, KeyFormat::Pkcs8] {
+                    let data = match format {
+                        KeyFormat::Raw => key.raw_private_key().unwrap(),
+                        _ => key.private_key_to_pkcs8().unwrap(),
+                    };
+                    let mut params = vec![
+                        KeyParam::Algorithm(Algorithm::Ec),
+                        KeyParam::EcCurve(EcCurve::Curve25519),
+                        KeyParam::Purpose(purposes[0]),
+                        KeyParam::Purpose(purposes[1]),
+                    ];
+                    let (_, material) = tag::extract_key_import_characteristics(
+                        &crypto,
+                        tag::SecureStorage::Unavailable,
+                        &params,
+                        SecurityLevel::TrustedEnvironment,
+                        format,
+                        &data,
+                    )
+                    .unwrap();
+                    let expected = if agree { CurveType::Xdh } else { CurveType::EdDsa };
+                    assert!(
+                        matches!(material, KeyMaterial::Ec(EcCurve::Curve25519, actual, _) if actual == expected)
+                    );
+                    params.insert(0, KeyParam::Purpose(KeyPurpose::Decrypt));
+                    let error = tag::extract_key_import_characteristics(
+                        &crypto,
+                        tag::SecureStorage::Unavailable,
+                        &params,
+                        SecurityLevel::TrustedEnvironment,
+                        format,
+                        &data,
+                    )
+                    .expect_err("Curve25519 must reject the P-256-only compatibility purpose");
+                    assert!(matches!(
+                        error.kind(),
+                        kmr_common::ErrorKind::Hal(
+                            kmr_wire::keymint::ErrorCode::IncompatiblePurpose,
+                            _
+                        )
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn wrapped_import_consumes_single_use_wrapping_key_only_after_success() {
         use der::{asn1::AnyRef, Decode, Encode, Sequence};
         use kmr_common::{

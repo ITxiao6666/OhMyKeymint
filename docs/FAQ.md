@@ -615,8 +615,11 @@ the operation runs.
 
 Authenticate in the way the app requests and retry promptly. The compatibility
 setting `force_skip_system_biometric_hat_verification` defaults to `true` and
-skips System KeyMint MAC verification. Set it explicitly to `false` when System
-KeyMint can verify the device's tokens, to retain that verification boundary.
+skips System KeyMint MAC verification only for directly submitted,
+fingerprint-only tokens. Password and mixed token types still require
+verification; tokens mirrored after System ingestion use a separate path.
+Set the switch explicitly to `false` when System KeyMint can verify the
+device's tokens, to retain that verification boundary for direct calls.
 
 ### Why do logs show `KEY_NOT_FOUND`, RSA errors, or repeated failures?
 

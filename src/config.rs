@@ -938,7 +938,8 @@ pub struct MainConfig {
     #[serde(deserialize_with = "deserialize_ta_delay_range")]
     pub ta_control_delay_ms: [u16; 2],
     /// Insecure fallback for devices whose system TEE cannot verify HATs.
-    /// When enabled, OMK accepts shape-valid HATs without system KeyMint MAC verification.
+    /// When enabled, direct fingerprint-only HATs skip system KeyMint MAC verification.
+    /// Password and combined token types still require verification; System mirrors are separate.
     pub force_skip_system_biometric_hat_verification: bool,
     /// Retire dedicated ATTEST_KEY entries bound to a previous keybox identity.
     /// Ordinary application keys and passkeys remain usable after a keybox change.

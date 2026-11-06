@@ -292,12 +292,9 @@ impl AuthorizationManager {
         auth_token: &HardwareAuthToken,
     ) -> Result<()> {
         info!(
-            "add_auth_token(challenge={}, userId={}, authId={}, authType={:#x}, timestamp={}ms)",
-            auth_token.challenge,
-            auth_token.userId,
-            auth_token.authenticatorId,
+            "event=auth_token_received source={} authType={:#x}",
+            if ctx.is_some() { "system_mirror" } else { "direct" },
             auth_token.authenticatorType.0,
-            auth_token.timestamp.milliSeconds,
         );
         if auth_token.userId == 0 {
             if ctx.is_some() {
@@ -313,15 +310,32 @@ impl AuthorizationManager {
         // calls only arrive after System returned success, so preserve that result and attempt to
         // localize the token without applying OMK-only shape or MAC checks. Direct service calls
         // retain the stricter OMK boundary checks.
-        validate_auth_token_shape_for_source(ctx, auth_token)?;
-        if should_skip_system_auth_token_verification(ctx) {
+        validate_auth_token_shape_for_source(ctx, auth_token).inspect_err(|error| {
+            log::warn!("event=auth_token_rejected stage=shape: {error:#}");
+        })?;
+        let skip_verification =
+            should_skip_system_auth_token_verification(ctx, auth_token.authenticatorType, || {
+                match config().read() {
+                    Ok(config) => config.main.force_skip_system_biometric_hat_verification,
+                    Err(_) => {
+                        error!("config lock poisoned while checking HAT verification fallback");
+                        false
+                    }
+                }
+            });
+        if skip_verification {
             log::debug!(
-                "system auth token MAC verification skipped for mirrored/config fallback authType={:#x} challengeTag={:04x}",
+                "event=auth_token_verification mode={} authType={:#x} challengeTag={:04x}",
+                if ctx.is_some() { "system_mirror" } else { "biometric_compatibility" },
                 auth_token.authenticatorType.0,
                 challenge_tag(auth_token.challenge),
             );
         } else {
+            log::debug!("event=auth_token_verification mode=system_mac");
             verify_system_auth_token(auth_token)
+                .inspect_err(|error| {
+                    log::warn!("event=auth_token_rejected stage=system_mac: {error:#}");
+                })
                 .context(ks_err!("system KeyMint did not verify the auth token MAC"))?;
         }
 
@@ -329,6 +343,7 @@ impl AuthorizationManager {
             localize_auth_token_for_source(ctx, auth_token, localize_auth_token_for_omk)?
         {
             ENFORCEMENTS.add_auth_token(localized);
+            log::debug!("event=auth_token_cached stage=localized");
         }
         Ok(())
     }
@@ -412,13 +427,16 @@ fn localize_auth_token_for_source(
         Ok(localized) => Ok(Some(localized)),
         Err(error) if ctx.is_some() => {
             log::warn!(
-                "dropping auth token mirrored after System success because OMK localization failed authType={:#x} challengeTag={:04x}: {error:#}",
+                "event=auth_token_dropped stage=localization source=system_mirror authType={:#x} challengeTag={:04x}: {error:#}",
                 auth_token.authenticatorType.0,
                 challenge_tag(auth_token.challenge),
             );
             Ok(None)
         }
-        Err(error) => Err(error),
+        Err(error) => {
+            log::warn!("event=auth_token_rejected stage=localization source=direct: {error:#}");
+            Err(error)
+        }
     }
 }
 
@@ -444,18 +462,17 @@ fn validate_auth_token_shape(auth_token: &HardwareAuthToken) -> Result<()> {
     Ok(())
 }
 
-fn should_skip_system_auth_token_verification(ctx: Option<&CallerInfo>) -> bool {
+fn should_skip_system_auth_token_verification(
+    ctx: Option<&CallerInfo>,
+    auth_type: HardwareAuthenticatorType,
+    compatibility_enabled: impl FnOnce() -> bool,
+) -> bool {
     if ctx.is_some() {
         return true;
     }
 
-    match config().read() {
-        Ok(config) => config.main.force_skip_system_biometric_hat_verification,
-        Err(_) => {
-            error!("config lock poisoned while checking HAT verification fallback");
-            false
-        }
-    }
+    // Password and combined/unknown token types must not inherit a biometric exception.
+    auth_type == HardwareAuthenticatorType::FINGERPRINT && compatibility_enabled()
 }
 
 thread_local! {
@@ -1014,6 +1031,46 @@ mod tests {
         HardwareAuthenticatorType(
             HardwareAuthenticatorType::PASSWORD.0 | HardwareAuthenticatorType::FINGERPRINT.0,
         )
+    }
+
+    #[test]
+    fn direct_hat_compatibility_is_limited_to_fingerprint_tokens() {
+        assert!(should_skip_system_auth_token_verification(
+            None,
+            HardwareAuthenticatorType::FINGERPRINT,
+            || true
+        ));
+        assert!(!should_skip_system_auth_token_verification(
+            None,
+            HardwareAuthenticatorType::FINGERPRINT,
+            || false
+        ));
+        for auth_type in [
+            HardwareAuthenticatorType::PASSWORD,
+            combined_authenticator_type(),
+            HardwareAuthenticatorType::ANY,
+            HardwareAuthenticatorType::NONE,
+            HardwareAuthenticatorType(4),
+        ] {
+            assert!(!should_skip_system_auth_token_verification(None, auth_type, || {
+                panic!("non-biometric tokens must not use the compatibility switch")
+            }));
+        }
+    }
+
+    #[test]
+    fn system_mirrors_do_not_depend_on_the_direct_hat_switch() {
+        let caller = mirrored_caller();
+        for auth_type in [
+            HardwareAuthenticatorType::PASSWORD,
+            HardwareAuthenticatorType::FINGERPRINT,
+            combined_authenticator_type(),
+            HardwareAuthenticatorType(4),
+        ] {
+            assert!(should_skip_system_auth_token_verification(Some(&caller), auth_type, || {
+                panic!("mirrored System success must not depend on direct-call configuration")
+            }));
+        }
     }
 
     #[test]
