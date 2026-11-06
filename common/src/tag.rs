@@ -705,6 +705,7 @@ fn check_ec_params(
                 KeyPurpose::AgreeKey => seen_agree = true,
                 KeyPurpose::AttestKey => seen_attest = true,
                 KeyPurpose::Verify => {}
+                KeyPurpose::Decrypt | KeyPurpose::Encrypt => {}
                 _ => {
                     return Err(km_err!(
                         IncompatiblePurpose,

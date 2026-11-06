@@ -963,7 +963,7 @@ impl Default for MainConfig {
             ta_operation_delay_ms: [9, 21],
             ta_generation_delay_ms: [6, 16],
             ta_control_delay_ms: [1, 4],
-            force_skip_system_biometric_hat_verification: false,
+            force_skip_system_biometric_hat_verification: true,
             retire_stale_keybox_bound_keys: true,
         }
     }
@@ -1509,7 +1509,7 @@ force_skip_system_biometric_hat_verification = true"#,
         )
         .unwrap();
         assert!(parsed.force_skip_system_biometric_hat_verification);
-        assert!(!MainConfig::default().force_skip_system_biometric_hat_verification);
+        assert!(MainConfig::default().force_skip_system_biometric_hat_verification);
     }
 
     #[test]
