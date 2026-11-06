@@ -122,8 +122,9 @@ export type SelectionFilter = 'all' | 'selected' | 'unselected'
 
 /**
  * The WebUI keeps the Android user alongside a package name so entries from
- * different profiles can be selected using the injector's package@user scoop
- * rules. Bare package entries still apply to every Android user.
+ * profiles can be displayed and used by separate per-app feature settings.
+ * The package picker writes all-user package rules; old package@user rules
+ * remain readable until the user explicitly saves.
  */
 export interface PackageUserTarget {
   packageName: string
@@ -247,6 +248,13 @@ export class AppList {
     return [...new Set(this.#config.get('target'))]
   }
 
+  getSelectedIdentityTargets(): string[] {
+    const selected = new Set(this.#config.get('target'))
+    return [...new Set(this.#entries
+      .filter(entry => selected.has(entry.packageName) || selected.has(entry.targetKey))
+      .map(entry => entry.targetKey))]
+  }
+
   getSelectedCount(): number {
     return this.getSelectedPackages().length
   }
@@ -257,37 +265,20 @@ export class AppList {
 
   setSelected(packageName: string, selected: boolean): void {
     if (!isValidPackageName(packageName)) return
-    const targets = new Set(this.#config.get('target'))
-    const changed = selected ? !targets.has(packageName) : targets.has(packageName)
-    if (!changed) return
-
-    if (selected) targets.add(packageName)
-    else targets.delete(packageName)
-    this.#config.set('target', [...targets])
+    const previous = this.#config.get('target')
+    const targets = previous.filter(value => {
+      const target = parseScoopTarget(value)
+      return !target || target.kind === 'uid' || target.packageName !== packageName
+    })
+    if (selected) targets.push(packageName)
+    if (targets.length === previous.length && targets.every((value, index) => value === previous[index])) return
+    this.#config.set('target', targets)
     this.#emitChange()
   }
 
   setTargetSelected(target: PackageUserTarget, selected: boolean): void {
     if (parsePackageUserTarget(target.targetKey) === null) return
-    const targets = new Set(this.#config.get('target'))
-    if (selected) {
-      if (targets.has(target.packageName) || targets.has(target.targetKey)) return
-      targets.add(target.targetKey)
-    } else {
-      const removed = targets.delete(target.targetKey)
-      if (targets.delete(target.packageName)) {
-        // Editing one user of an existing all-user rule makes that package
-        // explicit for the other discovered users. Unmapped per-user and UID
-        // rules remain in the config instead of being discarded by this view.
-        for (const entry of this.#entries) {
-          if (entry.packageName === target.packageName && entry.userId !== target.userId) {
-            targets.add(entry.targetKey)
-          }
-        }
-      } else if (!removed) return
-    }
-    this.#config.set('target', [...targets])
-    this.#emitChange()
+    this.setSelected(target.packageName, selected)
   }
 
   toggleSelected(packageName: string): void {
@@ -306,8 +297,8 @@ export class AppList {
     let changed = false
     for (const entry of this.#entries) {
       if (!recommended.has(entry.packageName)) continue
-      if (targets.has(entry.packageName) || targets.has(entry.targetKey)) continue
-      targets.add(entry.targetKey)
+      if (targets.has(entry.packageName)) continue
+      targets.add(entry.packageName)
       changed = true
     }
     if (!changed) return
@@ -328,11 +319,11 @@ export class AppList {
     const installedSystemApps = new Set(
       this.#entries.filter(entry => entry.isSystem).map(entry => entry.packageName),
     )
-    const checked = new Set(
-      checkedApps.filter(target => (
-        installedSystemTargets.has(target) || installedSystemApps.has(target)
-      )),
-    )
+    const checked = new Set(checkedApps
+      .filter(target => installedSystemTargets.has(target) || installedSystemApps.has(target))
+      .map(value => parseScoopTarget(value)!)
+      .filter(target => target.kind !== 'uid')
+      .map(target => target.packageName))
 
     const targets = new Set(this.#config.get('target'))
     for (const target of [...installedSystemApps, ...installedSystemTargets]) {
@@ -345,6 +336,7 @@ export class AppList {
 
   async save(): Promise<void> {
     await this.#config.write()
+    this.#emitChange()
   }
 
   async #fetch(): Promise<boolean> {

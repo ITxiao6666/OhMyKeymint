@@ -492,10 +492,13 @@ export class Cli {
   async changeSoterLocal(change: { action: 'enabled', enabled: boolean }
     | { action: 'remove', id: string }
     | { action: 'add', name: string }
+    | { action: 'apps', targets: string[], identity: string }
     | { action: 'app', target: string, identity: string | null, cpu_id: string }): Promise<SoterIdentityState> {
+    const encoded = encodeBase64Utf8(JSON.stringify(change))
+    if (encoded.length > 120 * 1024) throw new Error('SOTER request exceeds the command size limit')
     const { keymint } = await this.#getHelperPaths()
     return this.#parseSoterLocal(await this.#run(keymint,
-      ['--webui-set-soter-local-base64', encodeBase64Utf8(JSON.stringify(change))], 256 * 1024))
+      ['--webui-set-soter-local-base64', encoded], 256 * 1024))
   }
 
   #parseSoterLocal(output: string): SoterIdentityState {

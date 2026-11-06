@@ -891,7 +891,7 @@ fn main() {
             }
             if command == "--webui-set-soter-local-base64"
                 && args.len() == 1
-                && args[0].len() <= 8192
+                && args[0].len() <= 120 * 1024
             {
                 let raw = BASE64_STANDARD
                     .decode(&args[0])

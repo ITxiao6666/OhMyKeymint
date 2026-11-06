@@ -461,7 +461,6 @@ fn update_scoop_at_path(path: &Path, delta: ScoopDelta) -> Result<Vec<String>, S
             return Err(format!("invalid caller target in scoop: {target}"));
         }
     }
-    let previous = config.scoop.clone();
     let added = normalize_packages(delta.added);
     let removed = normalize_packages(delta.removed);
     config.scoop.retain(|target| !removed.contains(target));
@@ -473,9 +472,6 @@ fn update_scoop_at_path(path: &Path, delta: ScoopDelta) -> Result<Vec<String>, S
         if !covered && !config.scoop.contains(&target) {
             config.scoop.push(target);
         }
-    }
-    if config.scoop == previous {
-        return Ok(config.scoop);
     }
     let rendered = render_config(&config).map_err(|error| error.to_string())?;
     parse_versioned_config(&rendered, false)?;
@@ -539,22 +535,15 @@ fn render_config(config: &InjectorConfig) -> io::Result<String> {
          # Filter deny settings still apply to every package resolved for the UID.\n\n",
     );
     contents.push_str(&format!("version = {}\n\n", config.version));
-    contents.push_str(
-        "# Add one caller target per line. Blank lines and lines whose first non-space character is # are ignored.\n",
-    );
-    // Keep the package list easy to edit: bare one-package-per-line entries
-    // are accepted by preprocess_config and intentionally omit TOML punctuation.
+    // Emit the upstream-compatible standard TOML array. The reader continues
+    // to accept older line-oriented lists and explicit user/UID selectors.
     contents.push_str("scoop = [\n");
     for package in &config.scoop {
         let package = package.trim();
         contents.push_str("  ");
-        if is_bare_scoop_package(package) {
-            contents.push_str(package);
-        } else {
-            contents.push('"');
-            contents.push_str(&escape_toml_basic_string(package));
-            contents.push_str("\",");
-        }
+        contents.push('"');
+        contents.push_str(&escape_toml_basic_string(package));
+        contents.push_str("\",");
         contents.push('\n');
     }
     contents.push_str("]\n\n");

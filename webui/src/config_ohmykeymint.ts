@@ -1,6 +1,7 @@
 import { Cli } from './cli'
 import { Config } from './config'
 import { isDev } from './utils/dev'
+import { parseScoopTarget } from './package_name'
 
 export class ConfigOhMyKeyMint extends Config {
   readonly #cli: Cli
@@ -36,7 +37,14 @@ export class ConfigOhMyKeyMint extends Config {
     if (!this.#loaded) {
       throw new Error('Saving is disabled until the OMK package list is loaded')
     }
-    const desired = new Set(this.get('target'))
+    // UI-managed package selection follows the upstream all-user format.
+    // Preserve explicit UID rules; legacy package@user entries convert only
+    // when the user explicitly saves, never merely by opening the picker.
+    const desired = new Set(this.get('target').map(value => {
+      const target = parseScoopTarget(value)
+      if (!target) throw new Error('Invalid package selection')
+      return target.kind === 'uid' ? target.target : target.packageName
+    }))
     const added = [...desired].filter(target => !this.#savedTargets.has(target))
     const removed = [...this.#savedTargets].filter(target => !desired.has(target))
     const saved = isDev() ? [...desired] : await this.#cli.updateScoop(added, removed)

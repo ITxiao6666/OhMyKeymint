@@ -67,6 +67,8 @@ pub enum Change {
     Remove { id: String },
     #[serde(rename = "app")]
     App { target: String, identity: Option<String>, cpu_id: String },
+    #[serde(rename = "apps")]
+    Apps { targets: Vec<String>, identity: String },
 }
 
 pub fn valid_cpu_id(value: &str) -> bool {
@@ -304,6 +306,21 @@ fn change_at(root: &Path, change: Change) -> Result<Config, String> {
                 config.apps.remove(&key);
             }
         }
+        Change::Apps { targets, identity } => {
+            if targets.is_empty()
+                || targets.len() > MAX_APPS
+                || targets.iter().any(|key| target(key).is_none())
+                || !config.identities.iter().any(|item| item.id == identity)
+            {
+                return Err("Invalid bulk SOTER identity selection".into());
+            }
+            for key in targets {
+                config
+                    .apps
+                    .entry(key)
+                    .or_insert_with(|| App { identity: identity.clone(), cpu_id: String::new() });
+            }
+        }
     }
     config.validate()?;
     write(&root.join("identities.json"), &serde_json::to_vec(&config).map_err(|e| e.to_string())?)?;
@@ -513,6 +530,76 @@ mod tests {
         assert_eq!(config_at(root.path()).unwrap().apps, config.apps);
         assert!(change_at(root.path(), Change::Remove { id: removed }).is_ok());
         assert!(change_at(root.path(), Change::Remove { id: "../identities".into() }).is_err());
+    }
+
+    #[test]
+    fn bulk_assignment_is_atomic_and_preserves_existing_assignments_and_switch() {
+        let root = tempfile::tempdir().unwrap();
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let config = change_at(root.path(), Change::Add { name: "First".into() }).unwrap();
+        let first = config.identities[0].id.clone();
+        let config = change_at(root.path(), Change::Add { name: "Second".into() }).unwrap();
+        let second = config.identities[1].id.clone();
+        let override_id = "ab".repeat(16);
+        change_at(
+            root.path(),
+            Change::App {
+                target: "com.example.existing@0".into(),
+                identity: Some(first.clone()),
+                cpu_id: override_id.clone(),
+            },
+        )
+        .unwrap();
+        let targets = vec![
+            "com.example.existing@0".into(),
+            "com.example.new@0".into(),
+            "com.example.new@10".into(),
+            "com.example.new@0".into(),
+        ];
+        let config = change_at(
+            root.path(),
+            Change::Apps { targets: targets.clone(), identity: second.clone() },
+        )
+        .unwrap();
+        assert!(!config.enabled);
+        assert_eq!(config.apps.len(), 3);
+        assert_eq!(
+            config.apps["com.example.existing@0"],
+            App { identity: first, cpu_id: override_id }
+        );
+        assert_eq!(config.apps["com.example.new@0"].identity, second);
+        assert_eq!(config.apps["com.example.new@10"].identity, second);
+        let before = fs::read(root.path().join("identities.json")).unwrap();
+        for change in [
+            Change::Apps {
+                targets: vec!["com.example.other@0".into(), "invalid".into()],
+                identity: second.clone(),
+            },
+            Change::Apps { targets: targets.clone(), identity: "00".repeat(16) },
+            Change::Apps { targets: Vec::new(), identity: second.clone() },
+        ] {
+            assert!(change_at(root.path(), change).is_err());
+            assert_eq!(fs::read(root.path().join("identities.json")).unwrap(), before);
+        }
+        change_at(root.path(), Change::Apps { targets, identity: second }).unwrap();
+        assert_eq!(config_at(root.path()).unwrap().apps, config.apps);
+    }
+
+    #[test]
+    fn bulk_assignment_over_capacity_leaves_all_policy_unchanged() {
+        let root = tempfile::tempdir().unwrap();
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let config = change_at(root.path(), Change::Add { name: "Local".into() }).unwrap();
+        let id = config.identities[0].id.clone();
+        let targets = (0..MAX_APPS).map(|i| format!("com.example.app{i}@0")).collect();
+        change_at(root.path(), Change::Apps { targets, identity: id.clone() }).unwrap();
+        let before = fs::read(root.path().join("identities.json")).unwrap();
+        assert!(change_at(
+            root.path(),
+            Change::Apps { targets: vec!["com.example.overflow@0".into()], identity: id }
+        )
+        .is_err());
+        assert_eq!(fs::read(root.path().join("identities.json")).unwrap(), before);
     }
 
     #[test]

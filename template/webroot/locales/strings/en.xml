@@ -237,7 +237,7 @@
     <string name="maintenance_preview_only">Browser preview only. No device command was executed.</string>
     <string name="tools_repair_rkp">Fix RKP</string>
     <string name="tools_repair_rkp_desc">Use the device vendor provisioning tool. Persistent-write risk requires confirmation.</string>
-    <string name="rkp_repair_warning">Compatible Qualcomm devices only. The vendor tool may permanently modify persist/TEE, even on failure or timeout. Rollback and repair are not guaranteed. Do not use on a healthy device or retry blindly.</string>
+    <string name="rkp_repair_warning">Compatible Qualcomm devices only. The vendor tool may permanently modify persist/TEE, even on failure or timeout. Rollback and repair are not guaranteed. Do not use on a healthy device or retry blindly. Before use, be sure to back up your original persist partition.</string>
     <string name="rkp_repair_confirm">Confirm</string>
     <string name="rkp_tool_completed">The vendor tool reported completion. Actual RKP provisioning and attestation still need independent verification.</string>
     <string name="tools_issue_rkp">Issue local RKP Keybox</string>
@@ -264,6 +264,12 @@
     <string name="rkp_import_running">Validating and importing the selected Keybox…</string>
     <string name="rkp_import_completed">The staged RKP Keybox was imported.</string>
     <string name="soter_local_title">Local SOTER identities</string>
+    <string name="soter_bulk_title">Assign local identity to selected apps</string>
+    <string name="soter_bulk_desc">Choose an existing random identity for all selected installed apps, including system apps and user profiles. Existing assignments and the SOTER master switch stay unchanged.</string>
+    <string name="soter_bulk_confirm_desc">Assign the selected identity to %s app entries.</string>
+    <string name="soter_bulk_apply">Confirm assignment</string>
+    <string name="soter_bulk_no_apps">Select apps before assigning an identity.</string>
+    <string name="soter_bulk_all_assigned">All selected apps already have an identity.</string>
     <string name="soter_local_delete">Delete</string>
     <string name="soter_local_delete_confirm">Confirm deletion</string>
     <string name="soter_local_delete_warning">Permanently delete this identity's keys and signing sessions. Assigned apps return to stock SOTER. Other identities and Keybox are unchanged. This cannot be undone.</string>

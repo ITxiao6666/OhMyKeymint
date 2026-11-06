@@ -190,10 +190,16 @@
     <string name="maintenance_preview_only">目前為瀏覽器預覽，未在裝置執行任何命令。</string>
     <string name="tools_repair_rkp">修復RKP</string>
     <string name="tools_repair_rkp_desc">呼叫手機原廠配置工具，涉及持久寫入，執行前需確認風險。</string>
-    <string name="rkp_repair_warning">僅限相容的驍龍裝置。原廠工具可能永久修改 persist/TEE，失敗或逾時也可能已寫入，不保證可還原或修復成功。正常裝置勿用，請勿盲目重試。</string>
+    <string name="rkp_repair_warning">僅限相容的驍龍裝置。原廠工具可能永久修改 persist/TEE，失敗或逾時也可能已寫入，不保證可還原或修復成功。正常裝置勿用，請勿盲目重試。使用前請務必備份好您原來的 persist 分割區。</string>
     <string name="rkp_repair_confirm">確定</string>
     <string name="rkp_tool_completed">原廠工具回報執行完成；RKP憑證下發與金鑰認證效果仍需另外驗證。</string>
     <string name="soter_local_title">SOTER 本機身分</string>
+    <string name="soter_bulk_title">為已勾選 APP 分配本機身分</string>
+    <string name="soter_bulk_desc">選擇一個既有隨機身分，分配給目前勾選的所有已安裝 APP，包含系統應用及各使用者空間；既有分配和 SOTER 總開關保持不變。</string>
+    <string name="soter_bulk_confirm_desc">將為 %s 個應用項目添加所選身分。</string>
+    <string name="soter_bulk_apply">確定分配</string>
+    <string name="soter_bulk_no_apps">請先勾選需要分配身分的 APP。</string>
+    <string name="soter_bulk_all_assigned">目前勾選的 APP 都已分配身分，無需重複添加。</string>
     <string name="soter_local_delete">刪除</string>
     <string name="soter_local_delete_confirm">確定刪除</string>
     <string name="soter_local_delete_warning">將永久刪除此身分的金鑰及簽章工作階段，關聯 APP 恢復原廠 SOTER。其他身分與 Keybox 不受影響，刪除後無法恢復。</string>

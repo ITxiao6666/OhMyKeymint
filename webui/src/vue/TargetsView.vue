@@ -43,6 +43,7 @@ interface Props {
   loading?: boolean
   refreshing?: boolean
   applyEnabled?: boolean
+  saveSelection: () => Promise<boolean>
 }
 
 interface SearchBarInstance extends ComponentPublicInstance {
@@ -77,6 +78,7 @@ const selectingRecommended = ref(false)
 const systemSheetOpen = ref(false)
 const systemSearchQuery = ref('')
 const systemSelection = ref(new Set<string>())
+const systemSaving = ref(false)
 const searchBar = ref<SearchBarInstance | null>(null)
 const pullBody = ref<HTMLElement | null>(null)
 const pullIndicator = ref<HTMLElement | null>(null)
@@ -89,11 +91,22 @@ const autoBusy = ref(false)
 const autoError = ref('')
 const identityOpen = ref(false)
 const identityTarget = ref('')
+const identityBatchTargets = ref<string[] | undefined>()
 const identityDialog = ref<InstanceType<typeof SoterIdentityDialog> | null>(null)
 function openIdentity(entry: SelectableAppEntry): void {
+  if (props.loading || systemSaving.value) return
   systemSheetOpen.value = false
   menuOpen.value = false
   identityTarget.value = entry.targetKey
+  identityBatchTargets.value = undefined
+  identityOpen.value = true
+}
+
+function openBulkIdentity(): void {
+  if (props.loading || systemSaving.value || selectingRecommended.value) return
+  identityTarget.value = ''
+  identityBatchTargets.value = props.appList.getSelectedIdentityTargets()
+  menuOpen.value = false
   identityOpen.value = true
 }
 let disposed = false
@@ -375,31 +388,34 @@ function openSystemApps(): void {
 }
 
 function setSystemSelected(targetKey: string, selected: boolean): void {
+  if (props.loading || systemSaving.value) return
   const target = parsePackageUserTarget(targetKey)
   if (target === null) return
   const nextSelection = new Set(systemSelection.value)
-  if (selected) {
-    if (!nextSelection.has(target.packageName)) nextSelection.add(target.targetKey)
-  } else {
-    nextSelection.delete(target.targetKey)
-    if (nextSelection.delete(target.packageName)) {
-      for (const entry of props.appList.getSystemEntries()) {
-        if (entry.packageName === target.packageName && entry.userId !== target.userId) {
-          nextSelection.add(entry.targetKey)
-        }
-      }
+  for (const value of nextSelection) {
+    if (value === target.packageName || parsePackageUserTarget(value)?.packageName === target.packageName) {
+      nextSelection.delete(value)
     }
   }
+  if (selected) nextSelection.add(target.packageName)
   systemSelection.value = nextSelection
 }
 
-function saveSystemApps(): void {
-  if (props.loading) return
-  props.appList.applySystemAppSelection([...systemSelection.value])
-  systemSheetOpen.value = false
+async function saveSystemApps(): Promise<void> {
+  if (props.loading || systemSaving.value || !props.applyEnabled) return
+  systemSaving.value = true
+  try {
+    props.appList.applySystemAppSelection([...systemSelection.value])
+    // Use the same awaited persistence path as the main checkmark. Closing
+    // only after success makes this sheet's Save a complete save operation.
+    if (await props.saveSelection()) systemSheetOpen.value = false
+  } finally {
+    systemSaving.value = false
+  }
 }
 
 function closeSystemApps(): void {
+  if (systemSaving.value) return
   systemSheetOpen.value = false
 }
 
@@ -492,6 +508,10 @@ defineExpose({
                 <MiuixButton role="menuitem" :disabled="loading || selectingRecommended" @click="openSystemApps">
                   <MiuixIcon :icon="AddCircle" :size="21" />
                   <span>{{ translate('menu_add_system_app', 'Add System App') }}</span>
+                </MiuixButton>
+                <MiuixButton role="menuitem" :disabled="loading || selectingRecommended" @click="openBulkIdentity">
+                  <MiuixIcon :icon="AddCircle" :size="21" />
+                  <span>{{ translate('soter_bulk_title', 'Assign local identity to selected apps') }}</span>
                 </MiuixButton>
               </MiuixCard>
             </Transition>
@@ -623,9 +643,12 @@ defineExpose({
     <MiuixBottomSheet
       v-model="systemSheetOpen"
       :title="translate('add_system_app_title', 'Add System App')"
+      :allow-dismiss="!systemSaving"
+      :close-on-click-modal="!systemSaving"
     >
       <template #start-action>
         <MiuixIconButton
+          :disabled="systemSaving"
           :aria-label="translate('functional_button_cancel', 'Cancel')"
           @click="closeSystemApps"
         >
@@ -633,7 +656,8 @@ defineExpose({
         </MiuixIconButton>
       </template>
       <template #end-action>
-        <MiuixButton type="primary" :disabled="loading" @click="saveSystemApps">
+        <MiuixButton type="primary" :disabled="loading || systemSaving || !applyEnabled" @click="saveSystemApps">
+          <MiuixProgressIndicator v-if="systemSaving" type="circular" :size="18" />
           {{ translate('functional_button_save', 'Save') }}
         </MiuixButton>
       </template>
@@ -656,7 +680,7 @@ defineExpose({
           </h3>
           <TargetAppRow
             :selected="systemSelection.has(entry.targetKey) || systemSelection.has(entry.packageName)"
-            :disabled="loading"
+            :disabled="loading || systemSaving"
             :app-name="entry.appName"
             :package-name="entry.packageName"
             @select="setSystemSelected(entry.targetKey, $event)"
@@ -676,7 +700,8 @@ defineExpose({
       </div>
     </MiuixBottomSheet>
 
-    <SoterIdentityDialog ref="identityDialog" v-model="identityOpen" :cli="cli" :target="identityTarget" />
+    <SoterIdentityDialog ref="identityDialog" v-model="identityOpen" :cli="cli" :target="identityTarget"
+      :batch-targets="identityBatchTargets" />
   </section>
 </template>
 

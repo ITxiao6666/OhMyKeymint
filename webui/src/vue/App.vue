@@ -335,17 +335,19 @@ async function reloadApps(): Promise<void> {
   }
 }
 
-async function saveTargets(): Promise<void> {
-  if (targetsLoading.value) return
+async function saveTargets(): Promise<boolean> {
+  if (targetsLoading.value) return false
   targetsLoading.value = true
   try {
     await afterPaint()
     await appList.save()
     snapshot.value = appList.getSnapshot()
     notify(i18n.t('prompt_saved_target'))
+    return true
   } catch (error) {
     console.error('Unable to save OMK targets:', error)
     notify(i18n.t('prompt_save_error'), true)
+    return false
   } finally {
     targetsLoading.value = false
   }
@@ -837,6 +839,7 @@ watch(rkpImportConfirmOpen, open => {
         :loading="targetsLoading"
         :refreshing="targetsRefreshing"
         :apply-enabled="snapshot.isWritable"
+        :save-selection="saveTargets"
         @close="closeTargets"
         @refresh="reloadApps"
         @apply="saveTargets"

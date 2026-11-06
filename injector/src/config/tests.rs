@@ -219,7 +219,7 @@ allow_packages = ["com.legacy.app"]
 }
 
 #[test]
-fn rendered_config_uses_new_scoop_format() {
+fn rendered_config_uses_standard_quoted_scoop_format() {
     let mut config =
         InjectorConfig { scoop: vec!["com.example.app".to_string()], ..Default::default() };
     let mut table = toml::Table::new();
@@ -227,13 +227,27 @@ fn rendered_config_uses_new_scoop_format() {
     config.scoop_details.insert("com.example.app".to_string(), table);
 
     let rendered = render_config(&config).expect("config should render");
-    assert!(rendered.contains("scoop = [\n  com.example.app\n]\n"));
-    assert!(!rendered.contains("  \"com.example.app\""));
+    assert!(rendered.contains("scoop = [\n  \"com.example.app\",\n]\n"));
     assert!(!rendered.contains("  com.example.app,"));
     assert!(rendered.contains("[scoop.com.example.app]"));
     assert!(!rendered.contains("[[scope]]"));
     let reparsed = parse_config(&rendered).expect("rendered config should parse");
     assert_eq!(reparsed.scoop_details, config.scoop_details);
+}
+
+#[test]
+fn standard_scoop_writer_retains_legacy_user_and_uid_selectors() {
+    let config = InjectorConfig {
+        scoop: vec!["com.example.app".into(), "com.profile.app@10".into(), "uid:1001".into()],
+        ..Default::default()
+    };
+    let rendered = render_config(&config).unwrap();
+    assert!(rendered.contains(
+        "scoop = [\n  \"com.example.app\",\n  \"com.profile.app@10\",\n  \"uid:1001\",\n]\n"
+    ));
+    assert_eq!(parse_config(&rendered).unwrap().scoop, config.scoop);
+    let plain_toml: toml::Value = toml::from_str(&rendered).unwrap();
+    assert_eq!(plain_toml["scoop"].as_array().unwrap().len(), 3);
 }
 
 #[test]
@@ -433,7 +447,7 @@ fn invalid_scoop_delta_does_not_modify_configuration() {
 }
 
 #[test]
-fn unchanged_scoop_delta_does_not_rewrite_configuration() {
+fn unchanged_scoop_delta_uses_the_standard_writer_without_changing_routes() {
     let path = temp_config_path("scoop-delta-noop");
     let original =
         "# Preserve custom formatting when nothing changes.\nversion = 1\nscoop = [\"com.global\"]\n";
@@ -443,7 +457,9 @@ fn unchanged_scoop_delta_does_not_rewrite_configuration() {
         ScoopDelta { added: vec!["com.global@0".into()], removed: vec!["com.missing".into()] },
     ] {
         assert_eq!(update_scoop_at_path(&path, delta).unwrap(), ["com.global"]);
-        assert_eq!(fs::read_to_string(&*path).unwrap(), original);
+        let rendered = fs::read_to_string(&*path).unwrap();
+        assert!(rendered.contains("scoop = [\n  \"com.global\",\n]\n"));
+        assert_eq!(parse_config(&rendered).unwrap().scoop, ["com.global"]);
     }
 }
 

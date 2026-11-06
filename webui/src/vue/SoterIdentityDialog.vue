@@ -9,7 +9,7 @@ import { afterPaint } from '../app_list/app_list'
 import { i18n } from '../i18n'
 import { isDev } from '../utils/dev'
 
-const props = defineProps<{ modelValue: boolean, cli: Cli, target?: string }>()
+const props = defineProps<{ modelValue: boolean, cli: Cli, target?: string, batchTargets?: string[] }>()
 const emit = defineEmits<{ 'update:modelValue': [open: boolean] }>()
 const state = ref<SoterIdentityState | null>(null)
 const busy = ref(false)
@@ -17,13 +17,18 @@ const error = ref('')
 const selected = ref('')
 const cpu = ref('')
 const pendingDelete = ref<SoterIdentityState['identities'][number] | null>(null)
+const batchConfirm = ref(false)
+const batchMode = computed(() => props.batchTargets !== undefined)
+const batchPending = computed(() => (props.batchTargets ?? []).filter(target => !state.value?.apps[target]))
+const batchIdentity = computed(() => state.value?.identities.find(identity => identity.id === selected.value))
 let generation = 0
-const title = computed(() => props.target ?? i18n.t('soter_local_title'))
+const title = computed(() => batchMode.value ? i18n.t('soter_bulk_title') : (props.target || i18n.t('soter_local_title')))
 
 async function load(): Promise<void> {
   const current = ++generation
   state.value = null
   pendingDelete.value = null
+  batchConfirm.value = false
   error.value = ''
   try {
     await afterPaint()
@@ -33,7 +38,7 @@ async function load(): Promise<void> {
     if (current !== generation || !props.modelValue) return
     state.value = value
     const app = props.target ? value.apps[props.target] : null
-    selected.value = app?.identity ?? ''
+    selected.value = app?.identity ?? (batchMode.value ? value.identities[0]?.id ?? '' : '')
     cpu.value = app?.cpu_id ?? ''
   } catch (reason) {
     if (current === generation) error.value = String(reason)
@@ -53,7 +58,7 @@ async function change(value: Parameters<Cli['changeSoterLocal']>[0]): Promise<vo
     await afterPaint()
     state.value = await props.cli.changeSoterLocal(value)
     pendingDelete.value = null
-    if (value.action === 'app') requestClose(true)
+    if (value.action === 'app' || value.action === 'apps') requestClose(true)
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : String(reason)
   } finally { busy.value = false }
@@ -79,6 +84,7 @@ defineExpose({ busy, requestClose })
 
 <template>
   <MiuixBottomSheet :model-value="modelValue" :title="title" :close-on-click-modal="!busy"
+    :allow-dismiss="!busy"
     @update:model-value="value => { if (!value) requestClose() }">
     <template #start-action>
       <MiuixIconButton :disabled="busy" :aria-label="i18n.t('functional_button_cancel')" @click="requestClose()">
@@ -89,7 +95,35 @@ defineExpose({ busy, requestClose })
       <p class="soter-note">{{ i18n.t('soter_local_desc') }}</p>
       <MiuixProgressIndicator v-if="!state && !error" type="circular" :size="30" />
       <template v-if="state">
-        <template v-if="pendingDelete">
+        <template v-if="batchMode">
+          <p class="soter-note">{{ i18n.t('soter_bulk_desc') }}</p>
+          <template v-if="batchConfirm && batchIdentity">
+            <strong>{{ batchIdentity.name }}</strong>
+            <p class="soter-note">{{ i18n.t('soter_bulk_confirm_desc', batchPending.length) }}</p>
+            <MiuixButton :disabled="busy" @click="batchConfirm = false">
+              {{ i18n.t('functional_button_cancel') }}
+            </MiuixButton>
+            <MiuixButton type="primary" :disabled="busy || isDev() || !batchPending.length"
+              @click="change({ action: 'apps', targets: batchPending, identity: selected })">
+              {{ i18n.t('soter_bulk_apply') }}
+            </MiuixButton>
+          </template>
+          <template v-else>
+            <MiuixRadioButtonPreference v-for="identity in state.identities" :key="identity.id"
+              :model-value="selected === identity.id" :disabled="busy"
+              :title="identity.name" @select="selected = identity.id" />
+            <p v-if="!state.identities.length" class="soter-note">{{ i18n.t('soter_local_empty') }}</p>
+            <p v-if="!batchTargets?.length" class="soter-note">{{ i18n.t('soter_bulk_no_apps') }}</p>
+            <p v-else-if="!batchPending.length" class="soter-note">{{ i18n.t('soter_bulk_all_assigned') }}</p>
+            <p v-else class="soter-note">{{ i18n.t('soter_bulk_confirm_desc', batchPending.length) }}</p>
+            <MiuixButton type="primary" :disabled="busy || isDev() || !batchIdentity || !batchPending.length"
+              @click="batchConfirm = true">
+              {{ i18n.t('functional_button_save') }}
+            </MiuixButton>
+          </template>
+          <p v-if="!state.enabled" class="soter-note">{{ i18n.t('soter_local_inactive') }}</p>
+        </template>
+        <template v-else-if="pendingDelete">
           <strong>{{ pendingDelete.name }}</strong>
           <p class="soter-note">{{ i18n.t('soter_local_delete_warning') }}</p>
           <MiuixButton :disabled="busy" @click="pendingDelete = null">

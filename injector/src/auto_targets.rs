@@ -146,7 +146,7 @@ fn reconcile(state: &mut State, snapshot: Snapshot) -> Vec<String> {
         };
         if let Some(Some(previous)) = state.users.get(&user) {
             for package in current.difference(previous) {
-                let target = format!("{package}@{user}");
+                let target = package.clone();
                 let installed = snapshot
                     .installed_at
                     .get(&(user, package.clone()))
@@ -527,7 +527,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(selected, ["com.selected@0", "com.after@0"]);
+        assert_eq!(selected, ["com.selected@0", "com.after"]);
     }
 
     #[test]
@@ -553,7 +553,7 @@ mod tests {
             ..State::default()
         };
         let scan = || snapshot(&["com.old", "com.new"]);
-        assert_eq!(reconcile(&mut state, scan()), ["com.new@0"]);
+        assert_eq!(reconcile(&mut state, scan()), ["com.new"]);
         assert!(reconcile(&mut state, scan()).is_empty());
     }
 
@@ -577,7 +577,7 @@ mod tests {
             ]),
             ..Snapshot::default()
         };
-        assert_eq!(reconcile(&mut state, second), ["com.new@10"]);
+        assert_eq!(reconcile(&mut state, second), ["com.new"]);
     }
 
     #[test]
@@ -600,7 +600,7 @@ mod tests {
                     ..Snapshot::default()
                 }
             ),
-            ["com.app@0"]
+            ["com.app"]
         );
     }
 
@@ -619,7 +619,7 @@ mod tests {
                 ((0, "com.latest".to_string()), 200),
             ]),
         };
-        assert_eq!(reconcile(&mut state, snapshot), ["com.latest@0"]);
+        assert_eq!(reconcile(&mut state, snapshot), ["com.latest"]);
         assert_eq!(state.users[&0], packages(&["com.old", "com.first", "com.latest"]));
     }
 

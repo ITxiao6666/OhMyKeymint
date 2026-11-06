@@ -237,7 +237,7 @@
     <string name="maintenance_preview_only">当前为浏览器预览，未在设备执行任何命令。</string>
     <string name="tools_repair_rkp">修复RKP</string>
     <string name="tools_repair_rkp_desc">调用手机原厂配置工具，涉及持久写入，执行前需确认风险。</string>
-    <string name="rkp_repair_warning">仅限骁龙TEE损坏的设备写入认证ID请求谷歌远程RKP，TEE没有损坏的设备请勿使用</string>
+    <string name="rkp_repair_warning">仅限骁龙TEE损坏的设备写入认证ID请求谷歌远程RKP，TEE没有损坏的设备请勿使用。使用前请务必备份好您原来的persist分区。</string>
     <string name="rkp_repair_confirm">确定</string>
     <string name="rkp_tool_completed">原厂工具报告执行完成；RKP证书下发与密钥认证效果仍需单独验证。</string>
     <string name="tools_issue_rkp">签发本机RKP Keybox</string>
@@ -264,6 +264,12 @@
     <string name="rkp_import_running">正在校验并导入选中的Keybox…</string>
     <string name="rkp_import_completed">已导入暂存的RKP Keybox。</string>
     <string name="soter_local_title">SOTER 本地身份</string>
+    <string name="soter_bulk_title">给已勾选 APP 分配本地身份</string>
+    <string name="soter_bulk_desc">选择一个已有随机身份，分配给当前勾选的所有已安装 APP，包含系统应用和各用户空间；已有分配保持不变，不改变 SOTER 总开关。</string>
+    <string name="soter_bulk_confirm_desc">将为 %s 个应用条目添加所选身份。</string>
+    <string name="soter_bulk_apply">确定分配</string>
+    <string name="soter_bulk_no_apps">请先勾选需要分配身份的 APP。</string>
+    <string name="soter_bulk_all_assigned">当前勾选的 APP 均已分配身份，无需重复添加。</string>
     <string name="soter_local_tool_desc">添加本地随机身份，按 APP 配置 CPU-ID 伪装。</string>
     <string name="soter_local_desc">本地随机签名证书和 CPU-ID，可用于检测器测试，不支持指纹支付认证。</string>
     <string name="soter_local_enabled">启用 SOTER</string>
