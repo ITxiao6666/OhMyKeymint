@@ -130,6 +130,14 @@ optimization, LTO and symbol stripping. The log4rs dependency enables only
 console and pattern encoding; OMK's shared rotating-file logger handles file
 output without log4rs configuration-file parsers or built-in rolling appenders.
 
+Generate KernelSU `changelog.md` and `update.json` with
+`scripts/update_release_metadata.py --release-json <GitHub-release.json>
+--version-code <packaged-versionCode> --output-dir <metadata-checkout>`.
+The generator writes UTF-8 without a BOM and uses LF newlines. When passing
+these files to Git from Python, use byte input (for example, `read_bytes()`)
+or explicitly set `encoding="utf-8"`; host-locale subprocess text encoding
+must not determine the bytes stored in Git.
+
 Rust changes must pass:
 
 ```sh

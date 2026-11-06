@@ -135,23 +135,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          python scripts/update_release_metadata.py \
+            --release-json "$SOURCE_RELEASE_JSON" \
+            --version-code "$VERSION_CODE" \
+            --output-dir changelog-branch
+
           cd changelog-branch
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          jq -r '.body // ""' "$SOURCE_RELEASE_JSON" > changelog.md
-
-          jq -n \
-            --arg version "$TAG_NAME" \
-            --argjson versionCode "$VERSION_CODE" \
-            --arg zipUrl "$RELEASE_ZIP_URL" \
-            --arg changelog "https://raw.githubusercontent.com/ITxiao6666/OhMyKeymint/changelog/changelog.md" \
-            '{
-              version: $version,
-              versionCode: $versionCode,
-              zipUrl: $zipUrl,
-              changelog: $changelog
-            }' > update.json
 
           git add changelog.md update.json
           if git diff --cached --quiet; then
