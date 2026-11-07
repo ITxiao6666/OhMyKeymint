@@ -130,6 +130,12 @@ optimization, LTO and symbol stripping. The log4rs dependency enables only
 console and pattern encoding; OMK's shared rotating-file logger handles file
 output without log4rs configuration-file parsers or built-in rolling appenders.
 
+The generated Cargo configuration sets `LIBSQLITE3_FLAGS` to
+`-DSQLITE_ENABLE_BATCH_ATOMIC_WRITE -Dfdatasync=fdatasync` for bundled SQLite.
+Batch atomic writes depend on the filesystem's runtime capabilities; unsupported
+filesystems retain the regular SQLite commit path. The database retains
+`synchronous=EXTRA`. These build options do not disable durability checks.
+
 Generate KernelSU `changelog.md` and `update.json` with
 `scripts/update_release_metadata.py --release-json <GitHub-release.json>
 --version-code <packaged-versionCode> --output-dir <metadata-checkout>`.
