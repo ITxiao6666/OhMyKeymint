@@ -47,6 +47,10 @@ const pageDirection = ref(1)
 const pageScrollPositions = [0, 0, 0]
 const targetsOpen = ref(false)
 const targetsLoading = ref(false)
+const targetsSaving = ref(false)
+const targetsSaveError = ref(false)
+let targetsSavePromise: Promise<boolean> | null = null
+let targetsSaveRequested = false
 const targetsRefreshing = ref(false)
 const snapshot = shallowRef<AppListSnapshot>(appList.getSnapshot())
 const moduleStatus = ref<ModuleStatus>('loading')
@@ -270,10 +274,11 @@ function scheduleTargetsRefresh(): void {
   if (!targetsOpen.value
       || document.visibilityState !== 'visible'
       || targetsLoading.value
+      || targetsSaving.value
       || targetsRefreshTimer !== null) return
   targetsRefreshTimer = window.setTimeout(() => {
     targetsRefreshTimer = null
-    if (targetsOpen.value && document.visibilityState === 'visible' && !targetsLoading.value) {
+    if (targetsOpen.value && document.visibilityState === 'visible' && !targetsLoading.value && !targetsSaving.value) {
       void reloadApps()
     }
   }, 180)
@@ -318,7 +323,7 @@ function handleEscape(): void {
 }
 
 async function reloadApps(): Promise<void> {
-  if (targetsLoading.value) return
+  if (targetsLoading.value || targetsSaving.value) return
   targetsRefreshing.value = appList.getEntries().length > 0
   targetsLoading.value = true
   try {
@@ -338,22 +343,34 @@ async function reloadApps(): Promise<void> {
   }
 }
 
-async function saveTargets(): Promise<boolean> {
-  if (targetsLoading.value) return false
-  targetsLoading.value = true
-  try {
-    await afterPaint()
-    await appList.save()
-    snapshot.value = appList.getSnapshot()
-    notify(i18n.t('prompt_saved_target'))
-    return true
-  } catch (error) {
-    console.error('Unable to save OMK targets:', error)
-    notify(i18n.t('prompt_save_error'), true)
-    return false
-  } finally {
-    targetsLoading.value = false
-  }
+function saveTargets(): Promise<boolean> {
+  if (targetsLoading.value || !config.isWritable) return Promise.resolve(false)
+  targetsSaveRequested = true
+  targetsSaveError.value = false
+  if (targetsSavePromise) return targetsSavePromise
+  targetsSaving.value = true
+  // Assign the promise before starting work so immediate callers share the queue.
+  targetsSavePromise = Promise.resolve().then(async () => {
+    try {
+      do {
+        targetsSaveRequested = false
+        await afterPaint()
+        await appList.save()
+        snapshot.value = appList.getSnapshot()
+      } while (targetsSaveRequested)
+      return true
+    } catch (error) {
+      targetsSaveRequested = false
+      targetsSaveError.value = true
+      console.error('Unable to save OMK targets:', error)
+      notify(i18n.t('prompt_save_error'), true)
+      return false
+    } finally {
+      targetsSaving.value = false
+      targetsSavePromise = null
+    }
+  })
+  return targetsSavePromise
 }
 
 async function refreshIdentity(force = false): Promise<void> {
@@ -840,12 +857,13 @@ watch(rkpImportConfirmOpen, open => {
         :app-list="appList"
         :cli="cli"
         :loading="targetsLoading"
+        :saving="targetsSaving"
+        :save-error="targetsSaveError"
         :refreshing="targetsRefreshing"
         :apply-enabled="snapshot.isWritable"
         :save-selection="saveTargets"
         @close="closeTargets"
         @refresh="reloadApps"
-        @apply="saveTargets"
         @overlay-open="onTargetsOverlayOpen"
         @overlay-close="onTargetsOverlayClose"
       />

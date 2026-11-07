@@ -225,6 +225,8 @@
     <string name="app_targets_auto_title">Automatically add new apps</string>
     <string name="app_targets_auto_desc">Automatically select only the most recently installed user app. Other new or existing apps remain unselected.</string>
     <string name="app_targets_selected">Selected package names</string>
+    <string name="app_targets_saving">Saving selections automatically…</string>
+    <string name="app_targets_save_failed">Selections are not saved. Retry to apply them.</string>
     <string name="app_targets_unselected">Unselected package names</string>
     <string name="app_targets_auto_saved">Automatic selection setting saved</string>
     <string name="app_targets_auto_error">Unable to update automatic selection. Check that the module is up to date.</string>

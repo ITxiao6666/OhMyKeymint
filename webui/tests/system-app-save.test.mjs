@@ -4,104 +4,131 @@ import { test } from 'node:test'
 import vm from 'node:vm'
 import ts from 'typescript'
 
-// Execute the actual SFC handlers with a delayed configuration writer. No
-// Android commands or mocked filesystem persistence are used in these tests.
-function handler(file, name, globals) {
+function handler(file, name, globals, prefix = '') {
   const source = readFileSync(new URL(`../src/vue/${file}`, import.meta.url), 'utf8')
     .split('<script setup lang="ts">')[1].split('</script>')[0]
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const declaration = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)
   assert.ok(declaration, `Missing ${name}`)
-  const javascript = ts.transpileModule(declaration.getText(ast), {
+  const javascript = ts.transpileModule(`${prefix}\n${declaration.getText(ast)}\n${name}`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText
-  return vm.runInNewContext(`${javascript}\n${name}`, globals)
+  return vm.runInNewContext(javascript, globals)
 }
 
 function harness(writer = async () => {}) {
   let writes = 0
-  let selections = 0
-  let saved = false
+  const selected = new Set()
   const messages = []
   const targetsLoading = { value: false }
+  const targetsSaving = { value: false }
+  const targetsSaveError = { value: false }
   const snapshot = { value: null }
+  const config = { isWritable: true }
   const appList = {
-    applySystemAppSelection(values) { selections++; assert.deepEqual([...values], ['com.example.system@0']) },
-    async save() { writes++; await writer(); saved = true },
-    getSnapshot() { return { saved } },
+    setTargetSelected(entry, enabled) { enabled ? selected.add(entry.packageName) : selected.delete(entry.packageName) },
+    async selectRecommended() { selected.add('com.example.recommended') },
+    deselectAll() { selected.clear() },
+    async save() { writes++; await writer([...selected]) },
+    getSnapshot() { return { selected: [...selected] } },
   }
   const saveSelection = handler('App.vue', 'saveTargets', {
-    targetsLoading, appList, snapshot,
+    targetsLoading, targetsSaving, targetsSaveError, config, appList, snapshot,
     afterPaint: async () => {},
     notify: (...values) => messages.push(values),
-    i18n: { t: value => value },
-    console: { error() {} },
-  })
+    i18n: { t: value => value }, console: { error() {} },
+  }, 'let targetsSavePromise = null; let targetsSaveRequested = false;')
   const globals = {
     props: { appList, saveSelection, loading: false, applyEnabled: true },
-    systemSaving: { value: false },
-    systemSelection: { value: new Set(['com.example.system@0']) },
-    systemSheetOpen: { value: true },
+    menuOpen: { value: false }, selectingRecommended: { value: false },
+    systemSheetOpen: { value: true }, console: { error() {} },
   }
   return {
-    ...globals, snapshot, messages,
-    save: handler('TargetsView.vue', 'saveSystemApps', globals),
+    ...globals, config, selected, messages, snapshot, targetsLoading, targetsSaving, targetsSaveError,
+    saveSelection,
+    toggle: handler('TargetsView.vue', 'setSelected', globals),
+    recommended: handler('TargetsView.vue', 'selectRecommended', globals),
+    deselect: handler('TargetsView.vue', 'deselectAll', globals),
     close: handler('TargetsView.vue', 'closeSystemApps', globals),
     get writes() { return writes },
-    get selections() { return selections },
   }
 }
 
-test('system Save persists through the parent writer without a second checkmark', async () => {
+test('ordinary and system app toggles automatically request persistence', async () => {
   const state = harness()
-  await state.save()
+  state.toggle({ packageName: 'com.example.app' }, true)
+  state.toggle({ packageName: 'com.example.system' }, true)
+  assert.equal(await state.saveSelection(), true)
   assert.equal(state.writes, 1)
-  assert.equal(state.selections, 1)
-  assert.equal(state.snapshot.value.saved, true)
-  assert.equal(state.systemSheetOpen.value, false)
-  assert.equal(state.messages[0][0], 'prompt_saved_target')
+  assert.deepEqual([...state.snapshot.value.selected].sort(), ['com.example.app', 'com.example.system'])
+  state.toggle({ packageName: 'com.example.system' }, false)
+  await state.saveSelection()
+  assert.deepEqual([...state.snapshot.value.selected], ['com.example.app'])
 })
 
-test('pending write keeps the sheet open and blocks dismissal and repeat Save', async () => {
-  let finish
-  const state = harness(() => new Promise(resolve => { finish = resolve }))
-  const saving = state.save()
-  await Promise.resolve()
-  await Promise.resolve()
-  assert.equal(state.systemSaving.value, true)
-  assert.equal(state.systemSheetOpen.value, true)
+test('rapid toggles are serialized, retain latest intent and finish after sheet closes', async () => {
+  const waiting = []
+  const saved = []
+  let active = 0
+  const state = harness(value => new Promise(resolve => {
+    assert.equal(++active, 1, 'writes must never overlap')
+    waiting.push(() => { saved.push(value); active--; resolve() })
+  }))
+  state.toggle({ packageName: 'com.example.first' }, true)
+  const drain = state.saveSelection()
+  await new Promise(resolve => setImmediate(resolve))
+  state.toggle({ packageName: 'com.example.second' }, true)
+  state.toggle({ packageName: 'com.example.first' }, false)
   state.close()
-  await state.save()
-  assert.equal(state.writes, 1)
-  assert.equal(state.selections, 1)
-  assert.equal(state.systemSheetOpen.value, true)
-  finish()
-  await saving
-  assert.equal(state.systemSaving.value, false)
   assert.equal(state.systemSheetOpen.value, false)
+  assert.equal(state.targetsSaving.value, true)
+  waiting.shift()()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(state.writes, 2)
+  waiting.shift()()
+  assert.equal(await drain, true)
+  assert.deepEqual(saved.map(value => [...value]), [['com.example.first'], ['com.example.second']])
+  assert.equal(state.targetsSaving.value, false)
 })
 
-test('failed write reports failure, retains the sheet and permits retry', async () => {
+test('failed autosave reports unsaved state, retains choices and retries without another toggle', async () => {
   let fail = true
   const state = harness(async () => { if (fail) throw new Error('write failed') })
-  await state.save()
-  assert.equal(state.systemSheetOpen.value, true)
-  assert.equal(state.systemSaving.value, false)
+  state.toggle({ packageName: 'com.example.app' }, true)
+  assert.equal(await state.saveSelection(), false)
+  assert.equal(state.targetsSaveError.value, true)
+  assert.equal(state.targetsSaving.value, false)
+  assert.equal(state.selected.has('com.example.app'), true)
   assert.equal(state.messages[0][0], 'prompt_save_error')
-  assert.equal(state.snapshot.value, null)
   fail = false
-  await state.save()
-  assert.equal(state.systemSheetOpen.value, false)
-  assert.equal(state.snapshot.value.saved, true)
+  assert.equal(await state.saveSelection(), true)
+  assert.equal(state.targetsSaveError.value, false)
+  assert.deepEqual([...state.snapshot.value.selected], ['com.example.app'])
 })
 
-test('unloaded or read-only configuration cannot be saved', async () => {
+test('recommended selection and deselect all automatically save', async () => {
+  const state = harness()
+  await state.recommended()
+  assert.equal(state.writes, 1)
+  assert.deepEqual([...state.snapshot.value.selected], ['com.example.recommended'])
+  state.deselect()
+  await state.saveSelection()
+  assert.deepEqual([...state.snapshot.value.selected], [])
+})
+
+test('loading and read-only states reject checkbox mutations and autosaves', async () => {
   for (const guard of ['loading', 'applyEnabled']) {
     const state = harness()
     state.props[guard] = guard === 'loading'
-    await state.save()
+    state.toggle({ packageName: 'com.example.app' }, true)
+    assert.equal(state.selected.size, 0)
     assert.equal(state.writes, 0)
-    assert.equal(state.selections, 0)
-    assert.equal(state.systemSheetOpen.value, true)
   }
+  const state = harness()
+  state.config.isWritable = false
+  assert.equal(await state.saveSelection(), false)
+  state.config.isWritable = true
+  state.targetsLoading.value = true
+  assert.equal(await state.saveSelection(), false)
+  assert.equal(state.writes, 0)
 })

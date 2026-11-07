@@ -140,11 +140,13 @@ select Oh My Keymint; the module does not install either host.
 The main package picker shows user applications in separate **Selected package
 names** and **Unselected package names** sections. System applications,
 including Android overlays, are managed through **More > Add system apps**.
-The system-app sheet's **Save** persists the current package selections using
-the same save operation as the main checkmark and closes only after success;
-no second confirmation on the parent list is required. Saving disables repeat
-submissions and dismissal. A failed save keeps the sheet and selection open
-for retry and reports the error without claiming persistence.
+Checking or unchecking an app saves automatically in both the main picker and
+the system-app sheet. Recommended selection and Deselect all also save
+automatically. Writes are serialized and consecutive changes are coalesced;
+clicks made during a bridge write retain their latest state for the next write.
+The page shows saving progress and an explicit unsaved error with Retry on
+failure. Failed edits remain visible for retry. Closing either picker does not
+cancel a pending save; reopening retains unsaved edits and the error state.
 Classification uses Android's package-manager list even when the WebUI host
 cannot provide an application's label or metadata. Hiding system applications
 from the main list does not remove their saved routing selections.
@@ -1097,8 +1099,8 @@ a failed reload keeps the previous valid settings active.
 The embedded WebUI presents an icon, application name, package name, and
 selection control for each installed package. Multiple Android users have
 separate groups, but package selections apply to every user of the same package.
-Manual selection, recommended selection, system-app Save and the main checkmark
-persist plain package names without user suffixes. On an explicit WebUI save,
+Manual selection, recommended selection and system-app checkboxes automatically
+persist plain package names without user suffixes. When a selection is saved,
 existing package@user selections are converted to plain package names and
 deduplicated; explicit UID entries remain intact. Opening the picker alone
 does not migrate configuration. SOTER identity assignments remain independent

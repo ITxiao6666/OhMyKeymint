@@ -128,3 +128,54 @@ test('failed save keeps legacy selection and can retry the same migration', asyn
   assert.equal(count, 2)
   assert.deepEqual([...config.get('target')], ['com.example.app'])
 })
+
+test('in-flight writes keep newer clicks and concurrent backend additions for the next save', async () => {
+  const { ConfigOhMyKeyMint } = modules(false)('config_ohmykeymint')
+  let disk = ['com.old.app', 'uid:1000']
+  let release
+  let calls = 0
+  const config = new ConfigOhMyKeyMint({
+    async getScoop() { return [...disk] },
+    async updateScoop(added, removed) {
+      calls++
+      if (calls === 1) await new Promise(resolve => { release = resolve })
+      disk = [...new Set([...disk.filter(target => !removed.includes(target)), ...added])]
+      return [...disk]
+    },
+  })
+  await config.read()
+  config.set('target', ['com.first.app', 'uid:1000'])
+  const firstWrite = config.write()
+  config.set('target', ['com.second.app', 'uid:1000'])
+  disk.push('com.concurrent.app')
+  release()
+  await firstWrite
+  assert.deepEqual([...config.get('target')].sort(), ['com.second.app', 'com.concurrent.app', 'uid:1000'].sort())
+  assert.equal(disk.includes('com.first.app'), true)
+  await config.write()
+  assert.deepEqual(disk.sort(), ['com.second.app', 'com.concurrent.app', 'uid:1000'].sort())
+})
+
+test('a failed queued write retains new choices and retries against the last confirmed baseline', async () => {
+  const { ConfigOhMyKeyMint } = modules(false)('config_ohmykeymint')
+  let disk = ['com.old.app']
+  let reject
+  let calls = 0
+  const config = new ConfigOhMyKeyMint({
+    async getScoop() { return [...disk] },
+    async updateScoop(added, removed) {
+      if (++calls === 1) await new Promise((_, fail) => { reject = fail })
+      disk = [...new Set([...disk.filter(target => !removed.includes(target)), ...added])]
+      return [...disk]
+    },
+  })
+  await config.read()
+  config.set('target', ['com.first.app'])
+  const pending = config.write()
+  config.set('target', ['com.final.app'])
+  reject(new Error('write failed'))
+  await assert.rejects(pending, /write failed/)
+  assert.deepEqual([...config.get('target')], ['com.final.app'])
+  await config.write()
+  assert.deepEqual(disk, ['com.final.app'])
+})

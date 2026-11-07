@@ -40,16 +40,22 @@ export class ConfigOhMyKeyMint extends Config {
     // UI-managed package selection follows the upstream all-user format.
     // Preserve explicit UID rules; legacy package@user entries convert only
     // when the user explicitly saves, never merely by opening the picker.
-    const desired = new Set(this.get('target').map(value => {
+    const packageTarget = (value: string): string => {
       const target = parseScoopTarget(value)
       if (!target) throw new Error('Invalid package selection')
       return target.kind === 'uid' ? target.target : target.packageName
-    }))
+    }
+    const desired = new Set(this.get('target').map(packageTarget))
     const added = [...desired].filter(target => !this.#savedTargets.has(target))
     const removed = [...this.#savedTargets].filter(target => !desired.has(target))
     const saved = isDev() ? [...desired] : await this.#cli.updateScoop(added, removed)
-    this.set({ target: saved })
+    // Retain edits made while the bridge was writing its captured snapshot.
+    const current = new Set(this.get('target').map(packageTarget))
+    const merged = new Set(saved)
+    for (const target of current) if (!desired.has(target)) merged.add(target)
+    for (const target of desired) if (!current.has(target)) merged.delete(target)
     this.#savedTargets = new Set(saved)
+    this.set({ target: [...merged] })
   }
 
   async refresh(): Promise<void> {

@@ -225,6 +225,8 @@
     <string name="app_targets_auto_title">自动添加新应用包名</string>
     <string name="app_targets_auto_desc">开启后仅自动勾选当前最新安装的用户应用，其他新应用和已有应用均不自动添加。</string>
     <string name="app_targets_selected">已选择包名</string>
+    <string name="app_targets_saving">正在自动保存选择…</string>
+    <string name="app_targets_save_failed">当前选择尚未保存，请重试后生效。</string>
     <string name="app_targets_unselected">未选择包名</string>
     <string name="app_targets_auto_saved">自动添加设置已保存</string>
     <string name="app_targets_auto_error">无法读取或保存自动添加设置，请确认模块已更新。</string>

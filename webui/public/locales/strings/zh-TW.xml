@@ -178,6 +178,8 @@
     <string name="app_targets_auto_title">自動新增應用程式套件名稱</string>
     <string name="app_targets_auto_desc">開啟後僅自動勾選目前最新安裝的使用者應用程式，其他新應用程式和既有應用程式均不自動加入。</string>
     <string name="app_targets_selected">已選擇套件名稱</string>
+    <string name="app_targets_saving">正在自動儲存選擇…</string>
+    <string name="app_targets_save_failed">目前選擇尚未儲存，請重試後生效。</string>
     <string name="app_targets_unselected">未選擇套件名稱</string>
     <string name="app_targets_auto_saved">自動新增設定已儲存</string>
     <string name="app_targets_auto_error">無法讀取或儲存自動新增設定，請確認模組已更新。</string>
