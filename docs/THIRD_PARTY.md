@@ -123,8 +123,9 @@ tool completion report, not proof of successful Google provisioning.
 
 The local RKP protocol, CBOR/DICE verification, native KeymasterUtils ABI and
 V1 Java bridge are adapted from
-[eltavine/Duck-ToolBox](https://github.com/eltavine/Duck-ToolBox/tree/8d6a2470b1033c35946b72bb1f9bc56d8947dd63)
-through revision `8d6a2470b1033c35946b72bb1f9bc56d8947dd63` (MIT).
+[eltavine/Duck-ToolBox](https://github.com/eltavine/Duck-ToolBox/tree/75f78866071287ecc749dcbbf53dbd2fc47b4e67)
+including optional CSR fingerprint metadata from
+`75f78866071287ecc749dcbbf53dbd2fc47b4e67` (MIT).
 Relevant upstream paths are `crates/duck-rkp-device/src/` and
 `crates/duck-rkp/src/{cbor,verify}`. The V1 PureSoft MAC/AIDL construction also
 derives from `LazyBonesLZY/rkp-v1-oracle` revision `b28480c` (MIT), as credited

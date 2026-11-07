@@ -1,5 +1,5 @@
 //! Explicit, device-backed RKP issuance. No startup action, automatic import, or retries.
-// Protocols adapted from Duck-ToolBox 7567a8e084d31b1a6da3541bf0e8e2692ee45e0a (MIT).
+// Protocols adapted from Duck-ToolBox through 75f78866071287ecc749dcbbf53dbd2fc47b4e67 (MIT).
 use std::{
     fs::OpenOptions,
     os::{
@@ -26,6 +26,7 @@ use self::cbor::{as_array, as_bytes, as_i128, as_map, bytes, decode, encode, int
 pub mod cbor;
 pub mod cose;
 mod native;
+mod request;
 mod v1;
 pub mod verify;
 
@@ -56,6 +57,40 @@ impl Protocol {
     }
 }
 
+pub struct IssueOptions {
+    protocol: Protocol,
+    include_fingerprint: bool,
+    fingerprint: Option<String>,
+}
+
+impl IssueOptions {
+    pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Self> {
+        let mut protocol = None;
+        let mut include_fingerprint = false;
+        let mut fingerprint = None;
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--include-fingerprint" if !include_fingerprint => include_fingerprint = true,
+                "--fingerprint-base64" if fingerprint.is_none() => {
+                    let encoded = args.next().ok_or_else(|| anyhow!("missing fingerprint"))?;
+                    if encoded.len() > 1368 {
+                        bail!("fingerprint argument exceeds size limit");
+                    }
+                    let decoded =
+                        STANDARD.decode(&encoded).context("invalid fingerprint Base64")?;
+                    let value = String::from_utf8(decoded).context("fingerprint is not UTF-8")?;
+                    let value = value.trim();
+                    request::validate_fingerprint(value)?;
+                    fingerprint = Some(value.to_string());
+                }
+                _ if protocol.is_none() => protocol = Some(Protocol::parse(&arg)?),
+                _ => bail!("unknown or repeated RKP issuance option"),
+            }
+        }
+        Ok(Self { protocol: protocol.unwrap_or(Protocol::Auto), include_fingerprint, fingerprint })
+    }
+}
+
 struct Eek {
     challenge: Vec<u8>,
     p256: Vec<u8>,
@@ -63,7 +98,7 @@ struct Eek {
 }
 
 /// Called only after the CLI's explicit confirmation. One submission at most per call.
-pub fn issue(protocol: Protocol) -> Result<String> {
+pub fn issue(options: IssueOptions) -> Result<String> {
     if !cfg!(all(target_os = "android", target_arch = "aarch64")) {
         bail!("Local RKP issuance requires Android arm64");
     }
@@ -84,18 +119,17 @@ pub fn issue(protocol: Protocol) -> Result<String> {
     if unsafe { libc::flock(data.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         bail!("Another OMK data operation is in progress");
     }
-    // Check storage before spending a server challenge. This creates only the approved
-    // private result directory, never a seed, identity, device configuration, or key.
+    let fingerprint = match options.fingerprint {
+        Some(value) => value,
+        None => {
+            rsproperties::get::<String>("ro.build.fingerprint").context("read build fingerprint")?
+        }
+    };
+    request::validate_fingerprint(&fingerprint)?;
+    let metadata = options.include_fingerprint.then_some(fingerprint.as_str());
+    let methods = candidate_methods(options.protocol)?;
+    // Validate options before creating the approved private result directory.
     crate::local_rkp_artifacts::prepare()?;
-    let fingerprint =
-        rsproperties::get::<String>("ro.build.fingerprint").context("read build fingerprint")?;
-    if fingerprint.is_empty()
-        || fingerprint.len() > 1024
-        || fingerprint.chars().any(char::is_control)
-    {
-        bail!("device build fingerprint is missing or invalid");
-    }
-    let methods = candidate_methods(protocol)?;
     let random = SystemRandom::new();
     let private = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &random)
         .map_err(|_| anyhow!("cannot generate local P-256 key"))?;
@@ -115,7 +149,7 @@ pub fn issue(protocol: Protocol) -> Result<String> {
     // Fallback is allowed only for LOCAL CSR construction failures. Once submitted to
     // Google, every failure is final, including a parse/validation/storage failure.
     for method in methods {
-        match build_csr(method, &eek, &public) {
+        match build_csr(method, &eek, &public, metadata) {
             Ok(value) => {
                 csr = Some(value);
                 break;
@@ -154,10 +188,15 @@ fn candidate_methods(protocol: Protocol) -> Result<Vec<Protocol>> {
     Ok(candidates)
 }
 
-fn build_csr(protocol: Protocol, eek: &Eek, public: &Value) -> Result<Vec<u8>> {
+fn build_csr(
+    protocol: Protocol,
+    eek: &Eek,
+    public: &Value,
+    fingerprint: Option<&str>,
+) -> Result<Vec<u8>> {
     match protocol {
-        Protocol::V1 => v1::aidl(eek, public),
-        Protocol::V1Native => v1::native(eek, public),
+        Protocol::V1 => v1::aidl(eek, public, fingerprint),
+        Protocol::V1Native => v1::native(eek, public, fingerprint),
         Protocol::V2 => {
             let payload = encode(&Value::Map(vec![
                 (int(4), bytes(eek.challenge.as_slice())),
@@ -176,6 +215,7 @@ fn build_csr(protocol: Protocol, eek: &Eek, public: &Value) -> Result<Vec<u8>> {
                 }
                 as_bytes(required(fields, 61)?, "V2 CSR")?.to_vec()
             };
+            let csr = request::with_fingerprint(&csr, fingerprint)?;
             validate_v2(&csr, &eek.challenge, public)?;
             Ok(csr)
         }
@@ -433,6 +473,52 @@ mod tests {
         }
         assert!(Protocol::parse("v3").is_err());
     }
+
+    #[test]
+    fn issuance_options_are_explicit_and_validated_before_side_effects() {
+        let defaults = IssueOptions::parse(Vec::<String>::new().into_iter()).unwrap();
+        assert_eq!(defaults.protocol, Protocol::Auto);
+        assert!(!defaults.include_fingerprint);
+        assert!(defaults.fingerprint.is_none());
+        for protocol in ["auto", "v1", "v2", "v1-native"] {
+            let options = IssueOptions::parse(
+                [
+                    protocol.to_string(),
+                    "--include-fingerprint".into(),
+                    "--fingerprint-base64".into(),
+                    STANDARD.encode("  source/device/build  "),
+                ]
+                .into_iter(),
+            )
+            .unwrap();
+            assert_eq!(options.protocol, Protocol::parse(protocol).unwrap());
+            assert!(options.include_fingerprint);
+            assert_eq!(options.fingerprint.as_deref(), Some("source/device/build"));
+        }
+        let override_only = IssueOptions::parse(
+            ["--fingerprint-base64".to_string(), STANDARD.encode("source/build")].into_iter(),
+        )
+        .unwrap();
+        assert!(!override_only.include_fingerprint);
+        for args in [
+            vec!["--fingerprint-base64".into()],
+            vec!["--fingerprint-base64".into(), "%%%".into()],
+            vec!["--fingerprint-base64".into(), STANDARD.encode([0xff])],
+            vec!["--fingerprint-base64".into(), STANDARD.encode(" ")],
+            vec!["--fingerprint-base64".into(), STANDARD.encode("x".repeat(1025))],
+            vec!["--fingerprint-base64".into(), STANDARD.encode("source\nbuild")],
+            vec!["v2".into(), "v1".into()],
+            vec!["--include-fingerprint".into(), "--include-fingerprint".into()],
+            vec![
+                "--fingerprint-base64".into(),
+                STANDARD.encode("source/build"),
+                "--fingerprint-base64".into(),
+                STANDARD.encode("other/build"),
+            ],
+        ] {
+            assert!(IssueOptions::parse(args.into_iter()).is_err());
+        }
+    }
     #[test]
     fn signed_response_requires_exactly_one_nonempty_key_chain() {
         let reply =
@@ -534,6 +620,26 @@ mod tests {
             (int(-3), bytes(&point[33..])),
         ]);
         let mut csr = signed_v2_fixture(&public, b"one-time-challenge");
+        let metadata_csr = request::with_fingerprint(&csr, Some("source/device/build")).unwrap();
+        validate_v2(&metadata_csr, b"one-time-challenge", &public).unwrap();
+        assert_eq!(
+            verify::verify_csr(&metadata_csr).unwrap().unverified_fingerprint.as_deref(),
+            Some("source/device/build")
+        );
+        let raw_before = cbor::array_items_raw(&csr).unwrap();
+        let raw_after = cbor::array_items_raw(&metadata_csr).unwrap();
+        assert_eq!(raw_before, &raw_after[..4]);
+        assert!(validate_v2(&metadata_csr, b"wrong-challenge", &public).is_err());
+        let mut tampered = decode(&metadata_csr).unwrap();
+        let Value::Array(ref mut fields) = tampered else { unreachable!() };
+        fields[4] = Value::Map(vec![(Value::Text("other".into()), Value::Text("build".into()))]);
+        assert!(validate_v2(&encode(&tampered).unwrap(), b"one-time-challenge", &public).is_err());
+        let Value::Array(ref mut fields) = tampered else { unreachable!() };
+        fields[4] = request::unverified_device_info(Some("source/device/build")).unwrap();
+        let Value::Array(ref mut signed) = fields[3] else { unreachable!() };
+        let Value::Bytes(ref mut signature) = signed[3] else { unreachable!() };
+        signature[0] ^= 1;
+        assert!(validate_v2(&encode(&tampered).unwrap(), b"one-time-challenge", &public).is_err());
         validate_v2(&csr, b"one-time-challenge", &public).unwrap();
         assert!(validate_v2(&csr, b"other-challenge", &public).is_err());
         assert!(validate_v2(&csr, b"one-time-challenge", &Value::Map(vec![])).is_err());

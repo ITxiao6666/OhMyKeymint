@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import {
   MiuixDialog,
   MiuixRadioButtonPreference,
+  MiuixSwitchPreference,
   MiuixIcon,
   MiuixButton,
   MiuixNavigationBar,
@@ -68,6 +69,8 @@ const rkpIssueConfirmOpen = ref(false)
 const rkpImportConfirmOpen = ref(false)
 const rkpIssueBusy = ref(false)
 const rkpProtocol = ref<RkpProtocol>('auto')
+const rkpIncludeFingerprint = ref(false)
+const rkpFingerprint = ref('')
 const rkpProtocols: RkpProtocol[] = ['auto', 'v2', 'v1', 'v1-native']
 const rkpListBusy = ref(false)
 const rkpIssuanceBusy = computed(() => rkpIssueBusy.value || rkpListBusy.value)
@@ -558,7 +561,7 @@ async function issueRkpKeybox(): Promise<void> {
       rkpIssueConfirmOpen.value = false
       return
     }
-    const artifact = await cli.issueRkpKeybox(rkpProtocol.value)
+    const artifact = await cli.issueRkpKeybox(rkpProtocol.value, rkpIncludeFingerprint.value, rkpFingerprint.value)
     rkpIssuedArtifacts.value = [artifact, ...rkpIssuedArtifacts.value.filter(item => item.id !== artifact.id)]
     notify(i18n.t('rkp_issue_completed'))
     rkpIssueConfirmOpen.value = false
@@ -931,10 +934,22 @@ watch(rkpImportConfirmOpen, open => {
             :key="protocol"
             :model-value="rkpProtocol === protocol"
             :title="i18n.t(`rkp_protocol_${protocol}`)"
-            :disabled="rkpIssuanceBusy"
+            :disabled="rkpIssuanceBusy || rkpIssueConfirmOpen"
             @select="rkpProtocol = protocol"
           />
         </div>
+        <MiuixSwitchPreference
+          v-model="rkpIncludeFingerprint"
+          :title="i18n.t('rkp_include_fingerprint')"
+          :summary="i18n.t('rkp_include_fingerprint_desc')"
+          :disabled="rkpIssuanceBusy || rkpIssueConfirmOpen"
+        />
+        <label class="rkp-fingerprint-field">
+          <span>{{ i18n.t('rkp_fingerprint') }}</span>
+          <input v-model="rkpFingerprint" :disabled="rkpIssuanceBusy || rkpIssueConfirmOpen"
+            maxlength="1024" spellcheck="false" autocapitalize="none" autocomplete="off"
+            :placeholder="i18n.t('rkp_fingerprint_placeholder')">
+        </label>
         <p v-if="rkpIssueError" role="alert">{{ rkpIssueError }}</p>
         <p v-if="rkpListBusy" class="rkp-loading" role="status">
           <MiuixProgressIndicator type="circular" :size="18" />
@@ -972,6 +987,8 @@ watch(rkpImportConfirmOpen, open => {
       <div class="confirm-sheet" :aria-busy="rkpIssueBusy">
         <p>{{ i18n.t('rkp_issue_warning') }}</p>
         <p>{{ i18n.t('rkp_protocol') }}: {{ i18n.t(`rkp_protocol_${rkpProtocol}`) }}</p>
+        <p>{{ i18n.t(rkpIncludeFingerprint ? 'rkp_include_fingerprint_on' : 'rkp_include_fingerprint_off') }}</p>
+        <p>{{ i18n.t('rkp_fingerprint') }}: {{ rkpFingerprint.trim() || i18n.t('rkp_fingerprint_placeholder') }}</p>
         <p v-if="rkpIssueError" role="alert">{{ rkpIssueError }}</p>
         <p v-if="rkpIssueBusy" role="status">{{ i18n.t('rkp_issue_running') }}</p>
         <div class="confirm-actions">

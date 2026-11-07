@@ -535,12 +535,19 @@ export class Cli {
     if (output !== 'rkp_tool_completed') throw new Error('OMK returned an unexpected RKP tool result')
   }
 
-  async issueRkpKeybox(protocol: RkpProtocol = 'auto'): Promise<RkpIssuedArtifact> {
+  async issueRkpKeybox(protocol: RkpProtocol = 'auto', includeFingerprint = false, fingerprint = ''): Promise<RkpIssuedArtifact> {
     if (!['auto', 'v1', 'v2', 'v1-native'].includes(protocol)) throw new Error('Invalid RKP protocol')
+    const value = fingerprint.trim()
+    if (typeof includeFingerprint !== 'boolean' || new TextEncoder().encode(value).length > 1024 || /[\x00-\x1f\x7f-\x9f]/u.test(value)) {
+      throw new Error('Invalid RKP build fingerprint')
+    }
+    const args = ['--webui-rkp-issue', '--confirm-issuance', protocol]
+    if (includeFingerprint) args.push('--include-fingerprint')
+    if (value) args.push('--fingerprint-base64', encodeBase64Utf8(value))
     const { keymint } = await this.#getHelperPaths()
     const output = await this.#run(
       keymint,
-      ['--webui-rkp-issue', '--confirm-issuance', protocol],
+      args,
       MAX_RKP_ISSUED_JSON_BYTES,
     )
     return parseRkpIssuedArtifact(parseCanonicalJson(output, 'issued RKP metadata'))

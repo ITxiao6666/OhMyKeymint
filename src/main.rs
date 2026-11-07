@@ -842,11 +842,7 @@ fn handle_local_rkp_command(
             if args.next().as_deref() != Some("--confirm-issuance") {
                 return Some(Err("RKP issuance requires --confirm-issuance".into()));
             }
-            let protocol = args.next().unwrap_or_else(|| "auto".into());
-            if args.next().is_some() {
-                return Some(Err("RKP issuance accepts only one optional protocol".into()));
-            }
-            local_rkp::Protocol::parse(&protocol).and_then(local_rkp::issue)
+            local_rkp::IssueOptions::parse(args).and_then(local_rkp::issue)
         }
         "--webui-rkp-list" => {
             if args.next().is_some() {

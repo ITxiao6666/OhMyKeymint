@@ -247,6 +247,12 @@
     <string name="rkp_refresh_list">Refresh list</string>
     <string name="rkp_list_loading">Loading staged Keyboxes…</string>
     <string name="rkp_issue_button">Issue certificate</string>
+    <string name="rkp_include_fingerprint">Include build fingerprint in signing request</string>
+    <string name="rkp_include_fingerprint_desc">Off by default. The fingerprint must match the firmware represented by the RKP VBMeta digest. Challenge requests still send it when this is off.</string>
+    <string name="rkp_fingerprint">Build fingerprint for this issuance</string>
+    <string name="rkp_fingerprint_placeholder">Leave empty to use the current device fingerprint</string>
+    <string name="rkp_include_fingerprint_on">CSR fingerprint: on (metadata not authenticated by the hardware signature)</string>
+    <string name="rkp_include_fingerprint_off">CSR fingerprint: off</string>
     <string name="rkp_protocol">Issuance protocol</string>
     <string name="rkp_protocol_auto">Automatic (recommended)</string>
     <string name="rkp_protocol_v2">V2 native</string>

@@ -1565,7 +1565,8 @@ V2 verifies the CSR/DICE signatures, structure, challenge and generated public
 key binding. V1 encrypted evidence can only be validated fully by the server.
 
 Every issuance requires a separate confirmation. The helper sends the real
-`ro.build.fingerprint`, generated public key and device RKP evidence only to
+`ro.build.fingerprint` (or an explicit per-issuance override), generated public
+key and device RKP evidence only to
 `https://remoteprovisioning.googleapis.com/v1:fetchEekChain` and
 `https://remoteprovisioning.googleapis.com/v1:signCertificates` over verified
 HTTPS. It never uploads the software private key. Redirects and automatic
@@ -1573,6 +1574,17 @@ signing retries are disabled. A timeout, malformed response or failed save
 after submission must not be treated as permission to retry blindly.
 Each network operation is bounded to 30 seconds and 256 KiB of response;
 each local bridge/worker is bounded to 30 seconds.
+
+**Include build fingerprint in signing request** is off by default. The
+effective fingerprint is always sent when fetching the challenge; this option
+also adds it as unverified metadata in the signing CSR. V1 places it in the
+unverified DeviceInfo map and V2 appends a fifth AuthenticatedRequest field.
+Signed and encrypted evidence retains its original bytes. Metadata is not
+covered by the hardware signature and must refer to the same firmware build
+as the device evidence's VBMeta digest. A per-issuance fingerprint override
+applies consistently to challenge fetching and all local protocol candidates.
+The choice never changes automatically after errors. Values are bounded to
+1024 UTF-8 bytes without control characters. These options are not persisted.
 
 Issued chains must match the generated key and pass certificate validity,
 issuer signature, CA/path-length/key-usage and pinned Google root checks.
@@ -1601,6 +1613,10 @@ keymint --webui-rkp-import <32-lowercase-hex-id> --confirm-replace
 ```
 
 The optional protocol argument accepts `auto`, `v1`, `v2`, or `v1-native`.
+Add `--include-fingerprint` to include unsigned CSR metadata, and optionally
+`--fingerprint-base64 <standard-base64-utf8>` to override the build fingerprint
+for this issuance. Without an override the current device property is read
+when issuing. The WebUI confirmation displays both choices before submission.
 Browser previews never execute these commands. Android arm64 is required;
 device and Google server acceptance must be tested on the actual firmware.
 The inherited V2 DICE validator recognizes Android 14, 15 and 16 profiles;

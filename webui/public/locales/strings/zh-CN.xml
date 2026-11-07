@@ -247,6 +247,12 @@
     <string name="rkp_refresh_list">刷新列表</string>
     <string name="rkp_list_loading">正在读取暂存的Keybox…</string>
     <string name="rkp_issue_button">签发证书</string>
+    <string name="rkp_include_fingerprint">签名请求附带构建指纹</string>
+    <string name="rkp_include_fingerprint_desc">默认关闭。指纹需与设备RKP证明中的VBMeta摘要对应同一固件；关闭后获取challenge仍会发送指纹。</string>
+    <string name="rkp_fingerprint">本次签发构建指纹</string>
+    <string name="rkp_fingerprint_placeholder">留空使用当前设备指纹</string>
+    <string name="rkp_include_fingerprint_on">CSR附带指纹：开启（未经硬件签名认证的元数据）</string>
+    <string name="rkp_include_fingerprint_off">CSR附带指纹：关闭</string>
     <string name="rkp_protocol">签发协议</string>
     <string name="rkp_protocol_auto">自动选择（推荐）</string>
     <string name="rkp_protocol_v2">V2 原生接口</string>

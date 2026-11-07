@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Result};
 use kmr_wire::cbor::value::Value;
 use ring::rand::{SecureRandom, SystemRandom};
 
-pub(super) fn aidl(eek: &Eek, public: &Value) -> Result<Vec<u8>> {
+pub(super) fn aidl(eek: &Eek, public: &Value, fingerprint: Option<&str>) -> Result<Vec<u8>> {
     let maced = cose::maced_key(public)?;
     let mut request = Vec::new();
     for field in [&eek.challenge, &maced, &eek.p256, &eek.x25519] {
@@ -15,10 +15,15 @@ pub(super) fn aidl(eek: &Eek, public: &Value) -> Result<Vec<u8>> {
         request.extend_from_slice(field);
     }
     let reply = crate::rkp_v1_bridge::exchange(&request)?;
-    parse_bridge(&reply, &eek.challenge, public)
+    parse_bridge(&reply, &eek.challenge, public, fingerprint)
 }
 
-fn parse_bridge(reply: &[u8], challenge: &[u8], public: &Value) -> Result<Vec<u8>> {
+fn parse_bridge(
+    reply: &[u8],
+    challenge: &[u8],
+    public: &Value,
+    fingerprint: Option<&str>,
+) -> Result<Vec<u8>> {
     let mut rest = reply;
     let status = read_int(&mut rest)?;
     if status != 0 {
@@ -35,7 +40,7 @@ fn parse_bridge(reply: &[u8], challenge: &[u8], public: &Value) -> Result<Vec<u8
     if !rest.is_empty() {
         bail!("trailing V1 bridge response");
     }
-    assemble(mac, device, protected, challenge, public)
+    assemble(mac, device, protected, challenge, public, fingerprint)
 }
 
 fn read_int(rest: &mut &[u8]) -> Result<u32> {
@@ -56,7 +61,7 @@ fn read_bytes<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8]> {
     Ok(field)
 }
 
-pub(super) fn native(eek: &Eek, public: &Value) -> Result<Vec<u8>> {
+pub(super) fn native(eek: &Eek, public: &Value, fingerprint: Option<&str>) -> Result<Vec<u8>> {
     let chain = if !eek.x25519.is_empty() { &eek.x25519 } else { &eek.p256 };
     let mut mac_key = [0; 32];
     SystemRandom::new()
@@ -84,6 +89,7 @@ pub(super) fn native(eek: &Eek, public: &Value) -> Result<Vec<u8>> {
         as_bytes(required(fields, 60)?, "ProtectedData")?,
         &eek.challenge,
         public,
+        fingerprint,
     )
 }
 
@@ -115,6 +121,7 @@ fn assemble(
     protected: &[u8],
     challenge: &[u8],
     public: &Value,
+    fingerprint: Option<&str>,
 ) -> Result<Vec<u8>> {
     if mac.len() != 32 || device.len() > BUFFER_SIZE || protected.len() > BUFFER_SIZE {
         bail!("invalid V1 response field sizes");
@@ -153,7 +160,7 @@ fn assemble(
     // canonicalize these or the encrypted evidence. The server alone can decrypt it.
     let mut csr = vec![0x84, 0x82];
     csr.extend_from_slice(device);
-    csr.push(0xa0);
+    csr.extend(encode(&super::request::unverified_device_info(fingerprint)?)?);
     csr.extend(encode(&bytes(challenge))?);
     csr.extend_from_slice(protected);
     csr.extend(cose::maced_keys(public, mac)?);
@@ -171,10 +178,10 @@ mod tests {
         let mut reply = 1u32.to_be_bytes().to_vec();
         reply.extend((-18i32).to_be_bytes());
         reply.extend(b"SECRET HAL MESSAGE");
-        let error = parse_bridge(&reply, b"challenge", &Value::Null).unwrap_err().to_string();
+        let error = parse_bridge(&reply, b"challenge", &Value::Null, None).unwrap_err().to_string();
         assert!(error.contains("-18"));
         assert!(!error.contains("SECRET"));
-        assert!(parse_bridge(&[], &[], &Value::Null).is_err());
+        assert!(parse_bridge(&[], &[], &Value::Null, None).is_err());
     }
     #[test]
     fn opaque_device_and_encrypted_bytes_are_preserved() {
@@ -187,9 +194,22 @@ mod tests {
             Value::Array(vec![Value::Array(vec![bytes([]), Value::Map(vec![]), Value::Null])]),
         ]))
         .unwrap();
-        let csr = assemble(&[7; 32], &device, &protected, b"test", &Value::Map(vec![])).unwrap();
-        assert_eq!(&csr[2..2 + device.len()], &device);
-        assert!(csr.windows(protected.len()).any(|part| part == protected));
-        assert!(assemble(&[7; 31], &device, &protected, b"test", &Value::Null).is_err());
+        for fingerprint in [None, Some("source/device/build")] {
+            let csr =
+                assemble(&[7; 32], &device, &protected, b"test", &Value::Map(vec![]), fingerprint)
+                    .unwrap();
+            assert_eq!(&csr[2..2 + device.len()], &device);
+            let raw = super::super::cbor::array_items_raw(&csr).unwrap();
+            assert_eq!(raw[2], protected);
+            let fields = decode(&csr).unwrap();
+            let fields = as_array(&fields, "CSR").unwrap();
+            let info = as_array(&fields[0], "device info").unwrap();
+            assert_eq!(
+                info[1],
+                super::super::request::unverified_device_info(fingerprint).unwrap()
+            );
+            assert_eq!(fields[1], bytes(b"test"));
+        }
+        assert!(assemble(&[7; 31], &device, &protected, b"test", &Value::Null, None).is_err());
     }
 }

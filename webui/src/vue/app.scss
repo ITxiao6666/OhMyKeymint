@@ -601,6 +601,8 @@ button { touch-action: manipulation; }
 
 .confirm-sheet { display: grid; gap: 18px; padding-top: 4px; }
 .confirm-sheet p { margin: 0; overflow-wrap: anywhere; color: var(--m-color-on-surface-variant-summary); line-height: 1.45; }
+.rkp-fingerprint-field { display: grid; gap: 8px; color: var(--m-color-on-surface-variant-summary); font-size: 14px; }
+.rkp-fingerprint-field input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--m-color-outline-variant); border-radius: 12px; background: var(--m-color-surface-container); color: var(--m-color-on-surface); font: inherit; }
 .confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .confirm-actions .m-button { gap: 6px; }
 .rkp-protocol-options .m-basic-component::after { content: none; }

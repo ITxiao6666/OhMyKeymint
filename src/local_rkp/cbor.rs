@@ -26,6 +26,25 @@ pub const MAX_INPUT_BYTES: usize = 256 * 1024;
 const MAX_DEPTH: usize = 16;
 const MAX_CONTAINER_ITEMS: u64 = 64;
 
+/// Return original array elements without re-encoding authenticated evidence.
+pub(super) fn array_items_raw(bytes: &[u8]) -> Result<Vec<&[u8]>> {
+    preflight(bytes)?;
+    let mut scanner = Scanner { bytes, position: 0 };
+    let initial = scanner.byte()?;
+    ensure!(initial >> 5 == 4, "CBOR item is not an array");
+    let length = scanner.argument(initial & 31)?;
+    let mut items = Vec::new();
+    while match length {
+        Some(length) => items.len() < length as usize,
+        None => scanner.bytes.get(scanner.position) != Some(&0xff),
+    } {
+        let start = scanner.position;
+        scanner.item(1)?;
+        items.push(&bytes[start..scanner.position]);
+    }
+    Ok(items)
+}
+
 // inspect lengths and nesting before the general decoder can allocate containers
 fn preflight(bytes: &[u8]) -> Result<()> {
     ensure!(

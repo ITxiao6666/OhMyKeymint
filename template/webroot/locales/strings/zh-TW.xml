@@ -192,6 +192,12 @@
     <string name="tools_repair_rkp_desc">呼叫手機原廠配置工具，涉及持久寫入，執行前需確認風險。</string>
     <string name="rkp_repair_warning">僅限相容的驍龍裝置。原廠工具可能永久修改 persist/TEE，失敗或逾時也可能已寫入，不保證可還原或修復成功。正常裝置勿用，請勿盲目重試。使用前請務必備份好您原來的 persist 分割區。</string>
     <string name="rkp_repair_confirm">確定</string>
+    <string name="rkp_include_fingerprint">簽章請求附帶建構指紋</string>
+    <string name="rkp_include_fingerprint_desc">預設關閉。指紋須與裝置RKP證明中的VBMeta摘要對應相同韌體；關閉後取得challenge仍會傳送指紋。</string>
+    <string name="rkp_fingerprint">本次簽發建構指紋</string>
+    <string name="rkp_fingerprint_placeholder">留空使用目前裝置指紋</string>
+    <string name="rkp_include_fingerprint_on">CSR附帶指紋：開啟（未經硬體簽章認證的中繼資料）</string>
+    <string name="rkp_include_fingerprint_off">CSR附帶指紋：關閉</string>
     <string name="rkp_tool_completed">原廠工具回報執行完成；RKP憑證下發與金鑰認證效果仍需另外驗證。</string>
     <string name="soter_local_title">SOTER 本機身分</string>
     <string name="soter_bulk_title">為已勾選 APP 分配本機身分</string>
