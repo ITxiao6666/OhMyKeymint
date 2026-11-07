@@ -170,6 +170,11 @@
     <string name="prompt_adb_disabler_applied">ADB Disabler settings applied. Some changes take effect after reboot.</string>
     <string name="prompt_adb_disabler_disabled">ADB Disabler disabled. Existing changes remain until the device state is changed.</string>
     <string name="tools_security_patch">Security patch settings</string>
+    <string name="tools_security_patch_desc">Sync or restore the reported security patch date</string>
+    <string name="tools_rkp">Remote key provisioning</string>
+    <string name="tools_rkp_desc">Fix RKP or issue a local RKP Keybox</string>
+    <string name="tools_keybox_attestation">Keybox &amp; attestation</string>
+    <string name="tools_play_integrity">Play Integrity</string>
     <string name="tools_sync_patch_desc">Sync to the latest Google security patch date</string>
     <string name="tools_restore_patch_desc">Restore the device's default security patch</string>
     <string name="tools_pif_desc">Fetch and apply a Pixel fingerprint for PIF spoofing</string>

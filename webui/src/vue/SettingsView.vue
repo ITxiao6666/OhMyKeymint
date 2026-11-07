@@ -242,7 +242,7 @@ onBeforeUnmount(() => {
     <MiuixTopAppBar :title="translate('settings_title', 'Settings')" />
 
     <div class="settings-content">
-      <h1 id="settings-view-title" class="sr-only">
+      <h1 id="settings-view-title" class="page-large-title">
         {{ translate('settings_title', 'Settings') }}
       </h1>
 
@@ -469,16 +469,6 @@ onBeforeUnmount(() => {
   color: var(--m-color-on-background);
 }
 
-.settings-view :deep(.m-top-app-bar__row) {
-  min-height: 64px;
-}
-
-.settings-view :deep(.m-top-app-bar__title .m-text) {
-  font-size: clamp(21px, 5vw, 25px);
-  font-weight: 700;
-  letter-spacing: -.01em;
-}
-
 .settings-content {
   box-sizing: border-box;
   width: min(100%, 720px);
@@ -625,18 +615,6 @@ onBeforeUnmount(() => {
 .scale-preference__summary { margin-top: 3px; }
 .scale-preference__value { white-space: nowrap; }
 .scale-preference :deep(.m-slider) { margin-inline: 2px; }
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
 
 @media (max-width: 420px) {
   .settings-content {

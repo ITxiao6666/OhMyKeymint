@@ -137,6 +137,22 @@ Keybox. Open it from the Oh My Keymint module page in
 KernelSU. With Magisk, open an installed KSUWebUIStandalone or WebUI X host and
 select Oh My Keymint; the module does not install either host.
 
+The WebUI has Home, Tools, and Settings pages. Each page opens with a MIUIX
+large title that fades into the top app bar's small title over the first 48 px
+of scrolling. Home starts with a status card showing whether OMK KeyMint is
+running, its PID, or a loading or error state. Tools groups its entries into
+**App management** (package selection), **Keybox & attestation** (**Change
+Keybox**, **Remote key provisioning**, and **Local SOTER identities**), and
+**Play Integrity** (**Spoof PIF fingerprint**, **Clear GMS cache**, and
+**Security patch settings**). **Remote key provisioning** opens a bottom sheet
+with **Fix RKP** and **Issue local RKP Keybox**. **Security patch settings**
+shows the current patch date and opens a bottom sheet with **Sync security
+patch** and **Restore default security patch**. Choosing a sheet action closes
+the sheet before the action's own confirmation or panel opens. The close button,
+a downward drag, or Android Back dismisses a sheet without leaving Tools. A row
+shows a progress indicator while its action runs, and a sheet row is disabled
+only when all of its actions are busy.
+
 The main package picker shows user applications in separate **Selected package
 names** and **Unselected package names** sections. System applications,
 including Android overlays, are managed through **More > Add system apps**.

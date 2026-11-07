@@ -1,13 +1,16 @@
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue'
 import {
   MiuixArrowPreference,
   MiuixCard,
   MiuixIcon,
+  MiuixIconButton,
   MiuixProgressIndicator,
   MiuixSmallTitle,
   MiuixTopAppBar,
 } from 'miuix-vue'
-import { AddCircle, BankCards, Replace, Reset, Update } from 'miuix-vue/icons'
+import { AddCircle, BankCards, Close, Lock, Replace, Reset, Update } from 'miuix-vue/icons'
+import MiuixBottomSheet from './StableBottomSheet.vue'
 import { i18n } from '../i18n'
 
 export type ToolEvent =
@@ -22,11 +25,30 @@ export type ToolEvent =
   | 'openSoterLocal'
 
 type BusyPatch = 'sync' | 'restore' | null
+type SheetId = 'rkp' | 'patch'
+type IconValue = typeof AddCircle | null
+
+interface ToolAction {
+  event: ToolEvent
+  icon: IconValue
+  title: string
+  summary: string
+}
+
+interface ToolRow {
+  key: string
+  icon: IconValue
+  title: string
+  summary: string
+  event?: ToolEvent
+  sheet?: SheetId
+}
 
 const props = defineProps<{
   securityPatchBusy: BusyPatch
   maintenanceBusy: 'gms' | 'rkp' | null
   rkpIssuanceBusy: boolean
+  securityPatch: string | null
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +61,8 @@ const emit = defineEmits<{
   repairRkp: []
   issueRkp: []
   openSoterLocal: []
+  'overlay-open': []
+  'overlay-close': []
 }>()
 
 function runTool(event: ToolEvent): void {
@@ -60,83 +84,131 @@ function tr(key: string, fallback: string): string {
   return value === key ? fallback : value
 }
 
-const groups = [
-  {
-    title: tr('tools_app_management', 'App management'),
-    items: [{
-      event: 'openAppTargets' as const,
-      icon: AddCircle,
-      title: tr('app_targets_title', 'Add package names'),
-      summary: tr('tools_app_targets_desc', 'Choose which installed apps are routed through Oh My Keymint.'),
-    }],
-  },
-  {
-    title: tr('tools_key_management', 'Key management'),
-    items: [
+const activeSheet = ref<SheetId | null>(null)
+const sheetOpen = computed({
+  get: () => activeSheet.value !== null,
+  set: (open: boolean) => { if (!open) activeSheet.value = null },
+})
+// Keep the last sheet's content while the close animation plays.
+const shownSheet = ref<SheetId>('rkp')
+
+watch(activeSheet, (sheet, previous) => {
+  if (sheet !== null) shownSheet.value = sheet
+  if (sheet !== null && previous === null) emit('overlay-open')
+  else if (sheet === null && previous !== null) emit('overlay-close')
+})
+
+defineExpose({ dismissOverlay: () => { activeSheet.value = null } })
+
+const sheets: Record<SheetId, { title: string, actions: ToolAction[] }> = {
+  rkp: {
+    title: tr('tools_rkp', 'Remote key provisioning'),
+    actions: [
       {
-        event: 'openSoterLocal' as const,
-        icon: BankCards,
-        title: tr('soter_local_title', 'Local SOTER identities'),
-        summary: tr('soter_local_tool_desc', 'Create random local identities and set app CPU-ID overrides.'),
-      },
-      {
-        event: 'installKeybox' as const,
-        icon: Replace,
-        title: tr('menu_replace_keybox', 'Change Keybox'),
-        summary: tr('tools_keybox_desc', 'Choose a Keybox.xml file and install it for Oh My Keymint.'),
-      },
-      {
-        event: 'repairRkp' as const,
+        event: 'repairRkp',
         icon: Reset,
         title: tr('tools_repair_rkp', 'Fix RKP'),
         summary: tr('tools_repair_rkp_desc', 'Run the vendor provisioning tool after confirming the persistent-write risk.'),
       },
       {
-        event: 'issueRkp' as const,
+        event: 'issueRkp',
         icon: BankCards,
         title: tr('tools_issue_rkp', 'Issue local RKP Keybox'),
         summary: tr('tools_issue_rkp_desc', 'Use this device\'s RKP service to request a certificate for a locally generated key.'),
       },
     ],
   },
-  {
-    title: tr('tools_fingerprint_spoofing', 'Fingerprint spoofing'),
-    items: [{
-      event: 'spoofPif' as const,
-      icon: null,
-      title: tr('menu_spoof_pif_fingerprint', 'Spoof PIF fingerprint'),
-      summary: tr('tools_pif_desc', 'Fetch and apply a Pixel fingerprint for Play Integrity.'),
-    }, {
-      event: 'clearGmsCache' as const,
-      icon: Reset,
-      title: tr('tools_clear_gms_cache', 'Clear GMS cache'),
-      summary: tr('tools_clear_gms_cache_desc', 'Clear Play services and Play Store caches, keep app data, then stop the specified processes.'),
-    }],
-  },
-  {
-    title: tr('tools_security_patch', 'Set security patch'),
-    items: [
+  patch: {
+    title: tr('tools_security_patch', 'Security patch settings'),
+    actions: [
       {
-        event: 'syncSecurityPatch' as const,
+        event: 'syncSecurityPatch',
         icon: Update,
         title: tr('menu_sync_security_patch', 'Sync security patch'),
         summary: tr('tools_sync_patch_desc', 'Apply the latest Google security patch date. A reboot is required.'),
       },
       {
-        event: 'restoreSecurityPatch' as const,
+        event: 'restoreSecurityPatch',
         icon: Reset,
         title: tr('menu_restore_default_security_patch', 'Restore default security patch'),
         summary: tr('tools_restore_patch_desc', 'Restore the device default security patch date. A reboot is required.'),
       },
     ],
   },
-]
+}
+
+const groups = computed<{ title: string, rows: ToolRow[] }[]>(() => [
+  {
+    title: tr('tools_app_management', 'App management'),
+    rows: [{
+      key: 'targets',
+      event: 'openAppTargets',
+      icon: AddCircle,
+      title: tr('app_targets_title', 'Add package names'),
+      summary: tr('tools_app_targets_desc', 'Choose which installed apps are routed through Oh My Keymint.'),
+    }],
+  },
+  {
+    title: tr('tools_keybox_attestation', 'Keybox & attestation'),
+    rows: [
+      {
+        key: 'keybox',
+        event: 'installKeybox',
+        icon: Replace,
+        title: tr('menu_replace_keybox', 'Change Keybox'),
+        summary: tr('tools_keybox_desc', 'Choose a Keybox.xml file and install it for Oh My Keymint.'),
+      },
+      {
+        key: 'rkp',
+        sheet: 'rkp',
+        icon: Lock,
+        title: tr('tools_rkp', 'Remote key provisioning'),
+        summary: tr('tools_rkp_desc', 'Fix RKP or issue a local RKP Keybox.'),
+      },
+      {
+        key: 'soter',
+        event: 'openSoterLocal',
+        icon: BankCards,
+        title: tr('soter_local_title', 'Local SOTER identities'),
+        summary: tr('soter_local_tool_desc', 'Create random local identities and set app CPU-ID overrides.'),
+      },
+    ],
+  },
+  {
+    title: tr('tools_play_integrity', 'Play Integrity'),
+    rows: [
+      {
+        key: 'pif',
+        event: 'spoofPif',
+        icon: null,
+        title: tr('menu_spoof_pif_fingerprint', 'Spoof PIF fingerprint'),
+        summary: tr('tools_pif_desc', 'Fetch and apply a Pixel fingerprint for Play Integrity.'),
+      },
+      {
+        key: 'gms',
+        event: 'clearGmsCache',
+        icon: Reset,
+        title: tr('tools_clear_gms_cache', 'Clear GMS cache'),
+        summary: tr('tools_clear_gms_cache_desc', 'Clear Play services and Play Store caches, keep app data, then stop the specified processes.'),
+      },
+      {
+        key: 'patch',
+        sheet: 'patch',
+        icon: Update,
+        title: tr('tools_security_patch', 'Security patch settings'),
+        summary: props.securityPatch
+          ?? tr('tools_security_patch_desc', 'Sync or restore the reported security patch date.'),
+      },
+    ],
+  },
+])
 
 function isBusy(event: ToolEvent): boolean {
   if (event === 'clearGmsCache' || event === 'repairRkp') return props.maintenanceBusy !== null
   if (event === 'issueRkp') return props.rkpIssuanceBusy
-  if (event === 'syncSecurityPatch') return props.securityPatchBusy !== null
-  if (event === 'restoreSecurityPatch') return props.securityPatchBusy !== null
+  if (event === 'syncSecurityPatch' || event === 'restoreSecurityPatch') {
+    return props.securityPatchBusy !== null
+  }
   return false
 }
 
@@ -147,33 +219,54 @@ function isActiveBusy(event: ToolEvent): boolean {
     || (event === 'repairRkp' && props.maintenanceBusy === 'rkp')
     || (event === 'issueRkp' && props.rkpIssuanceBusy)
 }
+
+function rowActiveBusy(row: ToolRow): boolean {
+  if (row.event) return isActiveBusy(row.event)
+  return row.sheet ? sheets[row.sheet].actions.some(action => isActiveBusy(action.event)) : false
+}
+
+function rowDisabled(row: ToolRow): boolean {
+  if (row.event) return isBusy(row.event)
+  return row.sheet ? sheets[row.sheet].actions.every(action => isBusy(action.event)) : false
+}
+
+function onRow(row: ToolRow): void {
+  if (row.sheet) activeSheet.value = row.sheet
+  else if (row.event) runTool(row.event)
+}
+
+function onSheetAction(action: ToolAction): void {
+  activeSheet.value = null
+  runTool(action.event)
+}
 </script>
 
 <template>
   <section class="app-page tools-page" aria-labelledby="tools-title">
-    <MiuixTopAppBar id="tools-title" :title="tr('tools_title', 'Tools')" />
+    <MiuixTopAppBar :title="tr('tools_title', 'Tools')" />
+    <h1 id="tools-title" class="page-large-title">{{ tr('tools_title', 'Tools') }}</h1>
 
     <section v-for="group in groups" :key="group.title" class="preference-section">
       <MiuixSmallTitle :text="group.title" />
       <MiuixCard class="preference-card" press-feedback="none">
         <MiuixArrowPreference
-          v-for="item in group.items"
-          :key="item.event"
-          :title="item.title"
-          :summary="item.summary"
-          :disabled="isBusy(item.event)"
-          :hold-down="isActiveBusy(item.event)"
-          @click="runTool(item.event)"
+          v-for="row in group.rows"
+          :key="row.key"
+          :title="row.title"
+          :summary="row.summary"
+          :disabled="rowDisabled(row)"
+          :hold-down="rowActiveBusy(row)"
+          @click="onRow(row)"
         >
           <template #start>
             <span class="preference-icon">
               <MiuixProgressIndicator
-                v-if="isActiveBusy(item.event)"
+                v-if="rowActiveBusy(row)"
                 type="circular"
                 :size="22"
                 :stroke-width="2.5"
               />
-              <MiuixIcon v-else-if="item.icon" :icon="item.icon" :size="23" />
+              <MiuixIcon v-else-if="row.icon" :icon="row.icon" :size="23" />
               <svg v-else width="23" height="23" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
                 stroke-linejoin="round" aria-hidden="true">
@@ -184,5 +277,41 @@ function isActiveBusy(event: ToolEvent): boolean {
         </MiuixArrowPreference>
       </MiuixCard>
     </section>
+
+    <MiuixBottomSheet v-model="sheetOpen" :title="sheets[shownSheet].title">
+      <template #start-action>
+        <MiuixIconButton
+          :aria-label="tr('functional_button_cancel', 'Cancel')"
+          @click="activeSheet = null"
+        >
+          <MiuixIcon :icon="Close" :size="22" />
+        </MiuixIconButton>
+      </template>
+      <div class="tool-sheet">
+        <MiuixCard class="preference-card" press-feedback="none">
+          <MiuixArrowPreference
+            v-for="action in sheets[shownSheet].actions"
+            :key="action.event"
+            :title="action.title"
+            :summary="action.summary"
+            :disabled="isBusy(action.event)"
+            :hold-down="isActiveBusy(action.event)"
+            @click="onSheetAction(action)"
+          >
+            <template #start>
+              <span class="preference-icon">
+                <MiuixProgressIndicator
+                  v-if="isActiveBusy(action.event)"
+                  type="circular"
+                  :size="22"
+                  :stroke-width="2.5"
+                />
+                <MiuixIcon v-else-if="action.icon" :icon="action.icon" :size="23" />
+              </span>
+            </template>
+          </MiuixArrowPreference>
+        </MiuixCard>
+      </div>
+    </MiuixBottomSheet>
   </section>
 </template>

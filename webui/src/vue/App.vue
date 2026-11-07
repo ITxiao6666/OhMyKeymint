@@ -89,6 +89,7 @@ const selectedKeybox = ref<{ name: string, contents: Uint8Array } | null>(null)
 const keyboxBusy = ref(false)
 const targetsView = ref<InstanceType<typeof TargetsView> | null>(null)
 const settingsView = ref<InstanceType<typeof SettingsView> | null>(null)
+const toolsView = ref<InstanceType<typeof ToolsView> | null>(null)
 const pifDialog = ref<InstanceType<typeof PifFingerprintDialog> | null>(null)
 
 const pageIds = ['home', 'tools', 'settings'] as const
@@ -303,6 +304,21 @@ function onSettingsOverlayOpen(): void {
     overlayHistory.delete(key)
     settingsView.value?.dismissOverlay()
   })
+}
+
+function onToolsOverlayOpen(): void {
+  const key = 'tools-overlay'
+  if (overlayHistory.has(key)) return
+  overlayHistory.add(key)
+  history.push(key, () => {
+    overlayHistory.delete(key)
+    toolsView.value?.dismissOverlay()
+  })
+}
+
+function onToolsOverlayClose(): void {
+  const key = 'tools-overlay'
+  if (overlayHistory.delete(key)) history.consume(key)
 }
 
 function onSettingsOverlayClose(): void {
@@ -643,6 +659,8 @@ function onTool(event: ToolEvent): void {
 }
 
 onMounted(async () => {
+  pageScroller.addEventListener('scroll', onPageScroll, { passive: true })
+  updateTitleCollapse()
   navigationElement = document.querySelector<HTMLElement>('.main-navigation')
   navigationElement?.style.setProperty('--omk-liquid-nav-index', String(pageIndex.value))
   navigationElement?.style.setProperty('--omk-liquid-nav-scale', '1')
@@ -675,6 +693,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  pageScroller.removeEventListener('scroll', onPageScroll)
+  if (titleCollapseFrame !== 0) cancelAnimationFrame(titleCollapseFrame)
   if (navigationFrame !== null) window.cancelAnimationFrame(navigationFrame)
   navigationFrame = null
   if (targetsRefreshTimer !== null) {
@@ -695,12 +715,31 @@ onBeforeUnmount(() => {
   history.destroy()
 })
 
+// Drive the MIUIX large-title collapse from the shared page scroller.
+const TITLE_COLLAPSE_DISTANCE = 48
+let titleCollapseFrame = 0
+let titleCollapseValue = -1
+
+function updateTitleCollapse(): void {
+  titleCollapseFrame = 0
+  const value = Math.min(1, Math.max(0, pageScroller.scrollTop / TITLE_COLLAPSE_DISTANCE))
+  const rounded = Math.round(value * 100) / 100
+  if (rounded === titleCollapseValue) return
+  titleCollapseValue = rounded
+  pageScroller.style.setProperty('--omk-title-collapse', String(rounded))
+}
+
+function onPageScroll(): void {
+  if (titleCollapseFrame === 0) titleCollapseFrame = requestAnimationFrame(updateTitleCollapse)
+}
+
 watch(pageIndex, (index, previousIndex) => {
   pageScrollPositions[previousIndex] = pageScroller.scrollTop
   pageDirection.value = index > previousIndex ? 1 : -1
   void nextTick(() => {
     if (pageIndex.value === index && !targetsOpen.value) {
       pageScroller.scrollTo(0, pageScrollPositions[index] ?? 0)
+      updateTitleCollapse()
     }
   })
   if (navigationPointerId === null) {
@@ -713,6 +752,7 @@ watch(targetsOpen, open => {
   void nextTick(() => {
     if (targetsOpen.value === open) {
       pageScroller.scrollTo(0, open ? 0 : pageScrollPositions[pageIndex.value] ?? 0)
+      updateTitleCollapse()
     }
   })
 })
@@ -812,7 +852,11 @@ watch(rkpImportConfirmOpen, open => {
           v-show="pageIndex === 1"
           :security-patch-busy="securityPatchBusy"
           :maintenance-busy="maintenanceBusy"
+          ref="toolsView"
           :rkp-issuance-busy="rkpIssuanceBusy"
+          :security-patch="securityPatch"
+          @overlay-open="onToolsOverlayOpen"
+          @overlay-close="onToolsOverlayClose"
           @open-app-targets="onTool('openAppTargets')"
           @install-keybox="onTool('installKeybox')"
           @sync-security-patch="onTool('syncSecurityPatch')"

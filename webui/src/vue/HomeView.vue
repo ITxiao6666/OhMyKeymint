@@ -7,7 +7,7 @@ import {
   MiuixProgressIndicator,
   MiuixTopAppBar,
 } from 'miuix-vue'
-import { Info } from 'miuix-vue/icons'
+import { Info, Ok } from 'miuix-vue/icons'
 import type {
   DiagnosticsState,
   KeyboxLevel,
@@ -100,11 +100,23 @@ const teeState = computed(() => ({
   error: { label: tr('home_status_error', 'Needs attention'), tone: 'error' },
 })[props.teeStatus])
 
-const serviceRows = computed(() => {
-  if (!props.diagnostics) return []
-  return [
-    { id: 'keymint', label: tr('home_diag_keymint', 'OMK KeyMint'), value: props.diagnostics.keymint },
-  ]
+const heroState = computed(() => {
+  if (props.diagnosticsStatus === 'error') {
+    return { tone: 'error', label: tr('home_status_error', 'Needs attention'), detail: '' }
+  }
+  const keymint = props.diagnostics?.keymint
+  if (!keymint) {
+    return { tone: 'loading', label: tr('home_status_loading', 'Checking'), detail: '' }
+  }
+  const detail = keymint.pid !== null ? `PID ${keymint.pid}` : ''
+  if (keymint.status === 'running') {
+    return { tone: 'active', label: tr('home_status_running', 'Running'), detail }
+  }
+  return {
+    tone: keymint.status === 'error' ? 'error' : 'stopped',
+    label: diagnosticStatusLabel(keymint.status),
+    detail,
+  }
 })
 
 const hardwareRows = computed(() => {
@@ -134,15 +146,32 @@ function diagnosticStatusLabel(status: string, hardware = false): string {
   }
 }
 
-function diagnosticTone(status: string): string {
-  return status === 'error' ? 'error' : 'muted'
-}
-
 </script>
 
 <template>
   <section class="app-page home-page" aria-labelledby="home-title">
-    <MiuixTopAppBar id="home-title" title="Oh My Keymint" />
+    <MiuixTopAppBar title="Oh My Keymint" />
+    <h1 id="home-title" class="page-large-title">Oh My Keymint</h1>
+
+    <MiuixCard class="status-hero" :data-tone="heroState.tone" press-feedback="none">
+      <div class="status-hero__body" role="status" aria-live="polite">
+        <span class="status-hero__badge" aria-hidden="true">
+          <MiuixProgressIndicator
+            v-if="heroState.tone === 'loading'"
+            type="circular"
+            :size="26"
+            :stroke-width="2.5"
+          />
+          <MiuixIcon v-else :icon="heroState.tone === 'active' ? Ok : Info" :size="28" />
+        </span>
+        <div class="status-hero__text">
+          <strong>{{ heroState.label }}</strong>
+          <span>
+            {{ tr('home_diag_keymint', 'OMK KeyMint') }}<template v-if="heroState.detail"> · {{ heroState.detail }}</template>
+          </span>
+        </div>
+      </div>
+    </MiuixCard>
 
     <div class="identity-grid" aria-live="polite">
       <MiuixCard class="identity-card" press-feedback="none">
@@ -199,16 +228,6 @@ function diagnosticTone(status: string): string {
         <MiuixIcon :icon="Info" :size="22" />
         <span>{{ tr('home_diagnostics_error', 'Unable to load diagnostics') }}</span>
       </div>
-      <dl v-else class="diagnostics-services">
-        <div v-for="row in serviceRows" :key="row.id" class="diagnostics-service">
-          <dt>{{ row.label }}</dt>
-          <dd :data-tone="diagnosticTone(row.value.status)">
-            {{ diagnosticStatusLabel(row.value.status) }}
-            <small v-if="row.value.pid !== null">PID {{ row.value.pid }}</small>
-          </dd>
-        </div>
-      </dl>
-
       <dl v-if="diagnostics" class="diagnostics-services diagnostics-services--hardware">
         <div v-for="row in hardwareRows" :key="row.id" class="diagnostics-service">
           <dt>{{ row.label }}</dt>

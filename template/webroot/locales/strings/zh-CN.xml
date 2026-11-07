@@ -170,6 +170,11 @@
     <string name="prompt_adb_disabler_applied">ADB 禁用器设置已应用，部分更改将在重启后生效。</string>
     <string name="prompt_adb_disabler_disabled">ADB 禁用器已停用，当前更改会保留，直到设备状态被手动更改。</string>
     <string name="tools_security_patch">设置安全补丁</string>
+    <string name="tools_security_patch_desc">同步或恢复安全补丁日期</string>
+    <string name="tools_rkp">远程密钥配置 (RKP)</string>
+    <string name="tools_rkp_desc">修复 RKP 或签发本地 RKP Keybox</string>
+    <string name="tools_keybox_attestation">Keybox 与认证</string>
+    <string name="tools_play_integrity">Play Integrity</string>
     <string name="tools_sync_patch_desc">同步至 Google 最新安全补丁日期</string>
     <string name="tools_restore_patch_desc">恢复设备默认安全补丁</string>
     <string name="tools_pif_desc">获取并应用 Pixel 指纹以伪装 PIF</string>
