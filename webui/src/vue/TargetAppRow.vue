@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { MiuixCheckboxPreference, MiuixIcon } from 'miuix-vue'
-import { All, More } from 'miuix-vue/icons'
+import { All, ChevronForward } from 'miuix-vue/icons'
 
 const props = defineProps<{
   packageName: string
@@ -49,7 +49,7 @@ watch(() => props.packageName, () => { iconLoaded.value = false })
     </MiuixCheckboxPreference>
     <button type="button" class="target-app-settings" :disabled="disabled"
       :aria-label="'SOTER: ' + appName" @click="emit('settings')">
-      <MiuixIcon :icon="More" :size="22" />
+      <MiuixIcon :icon="ChevronForward" :size="20" />
     </button>
   </div>
 </template>
@@ -59,9 +59,7 @@ watch(() => props.packageName, () => { iconLoaded.value = false })
   display: flex;
   align-items: stretch;
   min-width: 0;
-  border-radius: 22px;
-  overflow: hidden;
-  background: var(--m-color-surface-container);
+  background: transparent;
 }
 
 .target-app-row :deep(.m-basic-component) {
@@ -74,10 +72,22 @@ watch(() => props.packageName, () => { iconLoaded.value = false })
   background: transparent;
 }
 
-.target-app-settings { flex: none; width: 44px; border: 0; background: transparent;
-  color: var(--m-color-on-surface-variant-summary); display: grid; place-items: center;
-  -webkit-tap-highlight-color: transparent; }
-.target-app-settings:active { background: color-mix(in srgb, var(--m-color-primary) 10%, transparent); }
+.target-app-settings {
+  flex: none;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-right: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--m-color-on-surface-variant-summary);
+  -webkit-tap-highlight-color: transparent;
+}
+.target-app-settings:active { background: color-mix(in srgb, var(--m-color-on-surface) 10%, transparent); }
 .target-app-settings:focus-visible { outline: 2px solid var(--m-color-primary); outline-offset: -4px; }
 
 .app-icon-frame {

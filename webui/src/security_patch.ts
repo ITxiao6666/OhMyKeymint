@@ -109,6 +109,26 @@ function patchLevelColumn(table: HTMLTableElement): number {
   return index
 }
 
+/** UTF-8 byte length of a string, computed without allocating an encoded copy. */
+function utf8ByteLength(value: string): number {
+  let bytes = 0
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code < 0x80) {
+      bytes += 1
+    } else if (code < 0x800) {
+      bytes += 2
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length
+        && value.charCodeAt(index + 1) >= 0xdc00 && value.charCodeAt(index + 1) <= 0xdfff) {
+      bytes += 4
+      index++
+    } else {
+      bytes += 3
+    }
+  }
+  return bytes
+}
+
 function isPatchLevelHeader(value: string): boolean {
   const normalized = value.replace(/[\u0000-\u0020]+/g, '').toLowerCase()
   return normalized.includes('securitypatchlevel')
@@ -124,7 +144,7 @@ function isPatchLevelHeader(value: string): boolean {
  * a cached page.
  */
 export function parseLatestSecurityPatch(html: string, now = new Date()): string {
-  if (html.length === 0 || new TextEncoder().encode(html).byteLength > MAX_RESPONSE_BYTES) {
+  if (html.length === 0 || utf8ByteLength(html) > MAX_RESPONSE_BYTES) {
     throw new Error('Android Security Bulletin response is too large')
   }
 

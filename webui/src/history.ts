@@ -53,6 +53,9 @@ export class History {
    * @param onBack - Callback invoked when the user navigates back
    */
   push(key: string, onBack: () => void): void {
+    // A duplicated key would desynchronise the browser stack from #activeKeys:
+    // consume() removes every occurrence but only pops one browser entry.
+    if (this.#entries.has(key)) return
     this.#activeKeys.push(key)
     this.#entries.set(key, onBack)
     window.history.pushState({ key }, '')

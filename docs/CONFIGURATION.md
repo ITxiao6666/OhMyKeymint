@@ -79,6 +79,14 @@ slot after a successful unwrap import. Failed unwraps retain that slot. The TA
 consumption precedes database publication, so a later database failure does not
 restore a TA-enforced use.
 
+TA-enforced limited-use keys, including self-managed key blobs that have no
+Keystore entry, are accounted inside KeyMint. Opening several operations for the
+same key is allowed; each operation consumes one use only when its finish
+produces a result, and a key whose uses are exhausted keeps failing with
+`KEY_MAX_OPS_EXCEEDED`, both for operations that were opened earlier and for new
+ones. The accounting lives in the KeyMint process and is reset when the service
+restarts.
+
 Key generation and imports delete unpublished TA key blobs on a best-effort
 basis when storage or publication fails. Cleanup failure does not replace the
 original operation error.
@@ -147,7 +155,9 @@ Keybox**, **Remote key provisioning**, and **Local SOTER identities**), and
 **Security patch settings**). **Remote key provisioning** opens a bottom sheet
 with **Fix RKP** and **Issue local RKP Keybox**. **Security patch settings**
 shows the current patch date and opens a bottom sheet with **Sync security
-patch** and **Restore default security patch**. Choosing a sheet action closes
+patch**, **Restore default security patch**, and **Custom security patch**; the
+custom row expands an inline date field and applies only a complete
+`YYYY-MM-DD` value. Choosing a sheet action closes
 the sheet before the action's own confirmation or panel opens. The close button,
 a downward drag, or Android Back dismisses a sheet without leaving Tools. A row
 shows a progress indicator while its action runs, and a sheet row is disabled
@@ -189,7 +199,9 @@ Scroll indicators are hidden throughout pages, lists, menus and dialogs; touch,
 wheel and keyboard scrolling remain available. Per-page scroll restoration and
 package pull-to-refresh use that same app container.
 
-The Settings page keeps the selected language, theme mode, accent, and visual
+The Settings page groups **Language** and **Interface scale** under **General**,
+then **Appearance**, **Visual effects**, and **Maintenance**. It keeps the
+selected language, theme mode, accent, and visual
 effects in the WebUI's local storage. Language selection opens a height-limited
 MIUIX bottom sheet with single-choice rows, including the system-language option.
 The list scrolls inside the sheet; dismissing it or navigating back leaves the
@@ -235,6 +247,16 @@ visible; this does not change the host or Android theme settings.
 Blurred non-floating navigation keeps its own surface through the bottom
 gesture area so there is no contrasting strip below the navigation controls.
 
+**Export logs** in the Maintenance section writes one support archive to
+`/sdcard/Download/omk-logs-<UTC timestamp>.tar` and reports the path in a
+snackbar. The archive contains `manifest.txt` plus the four rotated log files
+under `logs/`. The manifest records the export time, package version, device
+model, Android release and SDK, build fingerprint, kernel release, and the byte
+size of each entry. `config.toml` and `keybox.xml` are never exported because
+they contain device identifiers and key material. A log larger than 8 MiB keeps
+only its tail with the partial first line removed, and the manifest records how
+many bytes were dropped; the archive stops growing at 24 MiB of payload.
+
 The Home page reads each identity item independently. The Keybox card parses
 the installed XML and checks the private key against its leaf certificate
 without rewriting the file. Source classification also verifies every
@@ -271,10 +293,12 @@ check after that interval performs an online lookup. A successful online
 lookup is atomically cached at
 `/data/misc/keystore/omk/data/google_attestation_status.json`. If the endpoint
 cannot be reached, the WebUI uses that locally validated cache; a first install
-is seeded from the validated snapshot shipped in the module. A lookup is shown
-as **Not revoked** when no serial is present. If any serial has a Google status
-of `SUSPENDED` or `REVOKED`, the card shows **Revoked**. A network, HTTP,
-certificate-parsing, or response-parsing failure is never treated as
+is seeded from the validated snapshot shipped in the module. The identity card
+paints its local fields first and fills in the revocation state when that lookup
+finishes, so an offline or slow endpoint never delays the rest of the card. A
+lookup is shown as **Not revoked** when no serial is present. If any serial has a
+Google status of `SUSPENDED` or `REVOKED`, the card shows **Revoked**. A network,
+HTTP, certificate-parsing, or response-parsing failure is never treated as
 **Not revoked** when neither local source is valid. The cache and bundled
 snapshot contain public Google data and can become stale, so **Not revoked**
 does not prove that Play Integrity will accept the Keybox. When a refresh is
@@ -284,16 +308,12 @@ the bundled snapshot.
 The WebUI does not display or clear a recent-activity history. Existing activity
 files from older installations are ignored by the current interface.
 
-The Home page exposes read-only runtime diagnostics for OMK KeyMint,
-the registered TEE and StrongBox KeyMint services and the matching
-`default` and `strongbox` RKP Binder services. A missing
-optional StrongBox service is shown as unregistered. These checks do not issue
-an attestation challenge, contact an RKP provisioning server, or certify
-hardware-backed operation. A vendor KeyMint process is not used as evidence
-that OMK itself is running. The current-device-status card shows service state
-only, without Keybox certificate-chain details or a separate inspector request.
-A diagnostic read failure is reported in the UI and does not change runtime
-routing.
+The Home page reports whether OMK KeyMint is running, its PID, or a checking or
+failed state. That reading comes from a read-only diagnostics query; it does not
+issue an attestation challenge, contact an RKP provisioning server, or certify
+hardware-backed operation. A vendor KeyMint process is not used as evidence that
+OMK itself is running. A diagnostic read failure is reported on the status card
+and does not change runtime routing.
 
 The injector daemon waits for keystore2 to appear and retries injection after
 startup or a process restart. If keystore2 disappears before launcher discovery,
@@ -800,6 +820,14 @@ snapshot follows the normal patch-level path and does not cause an extra
 vendor-property write. If the optional snapshot cannot be read or validated,
 both paths skip this paired reapply and keymint continues its normal
 initialization.
+
+The WebUI **Custom security patch** action writes the date entered in its sheet.
+It accepts a complete `YYYY-MM-DD` value for 2000 or later and rejects an empty,
+partial, or impossible date before contacting the helper. Day `05` keeps the
+bulletin date unchanged, matching the sync action, so the applied value may be
+reported as day `01` of the same month. The action writes
+`ro.build.version.security_patch` immediately and requires a reboot for the new
+value to be reported.
 
 The WebUI **Restore default security patch** action uses the saved snapshot and
 does not access the network. If the snapshot is absent, the helper records the

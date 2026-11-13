@@ -77,6 +77,20 @@ const menuOpen = ref(false)
 const selectingRecommended = ref(false)
 const systemSheetOpen = ref(false)
 const systemSearchQuery = ref('')
+// Filtering walks every installed package and rebuilds entry objects, so apply a
+// typed query a beat later instead of doing that work on every keystroke.
+const appliedSearchQuery = ref('')
+const appliedSystemSearchQuery = ref('')
+let searchTimer = 0
+let systemSearchTimer = 0
+watch(searchQuery, query => {
+  window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => { appliedSearchQuery.value = query }, 120)
+})
+watch(systemSearchQuery, query => {
+  window.clearTimeout(systemSearchTimer)
+  systemSearchTimer = window.setTimeout(() => { appliedSystemSearchQuery.value = query }, 120)
+})
 const searchBar = ref<SearchBarInstance | null>(null)
 const pullBody = ref<HTMLElement | null>(null)
 const pullIndicator = ref<HTMLElement | null>(null)
@@ -89,6 +103,7 @@ const autoBusy = ref(false)
 const autoError = ref('')
 const identityOpen = ref(false)
 const identityTarget = ref('')
+const identityLabel = ref('')
 const identityBatchTargets = ref<string[] | undefined>()
 const identityDialog = ref<InstanceType<typeof SoterIdentityDialog> | null>(null)
 function openIdentity(entry: SelectableAppEntry): void {
@@ -96,6 +111,7 @@ function openIdentity(entry: SelectableAppEntry): void {
   systemSheetOpen.value = false
   menuOpen.value = false
   identityTarget.value = entry.targetKey
+  identityLabel.value = entry.appName
   identityBatchTargets.value = undefined
   identityOpen.value = true
 }
@@ -268,13 +284,13 @@ const unsubscribe = props.appList.subscribe(snapshot => {
 
 const targetEntries = computed(() => {
   void revision.value
-  return props.appList.getTargetEntries(searchQuery.value)
+  return props.appList.getTargetEntries(appliedSearchQuery.value)
 })
 const selectedTargetEntries = computed(() => targetEntries.value.filter(entry => entry.selected))
 const unselectedTargetEntries = computed(() => targetEntries.value.filter(entry => !entry.selected))
 const systemEntries = computed(() => {
   void revision.value
-  return props.appList.getSystemEntries(systemSearchQuery.value)
+  return props.appList.getSystemEntries(appliedSystemSearchQuery.value)
 })
 const showUserGroups = computed(() => {
   void revision.value
@@ -402,6 +418,8 @@ function dismissOverlay(): boolean {
 
 onBeforeUnmount(() => {
   disposed = true
+  window.clearTimeout(searchTimer)
+  window.clearTimeout(systemSearchTimer)
   cancelAnimationFrame(pullFrame)
   unsubscribe()
 })
@@ -522,7 +540,7 @@ defineExpose({
           :summary="translate('app_targets_auto_desc', 'Automatically select only the most recently installed user app. Other apps remain unselected.')"
           @update:model-value="setAutoTargets"
         >
-          <template #start><MiuixIcon :icon="AddCircle" :size="23" /></template>
+
         </MiuixSwitchPreference>
         <div v-if="autoBusy || autoStatus === 'loading'" class="targets-auto-state" role="status">
           <MiuixProgressIndicator type="circular" :size="18" />
@@ -550,6 +568,7 @@ defineExpose({
             {{ translate('app_targets_selected', 'Selected package names') }}
             <span>{{ selectedTargetEntries.length }}</span>
           </h2>
+          <div class="targets-list-card">
           <template v-for="(entry, index) in renderedSelectedTargetEntries" :key="entry.targetKey">
             <h3 v-if="showUserGroups && (index === 0 || renderedSelectedTargetEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
               {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
@@ -563,12 +582,14 @@ defineExpose({
               @settings="openIdentity(entry)"
             />
           </template>
+          </div>
         </section>
         <section v-if="unselectedTargetEntries.length" class="targets-selection-group">
           <h2 class="targets-selection-heading">
             {{ translate('app_targets_unselected', 'Unselected package names') }}
             <span>{{ unselectedTargetEntries.length }}</span>
           </h2>
+          <div class="targets-list-card">
           <template v-for="(entry, index) in renderedUnselectedTargetEntries" :key="entry.targetKey">
             <h3 v-if="showUserGroups && (index === 0 || renderedUnselectedTargetEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
               {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
@@ -582,6 +603,7 @@ defineExpose({
               @settings="openIdentity(entry)"
             />
           </template>
+          </div>
         </section>
         <div v-if="renderedSelectedTargetEntries.length + renderedUnselectedTargetEntries.length < targetEntries.length" class="app-list-batch-loading" role="status">
           <MiuixProgressIndicator type="circular" :size="24" />
@@ -626,6 +648,7 @@ defineExpose({
         </div>
 
         <div v-else-if="systemEntries.length > 0" class="system-app-list">
+          <div class="targets-list-card">
           <template v-for="(entry, index) in renderedSystemEntries" :key="entry.targetKey">
           <h3 v-if="showUserGroups && (index === 0 || renderedSystemEntries[index - 1]?.userId !== entry.userId)" class="targets-user-heading">
             {{ translate('app_target_user', 'User') }} {{ entry.userId }}<span v-if="entry.currentUser"> · {{ translate('app_target_current_user', 'Current') }}</span>
@@ -639,6 +662,7 @@ defineExpose({
             @settings="openIdentity(entry)"
           />
           </template>
+          </div>
           <div v-if="renderedSystemEntries.length < systemEntries.length" class="app-list-batch-loading" role="status">
             <MiuixProgressIndicator type="circular" :size="24" />
             <span class="sr-only">{{ translate('home_status_loading', 'Checking') }}</span>
@@ -653,7 +677,7 @@ defineExpose({
     </MiuixBottomSheet>
 
     <SoterIdentityDialog ref="identityDialog" v-model="identityOpen" :cli="cli" :target="identityTarget"
-      :batch-targets="identityBatchTargets" />
+      :target-label="identityLabel" :batch-targets="identityBatchTargets" />
   </section>
 </template>
 
@@ -911,15 +935,24 @@ defineExpose({
   gap: 12px;
 }
 
-.targets-selection-group { display: grid; gap: 10px; }
+.targets-selection-group { display: grid; gap: 8px; }
+.targets-list-card {
+  overflow: hidden;
+  border-radius: 24px;
+  background: var(--m-color-surface-container);
+}
+.targets-list-card > .target-app-row + .target-app-row {
+  border-top: 1px solid color-mix(in srgb, var(--m-color-on-surface) 8%, transparent);
+}
 .targets-selection-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 4px 12px 0;
+  margin: 4px 16px 0;
   color: var(--m-color-on-surface-variant-summary);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .01em;
 }
 .targets-selection-heading span { font-variant-numeric: tabular-nums; }
 

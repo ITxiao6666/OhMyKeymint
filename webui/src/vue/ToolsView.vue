@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import {
   MiuixArrowPreference,
+  MiuixButton,
   MiuixCard,
   MiuixIcon,
   MiuixIconButton,
@@ -9,15 +10,17 @@ import {
   MiuixSmallTitle,
   MiuixTopAppBar,
 } from 'miuix-vue'
-import { AddCircle, BankCards, Close, Lock, Replace, Reset, Update } from 'miuix-vue/icons'
+import { AddCircle, BankCards, Close, Edit, Lock, Replace, Reset, Update } from 'miuix-vue/icons'
 import MiuixBottomSheet from './StableBottomSheet.vue'
 import { i18n } from '../i18n'
+import { isSecurityPatchDate } from '../security_patch'
 
 export type ToolEvent =
   | 'openAppTargets'
   | 'installKeybox'
   | 'syncSecurityPatch'
   | 'restoreSecurityPatch'
+  | 'customSecurityPatch'
   | 'spoofPif'
   | 'clearGmsCache'
   | 'repairRkp'
@@ -56,6 +59,7 @@ const emit = defineEmits<{
   installKeybox: []
   syncSecurityPatch: []
   restoreSecurityPatch: []
+  applySecurityPatch: [date: string]
   spoofPif: []
   clearGmsCache: []
   repairRkp: []
@@ -132,6 +136,12 @@ const sheets: Record<SheetId, { title: string, actions: ToolAction[] }> = {
         icon: Reset,
         title: tr('menu_restore_default_security_patch', 'Restore default security patch'),
         summary: tr('tools_restore_patch_desc', 'Restore the device default security patch date. A reboot is required.'),
+      },
+      {
+        event: 'customSecurityPatch',
+        icon: Edit,
+        title: tr('tools_custom_patch', 'Custom security patch'),
+        summary: tr('tools_custom_patch_desc', 'Enter a date such as 2026-05-01. A reboot is required.'),
       },
     ],
   },
@@ -235,7 +245,27 @@ function onRow(row: ToolRow): void {
   else if (row.event) runTool(row.event)
 }
 
+const customPatchOpen = ref(false)
+const customPatchDate = ref('')
+const customPatchValid = computed(() => isSecurityPatchDate(customPatchDate.value.trim()))
+// Inline validation instead of an unreachable submit failure: the Apply button is
+// disabled while the field is empty or malformed, so explain why as soon as the
+// user has typed something.
+const customPatchInvalid = computed(() => customPatchDate.value.trim() !== '' && !customPatchValid.value)
+
+function applyCustomPatch(): void {
+  if (!customPatchValid.value) return
+  const date = customPatchDate.value.trim()
+  customPatchOpen.value = false
+  activeSheet.value = null
+  emit('applySecurityPatch', date)
+}
+
 function onSheetAction(action: ToolAction): void {
+  if (action.event === 'customSecurityPatch') {
+    customPatchOpen.value = !customPatchOpen.value
+    return
+  }
   activeSheet.value = null
   runTool(action.event)
 }
@@ -311,7 +341,45 @@ function onSheetAction(action: ToolAction): void {
             </template>
           </MiuixArrowPreference>
         </MiuixCard>
+        <div v-if="shownSheet === 'patch' && customPatchOpen" class="custom-patch">
+          <label class="custom-patch__field">
+            <span>{{ tr('tools_custom_patch_label', 'Patch date') }}</span>
+            <input
+              v-model="customPatchDate"
+              type="text"
+              inputmode="numeric"
+              maxlength="10"
+              spellcheck="false"
+              autocomplete="off"
+              :placeholder="tr('tools_custom_patch_placeholder', '2026-05-01')"
+            >
+          </label>
+          <p v-if="customPatchInvalid" class="custom-patch__error" role="alert">{{ tr('tools_custom_patch_invalid', 'Enter a valid date (YYYY-MM-DD).') }}</p>
+          <MiuixButton type="primary" :disabled="!customPatchValid || securityPatchBusy !== null" @click="applyCustomPatch">
+            {{ tr('tools_custom_patch_apply', 'Apply') }}
+          </MiuixButton>
+        </div>
       </div>
     </MiuixBottomSheet>
   </section>
 </template>
+<style scoped>
+.custom-patch { display: grid; gap: 10px; padding: 12px 16px 4px; }
+.custom-patch__field { display: grid; gap: 6px; color: var(--m-color-on-surface-variant-summary); font-size: 13px; }
+.custom-patch__field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid var(--m-color-outline);
+  border-radius: 14px;
+  background: var(--m-color-surface-container);
+  color: var(--m-color-on-surface);
+  font: inherit;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+.custom-patch__field input:focus-visible { outline: 2px solid var(--m-color-primary); outline-offset: -2px; }
+.custom-patch__error { margin: 0; color: var(--m-color-error); font-size: 13px; }
+</style>

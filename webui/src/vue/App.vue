@@ -236,6 +236,9 @@ function notify(message: string, error = false): void {
 
 function setPage(index: number): void {
   if (index < 0 || index >= pageIds.length || index === pageIndex.value) return
+  // Write the slide direction before the page flips so the entering page's first
+  // frame already animates from the correct side.
+  pageDirection.value = index > pageIndex.value ? 1 : -1
   pageIndex.value = index
   if (index !== 0 && !pageHistoryActive) {
     pageHistoryActive = true
@@ -426,10 +429,14 @@ async function refreshIdentity(force = false): Promise<void> {
         ? (/^google\s/i.test(pif.value.model) ? pif.value.model : `Google ${pif.value.model}`)
         : null
     }
-    // Network revocation checks must not delay the other local status fields.
+    // The revocation check is a network round trip, so it must not gate the
+    // local identity fields or the caller's await. Its result is only applied
+    // while the same keybox identity is still on screen.
     if (keybox.status === 'fulfilled' && keybox.value.valid) {
-      try { keyboxRevocation.value = await cli.checkKeyboxRevocation() }
-      catch { keyboxRevocation.value = 'unknown' }
+      const identity = keyboxStatus.value
+      void cli.checkKeyboxRevocation()
+        .then(status => { if (keyboxStatus.value === identity) keyboxRevocation.value = status })
+        .catch(() => { if (keyboxStatus.value === identity) keyboxRevocation.value = 'unknown' })
     }
   } catch (error) {
     console.error('Unable to load OMK identity:', error)
@@ -493,6 +500,21 @@ async function installKeybox(): Promise<void> {
     notify(i18n.t('prompt_keybox_replace_error', error instanceof Error ? error.message : String(error)), true)
   } finally {
     keyboxBusy.value = false
+  }
+}
+
+async function applyPatchDate(date: string): Promise<void> {
+  if (securityPatchBusy.value !== null) return
+  securityPatchBusy.value = 'sync'
+  try {
+    await afterPaint()
+    const applied = isDev() ? date : await cli.syncSecurityPatch(date)
+    securityPatch.value = applied
+    notify(i18n.t('prompt_security_patch_custom_applied', applied))
+  } catch (error) {
+    notify(error instanceof Error ? error.message : String(error), true)
+  } finally {
+    securityPatchBusy.value = null
   }
 }
 
@@ -735,7 +757,6 @@ function onPageScroll(): void {
 
 watch(pageIndex, (index, previousIndex) => {
   pageScrollPositions[previousIndex] = pageScroller.scrollTop
-  pageDirection.value = index > previousIndex ? 1 : -1
   void nextTick(() => {
     if (pageIndex.value === index && !targetsOpen.value) {
       pageScroller.scrollTo(0, pageScrollPositions[index] ?? 0)
@@ -861,6 +882,7 @@ watch(rkpImportConfirmOpen, open => {
           @install-keybox="onTool('installKeybox')"
           @sync-security-patch="onTool('syncSecurityPatch')"
           @restore-security-patch="onTool('restoreSecurityPatch')"
+          @apply-security-patch="applyPatchDate"
           @spoof-pif="onTool('spoofPif')"
           @clear-gms-cache="onTool('clearGmsCache')"
           @repair-rkp="onTool('repairRkp')"
@@ -872,6 +894,7 @@ watch(rkpImportConfirmOpen, open => {
         <SettingsView
           v-show="pageIndex === 2"
           ref="settingsView"
+          :cli="cli"
           @overlay-open="onSettingsOverlayOpen"
           @overlay-close="onSettingsOverlayClose"
         />

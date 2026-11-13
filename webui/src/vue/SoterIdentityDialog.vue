@@ -9,7 +9,7 @@ import { afterPaint } from '../app_list/app_list'
 import { i18n } from '../i18n'
 import { isDev } from '../utils/dev'
 
-const props = defineProps<{ modelValue: boolean, cli: Cli, target?: string, batchTargets?: string[] }>()
+const props = defineProps<{ modelValue: boolean, cli: Cli, target?: string, targetLabel?: string, batchTargets?: string[] }>()
 const emit = defineEmits<{ 'update:modelValue': [open: boolean] }>()
 const state = ref<SoterIdentityState | null>(null)
 const busy = ref(false)
@@ -22,7 +22,9 @@ const batchMode = computed(() => props.batchTargets !== undefined)
 const batchPending = computed(() => (props.batchTargets ?? []).filter(target => !state.value?.apps[target]))
 const batchIdentity = computed(() => state.value?.identities.find(identity => identity.id === selected.value))
 let generation = 0
-const title = computed(() => batchMode.value ? i18n.t('soter_bulk_title') : (props.target || i18n.t('soter_local_title')))
+const title = computed(() => batchMode.value
+  ? i18n.t('soter_bulk_title')
+  : (props.targetLabel || props.target || i18n.t('soter_local_title')))
 
 async function load(): Promise<void> {
   const current = ++generation
@@ -109,9 +111,11 @@ defineExpose({ busy, requestClose })
             </MiuixButton>
           </template>
           <template v-else>
-            <MiuixRadioButtonPreference v-for="identity in state.identities" :key="identity.id"
-              :model-value="selected === identity.id" :disabled="busy"
-              :title="identity.name" @select="selected = identity.id" />
+            <MiuixCard class="soter-options" press-feedback="none">
+              <MiuixRadioButtonPreference v-for="identity in state.identities" :key="identity.id"
+                :model-value="selected === identity.id" :disabled="busy"
+                :title="identity.name" @select="selected = identity.id" />
+            </MiuixCard>
             <p v-if="!state.identities.length" class="soter-note">{{ i18n.t('soter_local_empty') }}</p>
             <p v-if="!batchTargets?.length" class="soter-note">{{ i18n.t('soter_bulk_no_apps') }}</p>
             <p v-else-if="!batchPending.length" class="soter-note">{{ i18n.t('soter_bulk_all_assigned') }}</p>
@@ -155,19 +159,23 @@ defineExpose({ busy, requestClose })
           </MiuixButton>
         </template>
         <template v-else>
-          <MiuixRadioButtonPreference :model-value="selected === ''" :disabled="busy"
-            :title="i18n.t('soter_local_stock')" @select="selected = ''" />
-          <MiuixRadioButtonPreference v-for="identity in state.identities" :key="identity.id"
-            :model-value="selected === identity.id" :disabled="busy"
-            :title="identity.name" @select="selected = identity.id" />
+          <MiuixCard class="soter-options" press-feedback="none">
+            <MiuixRadioButtonPreference :model-value="selected === ''" :disabled="busy"
+              :title="i18n.t('soter_local_stock')" @select="selected = ''" />
+            <MiuixRadioButtonPreference v-for="identity in state.identities" :key="identity.id"
+              :model-value="selected === identity.id" :disabled="busy"
+              :title="identity.name" @select="selected = identity.id" />
+          </MiuixCard>
           <label v-if="selected" class="soter-cpu-field">
             <span>{{ i18n.t('soter_cpu_override') }}</span>
             <input v-model="cpu" :disabled="busy" maxlength="36" spellcheck="false"
               autocapitalize="none" autocomplete="off" :placeholder="i18n.t('soter_cpu_placeholder')">
           </label>
-          <p v-if="!state.identities.length" class="soter-note">{{ i18n.t('soter_local_empty') }}</p>
-          <p v-if="!state.enabled" class="soter-note">{{ i18n.t('soter_local_inactive') }}</p>
-          <MiuixButton type="primary" :disabled="busy || isDev()" @click="saveApp">
+          <div v-if="!state.identities.length || !state.enabled" class="soter-hints">
+            <p v-if="!state.identities.length">{{ i18n.t('soter_local_empty') }}</p>
+            <p v-if="!state.enabled">{{ i18n.t('soter_local_inactive') }}</p>
+          </div>
+          <MiuixButton type="primary" class="soter-submit" :disabled="busy || isDev()" @click="saveApp">
             {{ i18n.t('functional_button_save') }}
           </MiuixButton>
         </template>
@@ -180,8 +188,19 @@ defineExpose({ busy, requestClose })
 </template>
 
 <style scoped>
-.soter-local-sheet { display: grid; gap: 16px; padding: 0 4px 24px; }
-.soter-note { margin: 0; color: var(--m-color-on-surface-variant-summary); font-size: 14px; line-height: 1.6; }
+.soter-local-sheet { display: grid; gap: 14px; padding: 0 4px 24px; }
+.soter-note { margin: 0; color: var(--m-color-on-surface-variant-summary); font-size: 13px; line-height: 1.55; }
+
+.soter-options > .m-card,
+.soter-options.m-card { padding: 4px; border-radius: 20px; background: var(--m-color-surface-container); }
+.soter-hints { display: grid; gap: 4px; }
+.soter-hints p {
+  margin: 0;
+  color: var(--m-color-on-surface-variant-summary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.soter-submit { margin-top: 2px; }
 .soter-identity { display: grid; gap: 8px; padding: 18px; }
 .soter-identity-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .soter-identity-heading strong { min-width: 0; overflow-wrap: anywhere; }

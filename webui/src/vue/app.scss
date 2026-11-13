@@ -20,7 +20,6 @@
   --omk-system-bar-background: var(--m-color-surface);
   --omk-host-bar-background: #f7f7f7;
   --omk-glass-background: rgb(255 255 255 / 40%);
-  --omk-identity-mix: 42%;
   --omk-preference-mix: 24%;
   --omk-ui-scale: 1;
 }
@@ -280,85 +279,90 @@ button { touch-action: manipulation; }
 }
 .m-button { transition: transform 160ms cubic-bezier(.2, .8, .2, 1); }
 .m-button:active:not(:disabled) { transform: scale(.97); }
-.status-hero { margin-bottom: 12px; }
-.status-hero > .m-card, .status-hero.m-card { padding: 18px 16px; background: var(--m-color-surface-container); }
-.status-hero[data-tone='active'] > .m-card, .status-hero.m-card[data-tone='active'] {
-  background: var(--m-color-primary-container);
-  background: color-mix(in srgb, var(--m-color-primary-container) 70%, var(--m-color-surface-container));
+/* ------------------------------------------------------------------ Home page
+ * A single accent surface (the status hero) carries emphasis; the identity
+ * fields become neutral cells and status is conveyed by chips, so the layout
+ * reads the same for every Monet seed and both theme modes.
+ */
+/* ------------------------------------------------------------------ Home page
+ * KernelSU-style home: one tinted status panel with a large clipped glyph,
+ * then cards of icon rows where the title is the field name and the summary is
+ * the current value.
+ */
+.status-hero {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 12px;
 }
-.status-hero[data-tone='error'] > .m-card, .status-hero.m-card[data-tone='error'] {
-  background: var(--m-color-error-container, var(--m-color-surface-container));
-}
-.status-hero[data-tone] { color: inherit; opacity: 1; }
-.status-hero__body { display: flex; align-items: center; gap: 14px; }
-.status-hero__badge {
-  display: inline-flex;
-  flex: none;
-  width: 48px;
-  height: 48px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--m-color-surface-container-high);
-  color: var(--m-color-on-surface);
-  transition: background-color 240ms ease, color 240ms ease;
-}
-.status-hero[data-tone='active'] .status-hero__badge { background: var(--m-color-primary); color: var(--m-color-on-primary); }
-.status-hero[data-tone='error'] .status-hero__badge { background: var(--m-color-error); color: var(--m-color-on-error, #fff); }
-.status-hero__text { display: grid; min-width: 0; gap: 2px; }
-.status-hero__text strong { color: var(--m-color-on-surface); font-size: 20px; font-weight: 600; line-height: 1.25; }
-.status-hero__text span { color: var(--m-color-on-surface-variant-summary); font-size: 13px; line-height: 1.35; }
-.tool-sheet { padding-bottom: 12px; }
-.m-basic-component__title { font-size: 16px; line-height: 1.3; }
-.m-basic-component__summary { font-size: 14px; line-height: 1.35; }
-.m-arrow-preference__title, .m-checkbox-preference__title, .m-switch-preference__title { font-size: 16px; line-height: 1.3; }
-.m-arrow-preference__summary, .m-checkbox-preference__summary, .m-switch-preference__summary { font-size: 14px; line-height: 1.35; }
-.m-basic-component__end { margin-left: 0; margin-inline-start: auto; }
-.m-top-app-bar__nav { left: auto; inset-inline-start: 0; padding-left: 0; padding-inline-start: 16px; }
-.m-top-app-bar__actions { right: auto; inset-inline-end: 0; padding-right: 0; padding-inline-end: 16px; }
-.identity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.identity-card { min-width: 0; }
-.identity-card > .m-card { height: 100%; min-height: 182px; padding: 16px; }
-.identity-card > .m-card {
-  /* KernelSU-style tonal surfaces: the active accent is visible as a
-   * soft fill instead of leaving every raised card pure white. */
+.status-hero > .m-card,
+.status-hero.m-card {
+  padding: 20px 18px;
+  border-radius: 26px;
   background: var(--m-color-surface-container);
 }
-.identity-card > .m-card {
-  background: var(--m-color-primary-container);
-  background: color-mix(
-    in srgb,
-    var(--m-color-primary-container) var(--omk-identity-mix),
-    var(--m-color-surface-container)
-  );
+.status-hero[data-tone='active'] > .m-card,
+.status-hero.m-card[data-tone='active'] {
+  background: color-mix(in srgb, var(--m-color-primary-container) 94%, var(--m-color-surface));
 }
-.identity-field { display: grid; gap: 4px; min-width: 0; padding-top: 14px; }
-.identity-field:first-child { padding-top: 0; }
-.identity-field > span { color: var(--m-color-on-surface-variant-summary); font-size: 13px; line-height: 1.35; }
-.identity-field strong { overflow-wrap: anywhere; font-size: 15px; line-height: 1.35; font-weight: 600; }
-.identity-field--primary { min-height: 42px; }
-.identity-field--primary strong { font-size: clamp(13px, 3.2vw, 15px); }
-[data-tone='error'] { color: var(--m-color-error); }
-[data-tone='muted'] {
-  color: var(--m-color-on-surface);
-  font-size: inherit;
-  font-weight: inherit;
+.status-hero[data-tone='error'] > .m-card,
+.status-hero.m-card[data-tone='error'] {
+  background: var(--m-color-error-container, var(--m-color-surface-container));
 }
-[data-tone='loading'] { opacity: .7; }
-.diagnostics-card { margin-top: 12px; }
-.diagnostics-card > .m-card { padding: 14px 12px; background: var(--m-color-surface-container); }
-.diagnostics-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 10px; }
-.diagnostics-heading h2 { margin: 0; font-size: 17px; line-height: 1.3; }
-.diagnostics-heading span { color: var(--m-color-on-surface-variant-summary); font-size: 13px; line-height: 1.4; }
-.diagnostics-refresh { min-height: 34px; padding: 6px 12px; font-size: 14px; flex-shrink: 0; margin-left: 10px; }
-.diagnostics-empty { min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--m-color-on-surface-variant-summary); }
-.diagnostics-services { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
-.diagnostics-service { min-width: 0; padding: 9px 10px; }
-.diagnostics-service dt { color: var(--m-color-on-surface-variant-summary); font-size: 13px; line-height: 1.4; }
-.diagnostics-service dd { margin: 3px 0 0; color: var(--m-color-on-surface); font-size: 14px; font-weight: 600; line-height: 1.3; }
-.diagnostics-service dd[data-tone='ok'] { color: var(--m-color-primary); }
-.diagnostics-service dd[data-tone='error'] { color: var(--m-color-error); }
-.diagnostics-service dd small { display: block; margin-top: 2px; color: var(--m-color-on-surface-variant-summary); font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
+.status-hero__text {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 4px;
+  max-width: 70%;
+}
+.status-hero__text strong {
+  font-size: clamp(22px, 6.6vw, 26px);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -.01em;
+}
+.status-hero__text span {
+  color: color-mix(in srgb, var(--m-color-on-surface) 62%, transparent);
+  font-size: 13px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.status-hero__glyph {
+  position: absolute;
+  right: -26px;
+  bottom: -40px;
+  z-index: 0;
+  width: 168px;
+  height: 168px;
+  color: color-mix(in srgb, var(--m-color-on-primary-container) 30%, transparent);
+  pointer-events: none;
+}
+.status-hero[data-tone='error'] .status-hero__glyph {
+  color: color-mix(in srgb, var(--m-color-error) 22%, transparent);
+}
+
+.info-card { margin-bottom: 12px; }
+.info-card > .m-card,
+.info-card.m-card {
+  padding: 6px 4px;
+  border-radius: 24px;
+  background: var(--m-color-surface-container);
+}
+.info-card .m-basic-component { min-height: 54px; padding: 6px 14px; }
+.info-card .m-basic-component__end { flex: 0 1 auto; min-width: 0; margin-left: 12px; }
+.row-value {
+  color: var(--m-color-on-surface-variant-summary);
+  font-size: 15px;
+  line-height: 1.35;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.row-value[data-tone='error'] { color: var(--m-color-error); }
+.row-value[data-tone='loading'] { opacity: .65; }
+
+
 .preference-section { margin-top: 4px; }
 .preference-section > .m-small-title,
 .settings-section > .m-small-title { padding: 10px 19px 8px; }
@@ -376,7 +380,7 @@ button { touch-action: manipulation; }
 /* KernelSU falls back to its neutral light/dark surfaces when Monet is
  * disabled.  Keep a previously selected custom seed from tinting every card
  * after the user turns the dynamic palette off. */
-:root[data-monet='false'] .identity-card > .m-card,
+:root[data-monet='false'] .info-card > .m-card,
 :root[data-monet='false'] .preference-card > .m-card,
 :root[data-monet='false'] .settings-card .m-card {
   background: var(--m-color-surface-container) !important;
@@ -665,15 +669,8 @@ button { touch-action: manipulation; }
   min-height: calc(100vh / var(--omk-ui-scale));
   min-height: calc(100dvh / var(--omk-ui-scale));
 }
-@media (max-width: 430px) {
-  .identity-grid { gap: 8px; }
-  .identity-card > .m-card { padding: 12px; }
-}
 @media (max-width: 360px) {
   .app-page { --omk-page-side: 10px; }
-  .identity-card > .m-card { padding: 10px; }
-  .identity-field strong { font-size: 13px; }
-  .identity-field--primary strong { font-size: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

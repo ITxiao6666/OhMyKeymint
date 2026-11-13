@@ -33,6 +33,7 @@ pub mod keymaster;
 pub mod keymint;
 pub mod local_rkp;
 pub mod local_rkp_artifacts;
+pub mod log_export;
 pub mod logging;
 pub mod macros;
 pub mod pif_spoof;
@@ -569,6 +570,16 @@ fn handle_webui_diagnostics_command() -> Option<Result<String, String>> {
     let mut args = std::env::args();
     let _program = args.next();
     match args.next()?.as_str() {
+        "--webui-export-logs" => {
+            if args.next().is_some() {
+                return Some(Err("--webui-export-logs does not accept arguments".to_string()));
+            }
+            Some(
+                crate::log_export::export_logs()
+                    .map(|path| path.display().to_string())
+                    .map_err(|error| format!("{error:#}")),
+            )
+        }
         "--webui-get-diagnostics" => {
             if args.next().is_some() {
                 return Some(Err("--webui-get-diagnostics does not accept arguments".to_string()));

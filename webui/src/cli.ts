@@ -26,6 +26,9 @@ const MAX_PIF_FINGERPRINT_LENGTH = 1024
 const PIF_PRODUCT_RE = /^[a-z0-9][a-z0-9_]*$/
 
 export const MAX_KEYBOX_XML_BYTES = 64 * 1024
+// Every helper call settles even when the host never reports its exit, so a
+// stalled binary can no longer leave a dialog or the whole view stuck busy.
+const DEFAULT_RUN_TIMEOUT_MS = 60_000
 
 export interface PifDevice {
   model: string
@@ -519,7 +522,7 @@ export class Cli {
 
   async clearGmsCache(): Promise<void> {
     const { keymint } = await this.#getHelperPaths()
-    const output = await this.#run(keymint, ['--webui-clear-gms-cache'], 65536)
+    const output = await this.#run(keymint, ['--webui-clear-gms-cache'], 65536, 90_000)
     const report: unknown = JSON.parse(output)
     if (!isRecord(report) || !Array.isArray(report.errors)
         || !report.errors.every((error: unknown) => typeof error === 'string')
@@ -531,7 +534,7 @@ export class Cli {
 
   async repairRkp(): Promise<void> {
     const { keymint } = await this.#getHelperPaths()
-    const output = await this.#run(keymint, ['--webui-repair-rkp', '--confirm-persistent-write'], 256)
+    const output = await this.#run(keymint, ['--webui-repair-rkp', '--confirm-persistent-write'], 256, 150_000)
     if (output !== 'rkp_tool_completed') throw new Error('OMK returned an unexpected RKP tool result')
   }
 
@@ -549,6 +552,7 @@ export class Cli {
       keymint,
       args,
       MAX_RKP_ISSUED_JSON_BYTES,
+      180_000,
     )
     return parseRkpIssuedArtifact(parseCanonicalJson(output, 'issued RKP metadata'))
   }
@@ -566,6 +570,7 @@ export class Cli {
       keymint,
       ['--webui-rkp-import', id, '--confirm-replace'],
       256,
+      90_000,
     )
     if (output !== 'rkp_imported') throw new Error('OMK returned an unexpected RKP import result')
   }
@@ -655,6 +660,16 @@ export class Cli {
     await this.#run(keymint, ['--webui-install-keybox', ...chunks])
   }
 
+  async exportLogs(): Promise<string> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-export-logs'], 4096, 60_000)
+    // The helper prints the archive path it created on shared storage.
+    if (!/^\/[^\s]+\.tar$/.test(output)) {
+      throw new Error('OMK returned an unexpected log export result')
+    }
+    return output
+  }
+
   async getKeyboxState(): Promise<KeyboxState> {
     const { keymint } = await this.#getHelperPaths()
     const output = await this.#run(keymint, ['--webui-get-keybox-state'], 256)
@@ -679,7 +694,7 @@ export class Cli {
 
   async checkKeyboxRevocation(): Promise<KeyboxRevocationStatus> {
     const { keymint } = await this.#getHelperPaths()
-    const output = await this.#run(keymint, ['--webui-check-keybox-revocation'], 256)
+    const output = await this.#run(keymint, ['--webui-check-keybox-revocation'], 256, 25_000)
     if (output !== 'not_listed' && output !== 'suspended' && output !== 'revoked') {
       throw new Error('OMK returned an invalid Keybox revocation status')
     }
@@ -746,6 +761,7 @@ export class Cli {
           keymint,
           ['--webui-fetch-security-bulletin', url],
           MAX_BULLETIN_BYTES + 1024,
+          30_000,
         )
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error))
@@ -873,7 +889,12 @@ export class Cli {
     throw new Error(`OMK ${abi} helper binaries are not installed`)
   }
 
-  #run(binary: string, args: string[], maxOutputBytes = Number.POSITIVE_INFINITY): Promise<string> {
+  #run(
+    binary: string,
+    args: string[],
+    maxOutputBytes = Number.POSITIVE_INFINITY,
+    timeoutMs = DEFAULT_RUN_TIMEOUT_MS,
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       let stdout = ''
       let stderr = ''
@@ -881,10 +902,26 @@ export class Cli {
       let stderrBytes = 0
       let outputTooLarge = false
       let settled = false
+      let timer: number | null = null
       const process = spawn(binary, args)
+      const stopTimer = () => {
+        if (timer !== null) {
+          window.clearTimeout(timer)
+          timer = null
+        }
+      }
+      // The host shim exposes no way to signal the child, so a stalled helper is
+      // abandoned here: the promise settles, the UI stops waiting, and the process
+      // exits on its own (helpers bound their own work internally).
+      timer = window.setTimeout(() => {
+        if (settled) return
+        settled = true
+        timer = null
+        reject(new Error(`OMK helper timed out after ${Math.round(timeoutMs / 1000)}s`))
+      }, timeoutMs)
 
       process.stdout.on('data', (chunk: string) => {
-        if (outputTooLarge) return
+        if (outputTooLarge || settled) return
         stdoutBytes += new TextEncoder().encode(chunk).byteLength
         if (stdoutBytes > maxOutputBytes) {
           outputTooLarge = true
@@ -893,13 +930,14 @@ export class Cli {
         stdout += chunk
       })
       process.stderr.on('data', (chunk: string) => {
-        if (stderrBytes >= 8192) return
+        if (settled || stderrBytes >= 8192) return
         const remaining = 8192 - stderrBytes
         const encoded = new TextEncoder().encode(chunk)
         stderrBytes += encoded.byteLength
         stderr += new TextDecoder().decode(encoded.subarray(0, remaining))
       })
       process.on('exit', (code: number | null) => {
+        stopTimer()
         if (settled) return
         settled = true
         if (outputTooLarge) {
@@ -911,6 +949,7 @@ export class Cli {
         }
       })
       process.on('error', (error: Error) => {
+        stopTimer()
         if (settled) return
         settled = true
         reject(new Error(`Unable to run the OMK helper: ${error.message}`))

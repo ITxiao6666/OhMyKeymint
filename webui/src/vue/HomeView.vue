@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  MiuixButton,
+  MiuixBasicComponent,
   MiuixCard,
   MiuixIcon,
+  MiuixIconButton,
   MiuixProgressIndicator,
   MiuixTopAppBar,
 } from 'miuix-vue'
-import { Info, Ok } from 'miuix-vue/icons'
+import { Refresh } from 'miuix-vue/icons'
 import type {
   DiagnosticsState,
   KeyboxLevel,
@@ -119,16 +120,6 @@ const heroState = computed(() => {
   }
 })
 
-const hardwareRows = computed(() => {
-  if (!props.diagnostics) return []
-  return [
-    { id: 'tee', label: 'TEE · KeyMint', value: props.diagnostics.tee },
-    { id: 'strongbox', label: 'StrongBox · KeyMint', value: props.diagnostics.strongbox },
-    { id: 'rkp-tee', label: 'TEE · RKP', value: props.diagnostics.rkp_tee },
-    { id: 'rkp-strongbox', label: 'StrongBox · RKP', value: props.diagnostics.rkp_strongbox },
-  ]
-})
-
 function diagnosticStatusLabel(status: string, hardware = false): string {
   switch (status) {
     case 'running': return tr('home_diag_running', 'Running')
@@ -146,99 +137,128 @@ function diagnosticStatusLabel(status: string, hardware = false): string {
   }
 }
 
+// Keep the decorative glyph consistent with the reported state so a failure is
+// never drawn with a tick.
+const heroGlyph = computed(() => {
+  if (heroState.value.tone === 'active') return 'tick'
+  if (heroState.value.tone === 'error') return 'alert'
+  return 'none'
+})
+
+// Rows keep the field name on the left and the current value right-aligned,
+// so each line reads as one label/value pair.
+const identityRows = computed(() => [
+
+  {
+    id: 'keybox',
+    label: tr('home_keybox', 'Keybox'),
+    value: keyboxSourceLabel.value,
+    tone: props.keyboxStatus === 'invalid' ? 'error' : 'default',
+  },
+  {
+    id: 'patch',
+    label: tr('home_security_patch', 'Security patch'),
+    value: props.securityPatch ?? '\u2014',
+    tone: 'default',
+  },
+  {
+    id: 'level',
+    label: tr('home_keybox_security_level', 'Security Level'),
+    value: keyboxLevelLabel.value,
+    tone: 'default',
+  },
+  {
+    id: 'revocation',
+    label: tr('home_keybox_revocation', 'Certificate status'),
+    value: revocationState.value.label,
+    tone: revocationState.value.tone,
+  },
+  {
+    id: 'tee',
+    label: tr('home_tee_status', 'TEE status'),
+    value: teeState.value.label,
+    tone: teeState.value.tone,
+  },
+  {
+    id: 'spoof',
+    label: tr('home_spoofed_device', 'Spoofed device fingerprint'),
+    value: props.spoofedDevice === null
+      ? tr('pif_disabled', 'Disabled')
+      : (props.spoofedDevice ?? '\u2014'),
+    tone: 'default',
+  },
+])
+
 </script>
 
 <template>
   <section class="app-page home-page" aria-labelledby="home-title">
-    <MiuixTopAppBar title="Oh My Keymint" />
+    <MiuixTopAppBar title="Oh My Keymint">
+      <template #actions>
+        <MiuixIconButton
+          :disabled="diagnosticsStatus === 'loading'"
+          :aria-label="tr('tools_diagnostics_refresh', 'Refresh')"
+          @click="emit('refreshDiagnostics')"
+        >
+          <MiuixProgressIndicator
+            v-if="diagnosticsStatus === 'loading'"
+            type="circular"
+            :size="18"
+            :stroke-width="2"
+          />
+          <MiuixIcon v-else :icon="Refresh" :size="22" />
+        </MiuixIconButton>
+      </template>
+    </MiuixTopAppBar>
     <h1 id="home-title" class="page-large-title">Oh My Keymint</h1>
 
     <MiuixCard class="status-hero" :data-tone="heroState.tone" press-feedback="none">
-      <div class="status-hero__body" role="status" aria-live="polite">
-        <span class="status-hero__badge" aria-hidden="true">
-          <MiuixProgressIndicator
-            v-if="heroState.tone === 'loading'"
-            type="circular"
-            :size="26"
-            :stroke-width="2.5"
-          />
-          <MiuixIcon v-else :icon="heroState.tone === 'active' ? Ok : Info" :size="28" />
+      <div class="status-hero__text" role="status" aria-live="polite">
+        <strong>{{ heroState.label }}</strong>
+        <span>
+          {{ tr('home_diag_keymint', 'OMK KeyMint') }}<template v-if="heroState.detail"> · {{ heroState.detail }}</template>
         </span>
-        <div class="status-hero__text">
-          <strong>{{ heroState.label }}</strong>
-          <span>
-            {{ tr('home_diag_keymint', 'OMK KeyMint') }}<template v-if="heroState.detail"> · {{ heroState.detail }}</template>
-          </span>
-        </div>
       </div>
+      <!-- The glyph mirrors the state: a tick only while running, an
+           exclamation for a failure, and nothing while the read is pending. -->
+      <svg
+        v-if="heroGlyph !== 'none'"
+        class="status-hero__glyph"
+        viewBox="0 0 100 100"
+        aria-hidden="true"
+      >
+        <path
+          v-if="heroGlyph === 'tick'"
+          d="M18 52 L40 74 L84 26"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="15"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <template v-else>
+          <path
+            d="M50 22 L50 62"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="15"
+            stroke-linecap="round"
+          />
+          <circle cx="50" cy="82" r="8" fill="currentColor" />
+        </template>
+      </svg>
     </MiuixCard>
 
-    <div class="identity-grid" aria-live="polite">
-      <MiuixCard class="identity-card" press-feedback="none">
-        <div class="identity-field identity-field--primary">
-          <span>{{ tr('home_keybox', 'Keybox') }}</span>
-          <strong :data-source="keyboxSource">{{ keyboxSourceLabel }}</strong>
-        </div>
-        <div class="identity-field">
-          <span>{{ tr('home_keybox_security_level', 'Security Level') }}</span>
-          <strong>{{ keyboxLevelLabel }}</strong>
-        </div>
-        <div class="identity-field">
-          <span>{{ tr('home_keybox_revocation', 'Certificate status') }}</span>
-          <strong :data-tone="revocationState.tone">{{ revocationState.label }}</strong>
-        </div>
-      </MiuixCard>
-
-      <MiuixCard class="identity-card" press-feedback="none">
-        <div class="identity-field identity-field--primary">
-          <span>{{ tr('home_security_patch', 'Security patch') }}</span>
-          <strong>{{ securityPatch ?? '\u2014' }}</strong>
-        </div>
-        <div class="identity-field">
-          <span>{{ tr('home_tee_status', 'TEE status') }}</span>
-          <strong :data-tone="teeState.tone">{{ teeState.label }}</strong>
-        </div>
-        <div class="identity-field">
-          <span>{{ tr('home_spoofed_device', 'Spoofed device fingerprint') }}</span>
-          <strong>{{ spoofedDevice === null ? tr('pif_disabled', 'Disabled') : (spoofedDevice ?? '\u2014') }}</strong>
-        </div>
-      </MiuixCard>
-    </div>
-
-    <MiuixCard class="diagnostics-card" press-feedback="none">
-      <header class="diagnostics-heading">
-        <div>
-          <h2>{{ tr('home_diagnostics_title', 'Current device status') }}</h2>
-        </div>
-        <MiuixButton
-          type="default"
-          class="diagnostics-refresh"
-          :disabled="diagnosticsStatus === 'loading'"
-          @click="emit('refreshDiagnostics')"
-        >
-          <MiuixProgressIndicator v-if="diagnosticsStatus === 'loading'" type="circular" :size="16" />
-          {{ tr('tools_diagnostics_refresh', 'Refresh') }}
-        </MiuixButton>
-      </header>
-      <div v-if="diagnosticsStatus === 'loading' && !diagnostics" class="diagnostics-empty" role="status">
-        <MiuixProgressIndicator type="circular" :size="22" :stroke-width="2" />
-        <span>{{ tr('home_status_loading', 'Checking') }}</span>
-      </div>
-      <div v-else-if="diagnosticsStatus === 'error'" class="diagnostics-empty" role="alert">
-        <MiuixIcon :icon="Info" :size="22" />
-        <span>{{ tr('home_diagnostics_error', 'Unable to load diagnostics') }}</span>
-      </div>
-      <dl v-if="diagnostics" class="diagnostics-services diagnostics-services--hardware">
-        <div v-for="row in hardwareRows" :key="row.id" class="diagnostics-service">
-          <dt>{{ row.label }}</dt>
-          <dd :data-tone="row.value.status === 'error' ? 'error' : 'muted'">
-            {{ diagnosticStatusLabel(row.value.status, true) }}
-            <small v-if="'name' in row.value && row.value.name">
-              {{ row.value.name }}<template v-if="row.value.version !== null"> · v{{ row.value.version }}</template>
-            </small>
-          </dd>
-        </div>
-      </dl>
+    <MiuixCard class="info-card" press-feedback="none">
+      <MiuixBasicComponent
+        v-for="row in identityRows"
+        :key="row.id"
+        :title="row.label"
+      >
+        <template #end>
+          <span class="row-value" :data-tone="row.tone">{{ row.value }}</span>
+        </template>
+      </MiuixBasicComponent>
     </MiuixCard>
 
   </section>
