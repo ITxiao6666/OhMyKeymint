@@ -108,9 +108,22 @@ pub fn boot_completed() -> bool {
 pub fn await_boot_completed() {
     let _wp = wd::watch_millis("await_boot_completed", 300_000);
     log::info!("monitoring for sys.boot_completed=1");
-    while let Err(e) = watch_for_boot_completed() {
-        log::error!("failed to watch for boot_completed: {e:?}");
-        std::thread::sleep(std::time::Duration::from_secs(5));
+    let mut reported_absent = false;
+    loop {
+        match watch_for_boot_completed() {
+            Ok(BootCompletionWatch::Completed) => break,
+            Ok(BootCompletionWatch::PropertyAbsent) => {
+                if !reported_absent {
+                    reported_absent = true;
+                    log::debug!("sys.boot_completed is not published yet; waiting for it");
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            Err(e) => {
+                log::warn!("failed to watch for boot_completed: {e:?}");
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        }
     }
 
     BOOT_COMPLETED.store(true, Ordering::Release);
@@ -118,13 +131,24 @@ pub fn await_boot_completed() {
     GC.notify_gc();
 }
 
-fn watch_for_boot_completed() -> Result<()> {
+/// Outcome of one boot-completion watch attempt.
+enum BootCompletionWatch {
+    /// `sys.boot_completed=1` was observed.
+    Completed,
+    /// The property does not exist yet, which is expected for an early start.
+    PropertyAbsent,
+}
+
+fn watch_for_boot_completed() -> Result<BootCompletionWatch> {
     let watcher =
         PropertyWatcher::new("sys.boot_completed").context(err!("PropertyWatcher::new failed"))?;
     loop {
-        let value = watcher.read().context(err!("Failed to read sys.boot_completed"))?;
+        let Some(value) = watcher.try_read().context(err!("Failed to read sys.boot_completed"))?
+        else {
+            return Ok(BootCompletionWatch::PropertyAbsent);
+        };
         if value == "1" {
-            return Ok(());
+            return Ok(BootCompletionWatch::Completed);
         }
         watcher.wait(Some(&value)).context(err!("Failed to wait for sys.boot_completed"))?;
     }

@@ -459,7 +459,7 @@ unsafe fn execute_native_transaction(
             )
         })?;
 
-        info!(
+        debug!(
             "event=synthetic handling {} security-level {:?} uid={} pid={} target=ptr:0x{:x}/cookie=0x{:x} packages={:?} security_level={:?}",
             command_name,
             method,
@@ -501,7 +501,7 @@ unsafe fn execute_native_transaction(
     };
     let method = request.method();
 
-    info!(
+    debug!(
         "event=synthetic handling {} operation {:?} uid={} pid={} target=ptr:0x{:x}/cookie:0x{:x}",
         command_name, method, caller.uid, caller.pid, target.ptr, target.cookie,
     );

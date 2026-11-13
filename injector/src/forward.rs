@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use log::debug;
+use log::trace;
 
 thread_local! {
     static BYPASS_HOOK_DEPTH: Cell<u32> = Cell::default();
@@ -15,7 +15,7 @@ pub struct BypassGuard;
 impl BypassGuard {
     pub fn enter() -> Self {
         BYPASS_HOOK_DEPTH.with(|depth| depth.set(depth.get() + 1));
-        debug!("entered bypass scope");
+        trace!("entered bypass scope");
         Self
     }
 }
@@ -23,6 +23,6 @@ impl BypassGuard {
 impl Drop for BypassGuard {
     fn drop(&mut self) {
         BYPASS_HOOK_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
-        debug!("exited bypass scope");
+        trace!("exited bypass scope");
     }
 }

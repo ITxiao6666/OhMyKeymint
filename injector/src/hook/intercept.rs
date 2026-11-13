@@ -24,7 +24,7 @@ use super::{
     OLD_FDSAN_CLOSE, OLD_IOCTL,
 };
 use crate::hook::binder::{LocalBinderTarget, NativeBinderRetirement};
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use nix::unistd::Pid;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -80,7 +80,11 @@ enum SyncTransactionState {
 
 thread_local! {
     static PENDING_TRANSACTION_COMPLETIONS: RefCell<HashMap<BinderStateKey, VecDeque<PendingTransactionCompletion>>> = RefCell::default();
-    static SYNC_TRANSACTIONS: RefCell<HashMap<BinderStateKey, Vec<SyncTransactionState>>> = RefCell::default();
+    /// Submission order of outstanding synchronous transactions. Binder
+    /// delivers submission completions and replies in submission order, so
+    /// this queue must be consumed from the front, exactly like
+    /// `PENDING_TRANSACTION_COMPLETIONS`.
+    static SYNC_TRANSACTIONS: RefCell<HashMap<BinderStateKey, VecDeque<SyncTransactionState>>> = RefCell::default();
     static PREPARED_BC_REPLIES: RefCell<HashMap<BinderStateKey, VecDeque<PreparedBcReply>>> = RefCell::default();
     static OBSERVED_BINDER_FD_TOKENS: RefCell<HashMap<c_int, BinderFdToken>> = RefCell::default();
     static PENDING_IOCTL_COPYBACKS: RefCell<HashMap<BinderStateKey, PendingIoctlCopyback>> = RefCell::default();

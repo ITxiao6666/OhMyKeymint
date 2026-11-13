@@ -475,7 +475,7 @@ pub(in crate::hook::rewrite) fn register_synthetic_security_level_carrier(
         }
     };
     tracker::remember_security_level_target(target, SecurityLevelTargetInfo { security_level });
-    info!(
+    debug!(
         "event=synthetic registered/reused security-level target ptr=0x{:x} cookie=0x{:x} security_level={:?} source_method={:?} uid={} pid={} sid='{}'",
         target.ptr, target.cookie, security_level, source_method, caller.uid, caller.pid, caller.sid
     );

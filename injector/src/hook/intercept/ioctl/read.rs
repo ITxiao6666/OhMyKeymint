@@ -132,13 +132,32 @@ pub(in crate::hook::intercept) unsafe fn parse_read_buffer(
                 BR_REPLY_NR => {
                     complete_sync_transaction(fd, SyncTransactionState::AwaitingReply);
                     if cmd_size == size_of::<binder_transaction_data>() {
-                        let mut tr =
-                            std::ptr::read_unaligned(payload as *const binder_transaction_data);
                         if log::log_enabled!(log::Level::Debug) {
-                            if let Some(mut shadow) = TransactionPayloadShadow::read(&tr) {
-                                shadow.install(&mut tr);
-                                debug!(
-                                ">>> BR_REPLY | target: {}, code: 0x{:x}, sender_euid: {}, sender_pid: {}, flags: 0x{:x}{}, parcel_size: {}, offsets_size: {}, parcel: {}",
+                            let mut tr =
+                                std::ptr::read_unaligned(payload as *const binder_transaction_data);
+                            // Previewing the parcel needs a copy of the payload, so it is only
+                            // collected when trace output was explicitly requested.
+                            let parcel = if log::log_enabled!(log::Level::Trace) {
+                                match TransactionPayloadShadow::read(&tr) {
+                                    Some(mut shadow) => {
+                                        shadow.install(&mut tr);
+                                        let preview = preview_transaction_parcel(&tr);
+                                        shadow.restore(&mut tr);
+                                        format!(", parcel: {preview}")
+                                    }
+                                    None => {
+                                        warn!(
+                                            "event=binder skipped unsafe BR_REPLY parcel fd={} data_size={} offsets_size={}",
+                                            fd, tr.data_size, tr.offsets_size
+                                        );
+                                        String::new()
+                                    }
+                                }
+                            } else {
+                                String::new()
+                            };
+                            debug!(
+                                ">>> BR_REPLY | target: {}, code: 0x{:x}, sender_euid: {}, sender_pid: {}, flags: 0x{:x}{}, parcel_size: {}, offsets_size: {}{}",
                                 format_target(&tr),
                                 tr.code,
                                 tr.sender_euid,
@@ -147,14 +166,8 @@ pub(in crate::hook::intercept) unsafe fn parse_read_buffer(
                                 if (tr.flags & TF_ONE_WAY) != 0 { ", oneway" } else { "" },
                                 tr.data_size,
                                 tr.offsets_size,
-                                preview_transaction_parcel(&tr),
+                                parcel,
                             );
-                            } else {
-                                warn!(
-                                "event=binder skipped unsafe BR_REPLY parcel fd={} data_size={} offsets_size={}",
-                                fd, tr.data_size, tr.offsets_size
-                            );
-                            }
                         }
                     } else {
                         warn!("unexpected BR_REPLY payload size {}", cmd_size);
@@ -187,10 +200,10 @@ pub(in crate::hook::intercept) fn record_transaction_completion(
                 .borrow_mut()
                 .entry(connection)
                 .or_default()
-                .push(SyncTransactionState::PendingCompletion);
+                .push_back(SyncTransactionState::PendingCompletion);
         });
     }
-    debug!(
+    trace!(
         "event=synthetic registered BR_TRANSACTION_COMPLETE for fd={} thread={:?} reply={} expects_reply={} pending={}",
         fd,
         std::thread::current().id(),
@@ -320,13 +333,14 @@ pub(super) fn complete_transaction_submission(fd: c_int) -> Option<()> {
 
     if completion.expects_reply && !mark_sync_transaction_completed(fd) {
         warn!(
-            "event=synthetic synchronous transaction completion had no pending transaction fd={} thread={:?}",
+            "event=synthetic synchronous transaction completion had no pending transaction fd={} thread={:?} remaining={}",
             fd,
-            std::thread::current().id()
+            std::thread::current().id(),
+            remaining
         );
     }
 
-    debug!(
+    trace!(
         "event=synthetic consumed BR_TRANSACTION_COMPLETE for fd={} thread={:?} remaining={}",
         fd,
         std::thread::current().id(),
@@ -335,20 +349,25 @@ pub(super) fn complete_transaction_submission(fd: c_int) -> Option<()> {
     Some(())
 }
 
+/// Transitions the oldest outstanding synchronous submission to
+/// `AwaitingReply`. Binder reports submission completions in submission order,
+/// so the marker this completion belongs to is the first one that is still
+/// `PendingCompletion`; it is not necessarily at the back of the queue, because
+/// markers for already completed submissions stay queued until their reply
+/// arrives.
 fn mark_sync_transaction_completed(fd: c_int) -> bool {
     let connection = binder_state_key(fd);
     SYNC_TRANSACTIONS.with(|transactions| {
         let mut transactions = transactions.borrow_mut();
-        let Some(stack) = transactions.get_mut(&connection) else {
+        let Some(states) = transactions.get_mut(&connection) else {
             return false;
         };
-        let Some(state) = stack.last_mut() else {
+        let Some(index) =
+            states.iter().position(|state| *state == SyncTransactionState::PendingCompletion)
+        else {
             return false;
         };
-        if *state != SyncTransactionState::PendingCompletion {
-            return false;
-        }
-        *state = SyncTransactionState::AwaitingReply;
+        states[index] = SyncTransactionState::AwaitingReply;
         true
     })
 }
@@ -357,14 +376,32 @@ fn complete_sync_transaction(fd: c_int, expected: SyncTransactionState) -> bool 
     let connection = binder_state_key(fd);
     SYNC_TRANSACTIONS.with(|transactions| {
         let mut transactions = transactions.borrow_mut();
-        let Some(stack) = transactions.get_mut(&connection) else {
+        let Some(states) = transactions.get_mut(&connection) else {
             return false;
         };
-        if stack.last() != Some(&expected) {
-            return false;
+        match expected {
+            // A reply belongs to the oldest submission that already reported
+            // its completion, so only the front marker can match it.
+            SyncTransactionState::AwaitingReply => {
+                if states.front() != Some(&SyncTransactionState::AwaitingReply) {
+                    return false;
+                }
+                states.pop_front();
+            }
+            // A terminal submission result cancels the oldest submission that
+            // never reported a completion, which may sit behind markers that
+            // are already awaiting their reply.
+            SyncTransactionState::PendingCompletion => {
+                let Some(index) = states
+                    .iter()
+                    .position(|state| *state == SyncTransactionState::PendingCompletion)
+                else {
+                    return false;
+                };
+                states.remove(index);
+            }
         }
-        stack.pop();
-        if stack.is_empty() {
+        if states.is_empty() {
             transactions.remove(&connection);
         }
         true

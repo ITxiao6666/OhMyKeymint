@@ -74,7 +74,9 @@ pub(super) unsafe fn prepare_write_buffer(
     inspect_all: bool,
 ) -> Option<PreparedWrite> {
     let connection = binder_state_key(fd);
-    let log_payloads = log::log_enabled!(log::Level::Info);
+    // Payload previews need a copy of every written transaction, so they are
+    // collected only when trace output was explicitly requested.
+    let log_payloads = log::log_enabled!(log::Level::Trace);
     let mut reply_payloads = VecDeque::new();
     let mut offset = 0usize;
     let mut reply_count = 0usize;
@@ -259,7 +261,7 @@ pub(super) unsafe fn parse_prepared_write_buffer(
                         }
                         let log_payloads = preflight
                             .as_ref()
-                            .map_or(log::log_enabled!(log::Level::Info), |prepared| {
+                            .map_or(log::log_enabled!(log::Level::Trace), |prepared| {
                                 prepared.log_payloads
                             });
                         let mut shadow = if is_reply {

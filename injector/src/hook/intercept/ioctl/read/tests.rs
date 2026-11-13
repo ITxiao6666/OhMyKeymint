@@ -107,3 +107,48 @@ fn terminal_results_preserve_nested_sync_completion_order() {
     assert!(complete_sync_transaction(fd, SyncTransactionState::AwaitingReply));
     drain_transaction_completions(fd);
 }
+
+#[test]
+fn pipelined_sync_completions_transition_every_marker() {
+    let _guard = SYNTHETIC_REPLY_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let fd = 11;
+    drain_transaction_completions(fd);
+
+    // Two synchronous submissions are in flight before either completes.
+    record_transaction_completion(fd, false, true, None);
+    record_transaction_completion(fd, false, true, None);
+    assert_eq!(complete_transaction_submission(fd), Some(()));
+    assert_eq!(complete_transaction_submission(fd), Some(()));
+    // Each completion must move exactly one marker to AwaitingReply; a marker
+    // left behind makes this sequence fall short.
+    assert!(complete_sync_transaction(fd, SyncTransactionState::AwaitingReply));
+    assert!(complete_sync_transaction(fd, SyncTransactionState::AwaitingReply));
+    assert!(!complete_sync_transaction(fd, SyncTransactionState::AwaitingReply));
+
+    drain_transaction_completions(fd);
+}
+
+#[test]
+fn terminal_failure_cancels_only_the_oldest_pending_submission() {
+    let _guard = SYNTHETIC_REPLY_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let fd = 12;
+    drain_transaction_completions(fd);
+
+    // The oldest submission is awaiting its reply while two siblings are still
+    // waiting for their own submission completions.
+    record_transaction_completion(fd, false, true, None);
+    assert_eq!(complete_transaction_submission(fd), Some(()));
+    record_transaction_completion(fd, false, true, None);
+    record_transaction_completion(fd, false, true, None);
+
+    complete_failed_transaction_submission(fd, BR_DEAD_REPLY_NR);
+
+    // The failed submission cancels the oldest pending marker, and the reply
+    // marker of the completed submission stays available.
+    assert!(complete_sync_transaction(fd, SyncTransactionState::AwaitingReply));
+    assert_eq!(complete_transaction_submission(fd), Some(()));
+    assert!(complete_sync_transaction(fd, SyncTransactionState::AwaitingReply));
+    assert!(!complete_sync_transaction(fd, SyncTransactionState::AwaitingReply));
+
+    drain_transaction_completions(fd);
+}
