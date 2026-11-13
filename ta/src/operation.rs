@@ -103,7 +103,7 @@ impl Operation {
 }
 
 /// Newtype for operation handles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct OpHandle(pub i64);
 
 /// Authentication requirements associated with an operation.
@@ -254,6 +254,43 @@ impl crate::KeyMintTa {
         timestamp_token: Option<TimeStampToken>,
         confirmation_token: Option<&[u8]>,
     ) -> Result<Vec<u8>, Error> {
+        // A limited-use key may have had its last use consumed by a sibling operation that was
+        // opened before this one; reject it before any crypto runs or its deletion slot is touched.
+        if let Err(error) = self.usage_limits.check_completion(op_handle) {
+            self.usage_limits.abandon(op_handle);
+            return Err(error);
+        }
+        match self.op_finish_inner(
+            op_handle,
+            data,
+            signature,
+            auth_token,
+            timestamp_token,
+            confirmation_token,
+        ) {
+            Ok(output) => {
+                // The result is only released once the key's usage accounting allows it, so an
+                // operation whose sibling already consumed the last use fails here instead of
+                // producing a signature.
+                self.usage_limits.complete(op_handle)?;
+                Ok(output)
+            }
+            Err(error) => {
+                self.usage_limits.abandon(op_handle);
+                Err(error)
+            }
+        }
+    }
+
+    fn op_finish_inner(
+        &mut self,
+        op_handle: OpHandle,
+        data: Option<&[u8]>,
+        signature: Option<&[u8]>,
+        auth_token: Option<HardwareAuthToken>,
+        timestamp_token: Option<TimeStampToken>,
+        confirmation_token: Option<&[u8]>,
+    ) -> Result<Vec<u8>, Error> {
         let mut op = self.take_operation(op_handle)?;
         self.check_subsequent_auth(&op, auth_token, timestamp_token)?;
 
@@ -379,6 +416,7 @@ impl crate::KeyMintTa {
             self.presence_required_op = None;
         }
         let _op = self.take_operation(op_handle)?;
+        self.usage_limits.abandon(op_handle);
         Ok(())
     }
 

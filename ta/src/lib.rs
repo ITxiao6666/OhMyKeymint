@@ -51,6 +51,7 @@ pub mod keys;
 mod operation;
 pub mod rkp;
 mod secret;
+mod usage;
 
 use keys::KeyImport;
 use operation::{OpHandle, Operation};
@@ -188,6 +189,9 @@ pub struct KeyMintTa {
 
     /// Operation handle of the (single) in-flight operation that requires trusted user presence.
     presence_required_op: Option<OpHandle>,
+
+    /// Usage accounting for keys that carry `Tag::USAGE_COUNT_LIMIT`.
+    usage_limits: usage::UsageLimits,
 }
 
 /// A helper method that can be used by the TA for processing the responses to be sent to the
@@ -319,8 +323,17 @@ pub struct RequestPatchLevels {
 }
 
 /// Identifier for a keyblob.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct KeyId([u8; 32]);
+
+impl KeyId {
+    /// First bytes of the identifier, for log correlation.
+    pub(crate) fn short(&self) -> [u8; 4] {
+        let mut short = [0u8; 4];
+        short.copy_from_slice(&self.0[..4]);
+        short
+    }
+}
 
 struct KeyBlobDecryptionResult {
     keyblob: keyblob::PlaintextKeyBlob,
@@ -364,6 +377,7 @@ impl KeyMintTa {
             operations: (0..max_operations).map(|_| None).collect(),
             use_count: Default::default(),
             presence_required_op: None,
+            usage_limits: Default::default(),
             shared_secret_params: None,
             hw_info,
             rpc_info,

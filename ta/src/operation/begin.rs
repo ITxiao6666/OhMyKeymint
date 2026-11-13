@@ -67,6 +67,24 @@ impl crate::KeyMintTa {
             None
         };
 
+        // A limited-use key may be opened more than once; a use is consumed only when an
+        // operation produces its result. Reject a key whose limit is already exhausted.
+        let usage_key = match characteristics
+            .iter()
+            .flat_map(|chars| chars.authorizations.iter())
+            .find_map(|param| match param {
+                KeyParam::UsageCountLimit(limit) => Some(*limit),
+                _ => None,
+            }) {
+            Some(limit) => {
+                let key = self.key_id(key_blob)?;
+                self.usage_limits.ensure_available(&key, limit)?;
+                info!("limited-use key begin: limit={} key={:02x?}", limit, key.short());
+                Some((key, limit))
+            }
+            None => None,
+        };
+
         let slot_to_delete = if let Some(&1) = get_opt_tag_value!(key_chars, UsageCountLimit)? {
             warn!("single-use key will be deleted on operation completion");
             sdd_slot
@@ -310,6 +328,9 @@ impl crate::KeyMintTa {
                 },
             },
         };
+        if let Some((key, limit)) = usage_key {
+            self.usage_limits.track(op_handle, key, limit);
+        }
         self.operations[op_idx] = Some(op);
         if presence_required {
             info!("this operation requires proof-of-presence");
