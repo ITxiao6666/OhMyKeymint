@@ -13,8 +13,55 @@ const MAX_REQUEST: usize = 0x9000;
 pub(super) fn available() -> bool {
     cfg!(all(target_os = "android", target_arch = "aarch64"))
         && qualcomm_soc()
-        && std::path::Path::new(LIBRARY).is_file()
-        && std::path::Path::new(DEVICE).exists()
+        && library_present()
+        && device_present()
+}
+
+pub(super) fn library_present() -> bool {
+    std::path::Path::new(LIBRARY).is_file()
+}
+
+pub(super) fn device_present() -> bool {
+    std::path::Path::new(DEVICE).exists()
+}
+
+pub(super) const LIBRARY_PATH: &str = LIBRARY;
+pub(super) const DEVICE_PATH: &str = DEVICE;
+
+/// MediaTek firmware has no Qualcomm KeyMint adapter; only the AIDL path applies.
+pub(super) fn mediatek_soc() -> bool {
+    [
+        "ro.soc.manufacturer",
+        "ro.vendor.soc.manufacturer",
+        "ro.soc.model",
+        "ro.vendor.soc.model",
+        "ro.hardware",
+        "ro.board.platform",
+    ]
+    .into_iter()
+    .filter_map(|property| rsproperties::get::<String>(property).ok())
+    .any(|value| identifies_mediatek(&value))
+}
+
+fn identifies_mediatek(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_uppercase();
+    let normalized = normalized
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let joined = normalized.join(" ");
+    if matches!(joined.as_str(), "MEDIATEK" | "MEDIATEK INC" | "MTK" | "HELIO" | "DIMENSITY") {
+        return true;
+    }
+    joined.split(' ').any(|part| {
+        part.starts_with("MT")
+            && part.len() >= 4
+            && part[2..].bytes().take_while(u8::is_ascii_digit).count() >= 3
+    })
+}
+
+pub(super) fn qualcomm() -> bool {
+    qualcomm_soc()
 }
 
 fn qualcomm_soc() -> bool {

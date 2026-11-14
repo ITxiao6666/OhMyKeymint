@@ -73,6 +73,18 @@ pub fn available() -> bool {
     }
 }
 
+/// The discovered rkpd APK path, for read-only prerequisite reporting.
+pub fn aidl_apk() -> Option<String> {
+    #[cfg(all(target_os = "android", target_arch = "aarch64"))]
+    {
+        find_aidl_apk().ok().map(|path| path.display().to_string())
+    }
+    #[cfg(not(all(target_os = "android", target_arch = "aarch64")))]
+    {
+        None
+    }
+}
+
 fn validate_request(bytes: &[u8]) -> Result<()> {
     if bytes.len() > MAX_REQUEST {
         bail!("RKP V1 bridge request exceeds its size limit");
@@ -245,8 +257,17 @@ fn find_aidl_apk() -> Result<PathBuf> {
 #[cfg(all(target_os = "android", target_arch = "aarch64"))]
 fn trusted_system_apk(path: &Path) -> bool {
     fs::metadata(path).is_ok_and(|metadata| {
-        metadata.is_file() && metadata.uid() == 0 && metadata.mode() & 0o022 == 0
+        metadata.is_file() && accepts_system_apk(metadata.uid(), metadata.mode())
     })
+}
+
+/// An RKP APK ships on a read-only system image or erofs APEX, so its contents
+/// cannot be replaced. Android 16 mounts `rkpdapp.apk` as system (1000) rather
+/// than root, and only an unwritable regular file is accepted.
+const SYSTEM_UID: u32 = 1000;
+
+fn accepts_system_apk(uid: u32, mode: u32) -> bool {
+    matches!(uid, 0 | SYSTEM_UID) && mode & 0o022 == 0
 }
 
 #[cfg(all(target_os = "android", target_arch = "aarch64"))]
@@ -328,6 +349,15 @@ impl Drop for ExchangeDir {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_apk_accepts_root_and_system_owners_only() {
+        assert!(accepts_system_apk(0, 0o644));
+        assert!(accepts_system_apk(1000, 0o644));
+        assert!(!accepts_system_apk(2000, 0o644));
+        assert!(!accepts_system_apk(1000, 0o664));
+        assert!(!accepts_system_apk(1000, 0o646));
+    }
 
     fn request(fields: [&[u8]; 4]) -> Vec<u8> {
         let mut bytes = Vec::new();

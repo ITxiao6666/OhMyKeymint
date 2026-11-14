@@ -27,6 +27,7 @@ pub mod cbor;
 pub mod cose;
 mod native;
 mod request;
+mod status;
 mod v1;
 pub mod verify;
 
@@ -97,6 +98,11 @@ struct Eek {
     x25519: Vec<u8>,
 }
 
+/// Read-only device prerequisites, mirroring Duck-ToolBox `rkp-device status`.
+pub fn status() -> Result<String> {
+    status::status()
+}
+
 /// Called only after the CLI's explicit confirmation. One submission at most per call.
 pub fn issue(options: IssueOptions) -> Result<String> {
     if !cfg!(all(target_os = "android", target_arch = "aarch64")) {
@@ -148,16 +154,27 @@ pub fn issue(options: IssueOptions) -> Result<String> {
     let mut csr = None;
     // Fallback is allowed only for LOCAL CSR construction failures. Once submitted to
     // Google, every failure is final, including a parse/validation/storage failure.
+    let mut chosen = None;
     for method in methods {
         match build_csr(method, &eek, &public, metadata) {
             Ok(value) => {
+                log::info!("RKP CSR built with {method:?}");
+                chosen = Some(method);
                 csr = Some(value);
                 break;
             }
-            Err(error) => last_error = Some(error),
+            Err(error) => {
+                // A vendor TA can reject one protocol while accepting another, so the
+                // rejected attempt is reported instead of aborting the fallback.
+                log::warn!("RKP {method:?} CSR attempt failed: {error:#}");
+                last_error = Some(error);
+            }
         }
     }
     let csr = csr.ok_or_else(|| last_error.unwrap_or_else(|| anyhow!("no supported RKP path")))?;
+    if let Some(method) = chosen {
+        log::info!("RKP issuance using {method:?}");
+    }
     let signed = submit(&csr, &eek.challenge)?;
     let chain = order_chain(&signed, point).context(SUBMISSION_UNKNOWN)?;
     let xml = keybox_xml(private.as_ref(), &chain);

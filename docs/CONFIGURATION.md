@@ -1600,7 +1600,10 @@ The WebUI offers Auto, V2 native, V1 AIDL and V1 native protocols. Auto attempts
 V2 native, V1 AIDL, then V1 native when the required local resources exist.
 Qualcomm SoC evidence is required for both native protocols. MediaTek devices
 use V1 AIDL only; the bridge recognizes both `rkpdapp.apk` and
-`rkpdapp.google.apk` inside the system RKP APEX.
+`rkpdapp.google.apk` inside the system RKP APEX. The proxy APK is accepted when
+it is a regular file owned by root or the system UID without group or other
+write permission; Android 16 mounts `rkpdapp.apk` as system-owned, so an owner
+check restricted to root would hide the only protocol that works there.
 Only local CSR construction failures permit trying another protocol. The V1
 AIDL route uses the device's system RKP proxy in an isolated Java `app_process`
 bridge. The native routes use the device's Qualcomm KeymasterUtils library in
@@ -1654,9 +1657,17 @@ Root-only helper commands:
 
 ```sh
 keymint --webui-rkp-issue --confirm-issuance auto
+keymint --webui-rkp-status
 keymint --webui-rkp-list
 keymint --webui-rkp-import <32-lowercase-hex-id> --confirm-replace
 ```
+
+`--webui-rkp-status` is read-only. It reports whether the AIDL proxy APK, the
+Qualcomm KeymasterUtils library and `/dev/smcinvoke` are present, which
+protocols are therefore available, the detected SoC family, the effective build
+fingerprint and stable blocker identifiers such as `v1_unavailable` or
+`soc_vendor_unknown`. It sends nothing to KeyMint or Google and creates no
+state, so a failure can be explained without issuing anything.
 
 The optional protocol argument accepts `auto`, `v1`, `v2`, or `v1-native`.
 Add `--include-fingerprint` to include unsigned CSR metadata, and optionally

@@ -855,6 +855,12 @@ fn handle_local_rkp_command(
             }
             local_rkp::IssueOptions::parse(args).and_then(local_rkp::issue)
         }
+        "--webui-rkp-status" => {
+            if args.next().is_some() {
+                return Some(Err("RKP status does not accept arguments".into()));
+            }
+            local_rkp::status()
+        }
         "--webui-rkp-list" => {
             if args.next().is_some() {
                 return Some(Err("RKP list does not accept arguments".into()));
@@ -1142,6 +1148,7 @@ mod tests {
             vec!["--webui-rkp-issue", "auto"],
             vec!["--webui-rkp-issue", "--confirm-issuance", "invalid"],
             vec!["--webui-rkp-issue", "--confirm-issuance", "auto", "extra"],
+            vec!["--webui-rkp-status", "extra"],
             vec!["--webui-rkp-list", "extra"],
             vec!["--webui-rkp-import"],
             vec!["--webui-rkp-import", "a"],
