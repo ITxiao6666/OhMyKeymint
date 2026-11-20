@@ -280,6 +280,43 @@ The biometric verification bypass is an insecure compatibility option, not a
 general fix for fingerprint errors or app root detection. Changing `[crypto]`
 values can make existing OMK keys unusable.
 
+### Why do keys stop working after updating the module without rebooting?
+
+Credential-encrypted keys need the user's super key, which OMK holds only in
+memory and receives from the boot-time unlock event. Replacing the module
+binaries and restarting keymint without rebooting leaves that key unavailable,
+so every credential-encrypted operation fails with "required super decryption
+key is not in memory" until the next reboot. Reboot after installing or
+updating OMK; restarting only the keymint process is enough for configuration
+changes, but not for keeping credential-encrypted keys usable.
+
+### Why did a passkey or a bank fingerprint stop working after adding the app?
+
+Two different things can cause this, and they need different fixes.
+
+The first is key continuity. A key that System created for the app before OMK
+handled it is not visible through OMK: alias lookups miss and the operation
+fails with `KEY_NOT_FOUND`. Apps treat that as an invalidated credential, so a
+passkey has to be registered again and a bank has to bind the fingerprint
+again. Re-register once while OMK already handles the app; the new key is then
+created and used through OMK. OMK never reads, imports, or reinterprets a
+System key blob.
+
+The second is the SOTER local identity feature. Its signing path only signs
+after a verifiable fingerprint match, so a device where the biometric evidence
+is unavailable answers `-26` exactly like a stock TA without a fresh press. A
+bank reads that as a failed fingerprint and asks for the binding again. Leave
+the SOTER local identity off for apps that use fingerprint payment; identity
+spoofing cannot complete that signature today.
+
+Run `keymint --webui-auth-report` as root after reproducing the problem. It
+prints one JSON object with the counted `auth_token_received`, verification
+modes, rejection and drop stages, SOTER sign refusals, and the effective
+biometric compatibility switch, so the log does not have to be shared. A
+non-zero `rejected` or `dropped` count names the failing stage directly, and
+`force_skip_system_biometric_hat_verification` shows whether token MACs were
+checked at all.
+
 ### How do I apply a setting change?
 
 Both components notice valid edits automatically, but not every keymint value

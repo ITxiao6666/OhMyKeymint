@@ -214,3 +214,57 @@ fn owner_resolution_preserves_preflight_and_unknown_policy() {
         );
     }
 }
+
+#[test]
+fn grant_domain_service_requests_stay_on_system() {
+    let intercept = config::InterceptConfig::default();
+    for request in [
+        ParsedServiceRequest::GetKeyEntry { key: sample_grant_descriptor() },
+        ParsedServiceRequest::DeleteKey { key: sample_grant_descriptor() },
+        ParsedServiceRequest::Grant {
+            key: sample_grant_descriptor(),
+            grantee_uid: 12345,
+            access_vector: 7,
+        },
+        ParsedServiceRequest::Ungrant { key: sample_grant_descriptor(), grantee_uid: 12345 },
+    ] {
+        assert_eq!(
+            route_for_service_request(&request, true, &intercept),
+            RouteTarget::System,
+            "{request:?} must stay on System"
+        );
+    }
+}
+
+#[test]
+fn app_domain_service_requests_keep_the_omk_route() {
+    let intercept = config::InterceptConfig::default();
+    let request = ParsedServiceRequest::GetKeyEntry { key: sample_key_descriptor() };
+    assert_eq!(route_for_service_request(&request, true, &intercept), RouteTarget::Omk);
+}
+
+#[test]
+fn grant_domain_security_level_requests_are_detected() {
+    let grant = ParsedSecurityLevelRequest::CreateOperation {
+        key: sample_grant_descriptor(),
+        operation_parameters: Vec::new(),
+        forced: false,
+    };
+    assert!(security_level_request_targets_grant(&grant));
+
+    let app = ParsedSecurityLevelRequest::CreateOperation {
+        key: sample_key_descriptor(),
+        operation_parameters: Vec::new(),
+        forced: false,
+    };
+    assert!(!security_level_request_targets_grant(&app));
+
+    // A getKeyEntry reply hands the caller a KEY_ID descriptor; it carries no
+    // grant-domain evidence, so it keeps the existing caller-based route.
+    let key_id = ParsedSecurityLevelRequest::CreateOperation {
+        key: KeyDescriptor { domain: Domain::KEY_ID, nspace: 42, alias: None, blob: None },
+        operation_parameters: Vec::new(),
+        forced: false,
+    };
+    assert!(!security_level_request_targets_grant(&key_id));
+}

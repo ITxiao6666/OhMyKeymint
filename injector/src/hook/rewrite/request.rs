@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::android::system::keystore2::Domain::Domain;
+
 #[cfg(test)]
 mod tests;
 
@@ -11,11 +13,51 @@ pub(super) fn target_from_transaction(tr: &binder_transaction_data) -> Option<Lo
     Some(LocalBinderTarget { ptr, cookie: tr.cookie })
 }
 
+/// A `GRANT`-domain descriptor names a key through an authorization that only the
+/// backend that accepted `Grant` holds. `Grant` comes from system_server, which
+/// the core-caller filter keeps on System, so OMK never records one: routing a
+/// grant-domain request to OMK can only answer `KEY_NOT_FOUND` and break flows
+/// such as passkey creation that rely on the grant.
+fn is_grant_domain(key: &KeyDescriptor) -> bool {
+    key.r#domain == Domain::GRANT
+}
+
+fn service_request_targets_grant(request: &ParsedServiceRequest) -> bool {
+    match request {
+        ParsedServiceRequest::GetKeyEntry { key }
+        | ParsedServiceRequest::UpdateSubcomponent { key, .. }
+        | ParsedServiceRequest::DeleteKey { key }
+        | ParsedServiceRequest::Grant { key, .. }
+        | ParsedServiceRequest::Ungrant { key, .. } => is_grant_domain(key),
+        ParsedServiceRequest::GetSecurityLevel { .. }
+        | ParsedServiceRequest::ListEntries { .. }
+        | ParsedServiceRequest::GetNumberOfEntries { .. }
+        | ParsedServiceRequest::ListEntriesBatched { .. }
+        | ParsedServiceRequest::GetSupplementaryAttestationInfo { .. } => false,
+    }
+}
+
+fn security_level_request_targets_grant(request: &ParsedSecurityLevelRequest) -> bool {
+    match request {
+        ParsedSecurityLevelRequest::CreateOperation { key, .. }
+        | ParsedSecurityLevelRequest::GenerateKey { key, .. }
+        | ParsedSecurityLevelRequest::ImportKey { key, .. }
+        | ParsedSecurityLevelRequest::ImportWrappedKey { key, .. }
+        | ParsedSecurityLevelRequest::DeleteKey { key } => is_grant_domain(key),
+        ParsedSecurityLevelRequest::ConvertStorageKeyToEphemeral { storage_key } => {
+            is_grant_domain(storage_key)
+        }
+    }
+}
+
 fn route_for_service_request(
     request: &ParsedServiceRequest,
     allowed: bool,
     intercept: &config::InterceptConfig,
 ) -> RouteTarget {
+    if service_request_targets_grant(request) {
+        return RouteTarget::System;
+    }
     if allowed && identify::is_omk_service_route_enabled(request.method(), intercept) {
         RouteTarget::Omk
     } else {
@@ -468,7 +510,10 @@ unsafe fn handle_keystore_transaction(
         // Keystore2 shares each security-level Binder between getSecurityLevel and getKeyEntry.
         let scoop_enabled = security_level_scoop_enabled(&cfg.intercept);
         let decision = scoop_enabled.then(|| evaluate_caller(&caller, cfg));
-        let route = if decision.as_ref().is_some_and(|decision| decision.allowed) {
+        let grant_domain = security_level_request_targets_grant(&request);
+        let route = if grant_domain {
+            RouteTarget::System
+        } else if decision.as_ref().is_some_and(|decision| decision.allowed) {
             RouteTarget::Omk
         } else {
             RouteTarget::System
@@ -507,8 +552,8 @@ unsafe fn handle_keystore_transaction(
             scoop_enabled,
         );
         info!(
-            "event=route security_level_method={:?} uid={} pid={} route={:?} security_level={:?}",
-            method, caller.uid, caller.pid, route, target_info.security_level
+            "event=route security_level_method={:?} uid={} pid={} route={:?} security_level={:?} grant_domain={}",
+            method, caller.uid, caller.pid, route, target_info.security_level, grant_domain
         );
 
         let pending = PendingSecurityLevelCall {
