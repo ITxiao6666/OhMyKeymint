@@ -156,7 +156,7 @@ impl_metadata!(
 impl KeyMetaData {
     fn load_from_db(key_id: i64, tx: &Transaction) -> Result<Self> {
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "SELECT tag, data from persistent.keymetadata
                     WHERE keyentryid = ?;",
             )
@@ -183,7 +183,7 @@ impl KeyMetaData {
 
     fn store_in_db(&self, key_id: i64, tx: &Transaction) -> Result<()> {
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "INSERT or REPLACE INTO persistent.keymetadata (keyentryid, tag, data)
                     VALUES (?, ?, ?);",
             )
@@ -232,7 +232,7 @@ impl_metadata!(
 impl BlobMetaData {
     fn load_from_db(blob_id: i64, tx: &Transaction) -> Result<Self> {
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "SELECT tag, data from persistent.blobmetadata
                     WHERE blobentryid = ?;",
             )
@@ -257,7 +257,7 @@ impl BlobMetaData {
 
     fn store_in_db(&self, blob_id: i64, tx: &Transaction) -> Result<()> {
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "INSERT or REPLACE INTO persistent.blobmetadata (blobentryid, tag, data)
                     VALUES (?, ?, ?);",
             )
@@ -1030,7 +1030,7 @@ impl KeystoreDB {
         let _wp = wd::watch("KeystoreDB::from_1_to_2 mark all non-current keyblobs");
         let sc_key_blob = SubComponentType::KEY_BLOB;
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "UPDATE persistent.blobentry SET state=?
                      WHERE subcomponent_type = ?
                      AND id NOT IN (
@@ -1048,7 +1048,7 @@ impl KeystoreDB {
         // This may take a while if there are excessive numbers of keys in the database.
         let _wp = wd::watch("KeystoreDB::from_1_to_2 mark all orphaned keyblobs");
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "UPDATE persistent.blobentry SET state=?
                      WHERE subcomponent_type = ?
                      AND NOT EXISTS (SELECT id FROM persistent.keyentry
@@ -1095,7 +1095,7 @@ impl KeystoreDB {
             });
 
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "SELECT k.id, k.km_uuid,
                         (SELECT b.blob FROM persistent.blobentry AS b WHERE b.keyentryid = k.id AND b.subcomponent_type = ? ORDER BY b.id DESC LIMIT 1),
                         (SELECT b.blob FROM persistent.blobentry AS b WHERE b.keyentryid = k.id AND b.subcomponent_type = ? ORDER BY b.id DESC LIMIT 1)
@@ -1337,6 +1337,11 @@ impl KeystoreDB {
         Ok(persistent_path_str)
     }
 
+    /// Page cache for the persistent database in KiB (SQLite's default is 2 MiB).
+    const DB_CACHE_KIB: i64 = 2 * 1024;
+    /// Durable mode without the per-commit directory sync that `EXTRA` adds.
+    const DB_SYNCHRONOUS: &str = "FULL";
+
     fn make_connection(persistent_file: &str) -> Result<Connection> {
         let conn =
             Connection::open_in_memory().context("Failed to initialize SQLite connection.")?;
@@ -1356,13 +1361,27 @@ impl KeystoreDB {
             break;
         }
 
-        // Drop the cache size from default (2M) to 0.5M
-        conn.execute("PRAGMA persistent.cache_size = -500;", params![])
-            .context("Failed to decrease cache size for persistent db")?;
+        // SQLite's default page cache is 2 MiB; 512 KiB caused frequent evictions on
+        // app key lookups, so keep the default and leave the trade-off explicit.
+        conn.execute(
+            &format!("PRAGMA persistent.cache_size = -{};", Self::DB_CACHE_KIB),
+            params![],
+        )
+        .context("Failed to set the page cache for the persistent db")?;
 
-        log::info!("Setting synchronous=EXTRA");
-        conn.execute("PRAGMA persistent.synchronous = EXTRA;", params![])
-            .context("Failed to set synchronous mode to EXTRA")?;
+        // FULL still fsyncs every committed transaction in rollback-journal mode and
+        // only drops the extra directory sync that EXTRA performs per commit, which
+        // is the single largest write-path cost for key creation.
+        conn.execute(
+            &format!("PRAGMA persistent.synchronous = {};", Self::DB_SYNCHRONOUS),
+            params![],
+        )
+        .context("Failed to set the synchronous mode for the persistent db")?;
+        log::info!(
+            "persistent db: cache_size=-{} KiB, synchronous={}",
+            Self::DB_CACHE_KIB,
+            Self::DB_SYNCHRONOUS
+        );
 
         Ok(conn)
     }
@@ -1474,7 +1493,7 @@ impl KeystoreDB {
     ) -> Result<Vec<(i32, usize)>> {
         self.with_transaction(Immediate("TX_per_uid_counts"), |tx| {
             let mut stmt = tx
-                .prepare(
+                .prepare_cached(
                     "SELECT namespace, COUNT(*) FROM persistent.keyentry
                          WHERE domain = ?
                          GROUP BY namespace
@@ -1528,7 +1547,7 @@ impl KeystoreDB {
             // Find up to `max_blobs` more out-of-date key blobs, load their metadata and return it.
             let _wp = wd::watch("KeystoreDB::handle_next_superseded_blob find_next v2");
             let mut stmt = tx
-                .prepare(
+                .prepare_cached(
                     "SELECT id, blob FROM persistent.blobentry
                         WHERE subcomponent_type = ? AND state != ?
                         LIMIT ?;",
@@ -1633,7 +1652,7 @@ impl KeystoreDB {
 
         self.with_transaction(Immediate("TX_retire_stale_keybox_bound_entries"), |tx| {
             let mut stmt = tx
-                .prepare(
+                .prepare_cached(
                     "SELECT k.id, k.km_uuid, m.data
                      FROM persistent.keyentry AS k
                      JOIN persistent.keymetadata AS m
@@ -1718,7 +1737,7 @@ impl KeystoreDB {
 
         self.with_transaction(Immediate("TX_terminate_uuid"), |tx| {
             let mut stmt = tx
-                .prepare(
+                .prepare_cached(
                     "SELECT id FROM persistent.keyentry
                      WHERE km_uuid = ?;",
                 )
@@ -2056,7 +2075,7 @@ impl KeystoreDB {
         params: &[KeyParameter],
     ) -> Result<()> {
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "INSERT into persistent.keyparameter (keyentryid, tag, data, security_level)
                 VALUES (?, ?, ?, ?);",
             )
@@ -2347,7 +2366,7 @@ impl KeystoreDB {
             .map_or_else(|| Err(KsError::sys()), Ok)
             .context("In load_key_entry_id: Alias must be specified.")?;
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "SELECT id FROM persistent.keyentry
                     WHERE
                     key_type = ?
@@ -2410,7 +2429,7 @@ impl KeystoreDB {
             // from the grant table.
             Domain::GRANT => {
                 let mut stmt = tx
-                    .prepare(
+                    .prepare_cached(
                         "SELECT keyentryid, access_vector FROM persistent.grant
                             WHERE grantee = ? AND id = ? AND
                             (SELECT state FROM persistent.keyentry WHERE id = keyentryid) = ?;",
@@ -2441,7 +2460,7 @@ impl KeystoreDB {
             Domain::KEY_ID => {
                 let (domain, namespace): (Domain, i64) = {
                     let mut stmt = tx
-                        .prepare(
+                        .prepare_cached(
                             "SELECT domain, namespace FROM persistent.keyentry
                                 WHERE
                                 id = ?
@@ -2501,7 +2520,7 @@ impl KeystoreDB {
         tx: &Transaction,
     ) -> Result<LoadedBlobComponents> {
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "SELECT MAX(id), subcomponent_type, blob FROM persistent.blobentry
                     WHERE keyentryid = ? GROUP BY subcomponent_type;",
             )
@@ -2554,7 +2573,7 @@ impl KeystoreDB {
 
     fn load_key_parameters(key_id: i64, tx: &Transaction) -> Result<Vec<KeyParameter>> {
         let mut stmt = tx
-            .prepare(
+            .prepare_cached(
                 "SELECT tag, data, security_level from persistent.keyparameter
                     WHERE keyentryid = ?;",
             )
@@ -2959,7 +2978,7 @@ impl KeystoreDB {
             ))?;
 
             let mut stmt = tx
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT id from persistent.keyentry
                      WHERE (
                          key_type = ?
@@ -3024,7 +3043,7 @@ impl KeystoreDB {
 
         self.with_transaction(Immediate("TX_unbind_auth_bound_keys_for_user"), |tx| {
             let mut stmt = tx
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT id from persistent.keyentry
                      WHERE key_type = ?
                      AND domain = ?
@@ -3081,7 +3100,7 @@ impl KeystoreDB {
 
         self.with_transaction(Immediate("TX_unbind_lskf_bound_keys_for_user"), |tx| {
             let mut stmt = tx
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT id, key_type from persistent.keyentry
                      WHERE (
                          key_type = ?
@@ -3217,7 +3236,7 @@ impl KeystoreDB {
         );
 
         self.with_transaction(TransactionBehavior::Deferred, |tx| {
-            let mut stmt = tx.prepare(&query).context(ks_err!("Failed to prepare."))?;
+            let mut stmt = tx.prepare_cached(&query).context(ks_err!("Failed to prepare."))?;
 
             let mut rows = match start_past_alias {
                 Some(past_alias) => stmt
@@ -3470,7 +3489,7 @@ impl KeystoreDB {
 
         let ids = self.with_transaction(Immediate("TX_get_app_uids_affected_by_sid"), |tx| {
             let mut stmt = tx
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT id, namespace from persistent.keyentry
                      WHERE key_type = ?
                      AND domain = ?
