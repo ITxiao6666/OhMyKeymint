@@ -31,15 +31,6 @@ pub(super) fn sample_key_descriptor() -> KeyDescriptor {
     KeyDescriptor { domain: Domain::APP, nspace: 7, alias: Some("alias".to_string()), blob: None }
 }
 
-pub(super) fn sample_grant_descriptor() -> KeyDescriptor {
-    KeyDescriptor {
-        domain: Domain::GRANT,
-        nspace: 10123,
-        alias: Some("granted-alias".to_string()),
-        blob: None,
-    }
-}
-
 pub(super) fn sample_service_requests() -> Vec<ParsedServiceRequest> {
     vec![
         ParsedServiceRequest::GetSecurityLevel {

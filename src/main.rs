@@ -24,7 +24,6 @@ use crate::{
 };
 
 pub mod att_mgr;
-pub mod auth_report;
 pub mod config;
 pub mod consts;
 pub mod global;
@@ -580,12 +579,6 @@ fn handle_webui_diagnostics_command() -> Option<Result<String, String>> {
                     .map(|path| path.display().to_string())
                     .map_err(|error| format!("{error:#}")),
             )
-        }
-        "--webui-auth-report" => {
-            if args.next().is_some() {
-                return Some(Err("--webui-auth-report does not accept arguments".into()));
-            }
-            Some(crate::auth_report::auth_report().map_err(|error| format!("{error:#}")))
         }
         "--webui-get-diagnostics" => {
             if args.next().is_some() {
