@@ -392,6 +392,19 @@ fn check_grant_permission_raw(
     Ok(())
 }
 
+/// A grant that cannot extend anybody's access: an `APP`-domain key owned by the caller and
+/// granted back to the same uid. Ownership already implies every permission on that key, so the
+/// SELinux `grant` permission has nothing to protect here. AOSP sepolicy grants
+/// `keystore2_key:grant` to application domains, but vendor policies may drop it, and then every
+/// grant call from an app fails even though the grant only returns the key to its owner.
+fn is_self_grant_of_owned_app_key(
+    caller_uid: AppUid,
+    grantee_uid: AppUid,
+    key: &KeyDescriptor,
+) -> bool {
+    key.domain == Domain::APP && key.nspace == caller_uid.0 && grantee_uid == caller_uid
+}
+
 /// Uses `selinux::check_permission` to check if the given caller context `caller_cxt`
 /// has the permissions indicated by `perm` for the target domain indicated by the key
 /// descriptor `key` in the security class `keystore2_key`.
@@ -506,6 +519,27 @@ pub fn check_grant_permission(
         .ok_or_else(KsError::sys)
         .context("caller SID unavailable for grant permission check")?;
     check_grant_permission_raw(AppUid(caller.uid as u32 as i64), sid.as_c_str(), access_vec, key)
+}
+
+/// Grants `key` to `grantee_uid`.
+///
+/// A self grant of an owned `APP`-domain key cannot add access, so it skips the SELinux `grant`
+/// and access-vector checks and only keeps the rule that the `GRANT` permission itself is never
+/// grantable. Every other grant keeps the AOSP permission model unchanged.
+pub fn check_grant_permission_for_grantee(
+    access_vec: KeyPermSet,
+    key: &KeyDescriptor,
+    grantee_uid: AppUid,
+    caller: Option<&CallerInfo>,
+) -> anyhow::Result<()> {
+    let caller = resolve_caller_info(caller);
+    if is_self_grant_of_owned_app_key(AppUid(caller.uid as u32 as i64), grantee_uid, key) {
+        if access_vec.includes(KeyPerm::Grant) {
+            return Err(selinux::Error::perm()).context("Grant permission cannot be granted.");
+        }
+        return Ok(());
+    }
+    check_grant_permission(access_vec, key, Some(&caller))
 }
 
 pub fn check_key_permission(
@@ -699,8 +733,9 @@ mod tests {
     use std::ffi::CString;
 
     use super::{
-        android_permission_check_path, sid_matches_context, trusted_forwarding_sid,
-        AndroidPermissionCheckPath,
+        android_permission_check_path, check_grant_permission_for_grantee,
+        is_self_grant_of_owned_app_key, sid_matches_context, trusted_forwarding_sid,
+        AndroidPermissionCheckPath, AppUid, CallerInfo, Domain, KeyDescriptor, KeyPerm, KeyPermSet,
     };
     use crate::selinux;
 
@@ -758,5 +793,54 @@ mod tests {
 
         let sid = CString::new("u:r:untrusted_app:s0").unwrap();
         assert!(!trusted_forwarding_sid(&sid));
+    }
+
+    fn app_key(alias: &str) -> KeyDescriptor {
+        KeyDescriptor {
+            domain: Domain::APP,
+            nspace: 10_123,
+            alias: Some(alias.to_string()),
+            blob: None,
+        }
+    }
+
+    #[test]
+    fn self_grant_detection_requires_an_owned_app_key_and_the_same_grantee() {
+        let key = app_key("self-grant");
+
+        assert!(is_self_grant_of_owned_app_key(AppUid(10_123), AppUid(10_123), &key));
+        assert!(!is_self_grant_of_owned_app_key(AppUid(10_123), AppUid(10_124), &key));
+        assert!(!is_self_grant_of_owned_app_key(AppUid(10_124), AppUid(10_124), &key));
+
+        let selinux_domain =
+            KeyDescriptor { domain: Domain::SELINUX, nspace: 10_123, alias: None, blob: None };
+        assert!(!is_self_grant_of_owned_app_key(AppUid(10_123), AppUid(10_123), &selinux_domain));
+    }
+
+    #[test]
+    fn self_grant_of_an_owned_app_key_skips_the_selinux_grant_permission() {
+        let key = app_key("self-grant");
+        // An empty SID cannot reach the SELinux backend, so success here proves the self grant
+        // returned before any permission lookup.
+        let caller = CallerInfo { uid: 10_123, pid: 42, sid: String::new() };
+        let vector = key_perm_set![KeyPerm::Use, KeyPerm::GetInfo];
+
+        assert!(
+            check_grant_permission_for_grantee(vector, &key, AppUid(10_123), Some(&caller)).is_ok()
+        );
+
+        // Any other grantee keeps the AOSP permission model.
+        assert!(check_grant_permission_for_grantee(vector, &key, AppUid(10_124), Some(&caller))
+            .is_err());
+
+        // The GRANT permission itself remains un-grantable.
+        let with_grant = key_perm_set![KeyPerm::Use, KeyPerm::Grant];
+        assert!(check_grant_permission_for_grantee(
+            with_grant,
+            &key,
+            AppUid(10_123),
+            Some(&caller)
+        )
+        .is_err());
     }
 }

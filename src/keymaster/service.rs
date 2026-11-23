@@ -38,8 +38,8 @@ use crate::keymaster::db::{KeyEntryLoadBits, KeyType, SubComponentType};
 use crate::keymaster::error::{into_logged_binder, KsError as Error};
 use crate::keymaster::id_rotation::IdRotationState;
 use crate::keymaster::permission::{
-    check_grant_permission, check_key_permission, check_keystore_permission, require_omk_ctx,
-    KeyPerm, KeyPermSet, KeystorePerm,
+    check_grant_permission_for_grantee, check_key_permission, check_keystore_permission,
+    require_omk_ctx, KeyPerm, KeyPermSet, KeystorePerm,
 };
 use crate::keymaster::security_level::KeystoreSecurityLevel;
 use crate::keymaster::utils::{
@@ -545,14 +545,11 @@ impl KeystoreService {
             .unwrap()
             .get_credential_encrypted_key_by_user_id(caller_uid.owning_user());
 
+        let grantee_uid = AppUid(grantee_uid as i64);
         DB.with(|db| {
-            db.borrow_mut().grant(
-                key,
-                caller_uid,
-                AppUid(grantee_uid as i64),
-                access_vector,
-                |k, av| check_grant_permission(*av, k, ctx),
-            )
+            db.borrow_mut().grant(key, caller_uid, grantee_uid, access_vector, |k, av| {
+                check_grant_permission_for_grantee(*av, k, grantee_uid, ctx)
+            })
         })
         .context(err!("KeystoreService::grant."))
     }

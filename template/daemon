@@ -50,6 +50,47 @@ consume_restart_request() {
 cd "$MODDIR" || exit 1
 mkdir -p "$STATE_DIR"
 
+LOCK_DIR=$STATE_DIR/keymint-daemon.lock
+PID_FILE=$STATE_DIR/keymint-daemon.pid
+
+pid_matches_daemon() {
+  [ -r "/proc/$1/cmdline" ] || return 1
+  tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | grep -F "$0" >/dev/null 2>&1
+}
+
+cleanup_daemon_lock() {
+  rm -f "$PID_FILE"
+  rmdir "$LOCK_DIR" 2>/dev/null
+}
+
+take_daemon_lock() {
+  echo $$ > "$PID_FILE"
+  trap cleanup_daemon_lock EXIT
+  trap 'cleanup_daemon_lock; exit 0' INT TERM HUP
+}
+
+# A userspace restart (KernelSU soft reboot) re-runs the module scripts while the
+# previous daemons keep running, so the daemon itself has to stay single-instance.
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  owner=$(cat "$PID_FILE" 2>/dev/null)
+  if [ -z "$owner" ]; then
+    # Another instance may be between creating the lock and writing its pid.
+    sleep 1
+    owner=$(cat "$PID_FILE" 2>/dev/null)
+  fi
+  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null && pid_matches_daemon "$owner"; then
+    echo "[keymint-daemon] already running as pid $owner"
+    exit 0
+  fi
+  rm -f "$PID_FILE"
+  rmdir "$LOCK_DIR" 2>/dev/null
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "[keymint-daemon] another daemon holds the lock; exiting"
+    exit 0
+  fi
+fi
+take_daemon_lock
+
 while true; do
   TARGET=$(find_module_keymint)
   if [ -z "$TARGET" ]; then

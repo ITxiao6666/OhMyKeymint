@@ -21,7 +21,9 @@ chmod 0770 "$LOG_DIR"
 chown 1017:1017 "$LOG_DIR"
 
 mkdir -p "$STATE_DIR"
-rm -f "$STATE_DIR/keymint-daemon.pid" "$STATE_DIR/injector-daemon.pid"
+# Keep the pid files: a userspace restart (KernelSU soft reboot) reruns this script
+# while the previous daemons are still alive, and erasing their pids would make
+# service.sh start duplicates that crash-loop on the RPC socket.
 rm -f "$STATE_DIR/restart.keymint" "$STATE_DIR/restart.injector" "$STATE_DIR/restart.all"
 
 # Remove state from retired SOTER features and return the vendor HAL to init.

@@ -40,14 +40,18 @@
 - For every request routed by `scoop` with `FilterDecision::allowed == true`, OMK is the only
   backend during normal reachable operation. Per-method intercept settings still determine whether
   a request is routed by `scoop`.
-- Choose the backend only from the current caller, filter decision, method, and configuration. Do
-  not read or infer which backend created a key, `KeyDescriptor`, `KEY_ID`, `GRANT`, alias,
-  wrapping key, or attestation key.
+- Choose the backend from the current caller, filter decision, method, configuration, the
+  security-level carrier that produced the request, and one read-only ownership probe: a `GRANT`
+  descriptor is resolved through OMK's grant table (`IOhMyKsService::isOmkGrant`), so an
+  authorization OMK never accepted stays on System. Do not otherwise read or infer which backend
+  created a key, `KeyDescriptor`, `KEY_ID`, alias, wrapping key, or attestation key.
 - Per-method intercept settings are authoritative. When interception for a method is disabled, pass
   the request to System unchanged even for a caller allowed by `scoop`
 - Do not support key or descriptor continuity between System and OMK. Pass old, externally
   supplied, and System-created descriptors to the selected backend unchanged; an OMK business
-  error for such a descriptor is authoritative.
+  error for a descriptor the ownership probe confirmed as OMK-owned is authoritative. A `GRANT`
+  descriptor OMK does not own is routed to System before dispatch; never turn an OMK
+  `KEY_NOT_FOUND` into a successful System reply.
 - Return OMK business errors as-is. Reachable transport, boundary, or injector failures that are
   not OMK-unavailable must not fall back to a successful system reply; normalize them to the
   existing AOSP-compatible error path, such as `SYSTEM_ERROR` where applicable.

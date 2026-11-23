@@ -1188,9 +1188,14 @@ rejects one of the packages in the group. Adding or removing a package does not
 move or convert keys between System and OMK; an app may lose access to keys it
 created through the other route.
 
-Key descriptors, including `KEY_ID` and `GRANT`, do not change the selected
-backend. A caller must pass the filter and enable the relevant intercept route
-to use OMK, including when using a key shared by another app.
+A caller must pass the filter and enable the relevant intercept route to use OMK,
+including when using a key shared by another app. A `KEY_ID` descriptor does not
+change the selected backend. A `GRANT` descriptor does: OMK records the grants it
+accepted, so a grant-domain request is resolved once against OMK's grant table and
+stays on OMK only when OMK owns that authorization. A grant that `system_server`
+created stays on System because the core-caller filter keeps uid 1000 there.
+Security-level carriers keep the backend that produced them, so later operations
+on a System carrier stay on System even for a caller that `scoop` allows.
 
 Isolated and app-zygote processes use their host application's package identity
 for scoop and deny-list decisions. The host is resolved from ActivityManager's
@@ -1430,7 +1435,11 @@ does not delete a matching System key as a substitute.
 
 #### `grant`
 
-Controls granting another app access to a key.
+Controls granting another app access to a key. Ownership is the whole permission when an app
+grants an `APP`-domain key back to its own uid, so OMK records that grant without requiring the
+SELinux `keystore2_key:grant` permission, which some vendor policies drop for app domains. Every
+other grant keeps the Android permission model, and the `GRANT` permission itself is never
+grantable.
 
 #### `ungrant`
 

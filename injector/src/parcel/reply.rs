@@ -328,6 +328,11 @@ pub fn build_plain_reply<T: Serialize>(value: &T) -> Result<OwnedReply> {
     Ok(owned_reply_from_bytes(Parcel::with_capacity(0), data, std::iter::empty::<usize>()))
 }
 
+/// Wrap bytes that are already a complete Binder reply payload (no Binder objects).
+pub fn build_raw_reply(data: Vec<u8>) -> OwnedReply {
+    owned_reply_from_bytes(Parcel::with_capacity(0), data, std::iter::empty::<usize>())
+}
+
 pub fn build_void_reply() -> Result<OwnedReply> {
     build_status_reply(&Status::from(StatusCode::Ok))
 }

@@ -8,6 +8,7 @@ use super::{
     },
     BinderStateKey, OLD_IOCTL,
 };
+use crate::parcel;
 use soter_ta::{
     bridge::{Client, NativeReason, Observation},
     dispatch::{Outcome, MAX_REQUEST_BYTES},
@@ -121,14 +122,19 @@ fn receive(fd: i32, connection: BinderStateKey, bytes: &[u8]) {
             native_read(fd, cmd);
             if _ioc_nr(cmd) == BR_TRANSACTION_NR {
                 if let Some(tr) = transaction(payload) {
-                    let app = if tr.data_size <= MAX_REQUEST_BYTES {
-                        copy_process_buffer(unsafe { tr.data.ptr.buffer } as usize, tr.data_size)
+                    let request = (tr.data_size <= MAX_REQUEST_BYTES)
+                        .then(|| {
+                            copy_process_buffer(
+                                unsafe { tr.data.ptr.buffer } as usize,
+                                tr.data_size,
+                            )
                             .ok()
-                            .and_then(|data| hal::aidl_token(&data))
-                            .is_some_and(|(token, _)| token == hal::APP)
-                    } else {
-                        false
-                    };
+                        })
+                        .flatten();
+                    let app = request
+                        .as_deref()
+                        .and_then(hal::aidl_token)
+                        .is_some_and(|(token, _)| token == hal::APP);
                     let oneway = tr.flags & TF_ONE_WAY != 0;
                     let uid = u32::try_from(tr.sender_euid)
                         .ok()
@@ -137,13 +143,34 @@ fn receive(fd: i32, connection: BinderStateKey, bytes: &[u8]) {
                         if let Some(client) =
                             CLIENT.read().unwrap_or_else(|e| e.into_inner()).as_ref()
                         {
+                            let selected = uid.is_some_and(|uid| client.selected(uid));
                             client.observe(Observation::Sdk {
                                 uid: tr.sender_euid,
                                 wire_tx: tr.code,
                                 oneway,
                                 eligible: uid.is_some(),
-                                selected: uid.is_some_and(|uid| client.selected(uid)),
+                                selected,
                             });
+                            if let (Some(uid), true) = (uid, selected) {
+                                if soter_ta::service::handles(tr.code) {
+                                    if let Some(reply) = request
+                                        .as_deref()
+                                        .and_then(|data| client.forward_service(uid, tr.code, data))
+                                    {
+                                        crate::hook::rewrite::prepare_soter_service_reply(
+                                            connection,
+                                            i64::from(tr.sender_euid),
+                                            i64::from(tr.sender_pid),
+                                            parcel::build_raw_reply(reply),
+                                        );
+                                        log::info!(
+                                            target: "omk_soter_local",
+                                            "event=soter path=native_local stage=service uid={uid} tx={} route=aidl_fallback",
+                                            tr.code
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                     STATE.with(|s| {

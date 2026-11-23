@@ -71,6 +71,14 @@ source.
 Install the current release over the existing installation in the root manager,
 then reboot. The update keeps the active settings, keybox, and stored OMK keys.
 
+### Does a KernelSU soft reboot restart OMK?
+
+No. A soft reboot restarts the Android userspace without rebooting the kernel, so the module
+daemons and the injected `keystore2` keep running. The module scripts run again on every
+userspace boot, notice the daemons that still own `/data/adb/omk/*.lock` and their pid files, and
+leave them in place instead of starting duplicates. Use a normal reboot when you want OMK to
+reload binaries that were replaced on disk.
+
 ### Is downgrading safe?
 
 No.

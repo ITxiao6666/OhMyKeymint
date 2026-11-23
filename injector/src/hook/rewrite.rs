@@ -68,6 +68,23 @@ pub(super) mod tests;
 
 type OutboundReply = parcel::OwnedReply;
 
+/// Queue a local SOTER service answer for the next reply the host writes back.
+///
+/// The framework still owns reply bookkeeping; the interceptor only replaces the
+/// payload, exactly like the keystore mirrors.
+pub(in crate::hook) fn prepare_soter_service_reply(
+    connection: BinderStateKey,
+    uid: i64,
+    pid: i64,
+    reply: OutboundReply,
+) {
+    pending::push_pending_frame(connection);
+    pending::replace_top_pending(
+        connection,
+        PendingCall::SoterService { uid, pid, reply: Box::new(Some(reply)) },
+    );
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RouteTarget {
     System,

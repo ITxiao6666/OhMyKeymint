@@ -7,4 +7,5 @@ pub mod hal;
 pub mod identities;
 pub mod parcel;
 pub mod platform;
+pub mod service;
 pub mod state;

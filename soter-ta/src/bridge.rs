@@ -35,6 +35,21 @@ struct Call {
     tx: u32,
     request: Request,
 }
+
+/// One broker exchange. The HAL path and the service-boundary path share the
+/// channel but never share a frame shape, so a malformed frame cannot be
+/// mistaken for the other path.
+#[derive(Deserialize, Serialize)]
+enum CallFrame {
+    Hal(Call),
+    Service { uid: u32, tx: u32, request: Vec<u8> },
+}
+
+#[derive(Deserialize, Serialize)]
+enum ReplyFrame {
+    Hal(Outcome),
+    Service { reply: Option<Vec<u8>> },
+}
 struct Authorization {
     selection: Selection,
     fresh: bool,
@@ -254,16 +269,48 @@ impl Client {
                 "event=soter path=native_local stage=broker_call uid={uid} tx={tx} reason=channel_closed result={UNAVAILABLE}");
             return Outcome::Code(UNAVAILABLE);
         };
-        match write_frame(stream, &Call { uid, tx, request })
-            .and_then(|()| read_frame::<Outcome>(stream))
+        match write_frame(stream, &CallFrame::Hal(Call { uid, tx, request }))
+            .and_then(|()| read_frame::<ReplyFrame>(stream))
         {
-            Ok(outcome) => outcome,
+            Ok(ReplyFrame::Hal(outcome)) => outcome,
+            Ok(ReplyFrame::Service { .. }) => {
+                *channels = None;
+                Outcome::Code(UNAVAILABLE)
+            }
             Err(error) => {
                 *channels = None;
                 log::warn!(target: "omk_soter_local",
                     "event=soter path=native_local stage=broker_call uid={uid} tx={tx} reason={:?} result={UNAVAILABLE}",
                     error.kind());
                 Outcome::Code(UNAVAILABLE)
+            }
+        }
+    }
+}
+
+impl Client {
+    /// Answer one `ISoterService` transaction from the local ledger.
+    ///
+    /// The service boundary carries raw parcel bytes in both directions, so the
+    /// hook can hand out a like-for-like reply without parsing vendor layouts.
+    /// `None` means "no local answer": keep the original route.
+    pub fn forward_service(&self, uid: u32, tx: u32, request: &[u8]) -> Option<Vec<u8>> {
+        let authorization = self.authorization.lock().unwrap_or_else(|e| e.into_inner());
+        if !authorization.fresh || authorization.selection.uids.binary_search(&uid).is_err() {
+            return None;
+        }
+        drop(authorization);
+        let Ok(mut channels) = self.calls.try_lock() else {
+            return None;
+        };
+        let stream = channels.as_mut()?;
+        let reply = write_frame(stream, &CallFrame::Service { uid, tx, request: request.to_vec() })
+            .and_then(|()| read_frame::<ReplyFrame>(stream));
+        match reply {
+            Ok(ReplyFrame::Service { reply }) => reply,
+            Ok(ReplyFrame::Hal(_)) | Err(_) => {
+                *channels = None;
+                None
             }
         }
     }
@@ -325,25 +372,47 @@ pub fn serve(mut auth: UnixStream, mut calls: UnixStream) -> io::Result<()> {
         }
     })?;
     std::thread::Builder::new().name("omk-soter-local".into()).spawn(move || {
-        while let Ok(call) = read_frame::<Call>(&mut calls) {
-            let uid = call.uid;
-            let tx = call.tx;
+        while let Ok(frame) = read_frame::<CallFrame>(&mut calls) {
             let started = Instant::now();
-            let outcome = identities::answer(uid, tx, call.request).unwrap_or_else(|error| {
-                log::warn!("Local SOTER uid={uid} tx={tx} refused: {error}");
-                Outcome::Code(UNAVAILABLE)
-            });
-            let code = match &outcome {
-                Outcome::Code(code)
-                | Outcome::Buffer { code, .. }
-                | Outcome::Init { code, .. }
-                | Outcome::Exception { code, .. } => *code,
+            let reply = match frame {
+                CallFrame::Hal(call) => {
+                    let uid = call.uid;
+                    let tx = call.tx;
+                    let outcome =
+                        identities::answer(uid, tx, call.request).unwrap_or_else(|error| {
+                            log::warn!("Local SOTER uid={uid} tx={tx} refused: {error}");
+                            Outcome::Code(UNAVAILABLE)
+                        });
+                    let code = match &outcome {
+                        Outcome::Code(code)
+                        | Outcome::Buffer { code, .. }
+                        | Outcome::Init { code, .. }
+                        | Outcome::Exception { code, .. } => *code,
+                    };
+                    log::info!(
+                        "event=soter path=local stage=hal uid={uid} tx={tx} result={code} elapsed_ms={}",
+                        started.elapsed().as_millis()
+                    );
+                    ReplyFrame::Hal(outcome)
+                }
+                CallFrame::Service { uid, tx, request } => {
+                    let reply = identities::answer_service(uid, tx, &request).unwrap_or_else(
+                        |error| {
+                            log::warn!(
+                                "Local SOTER service uid={uid} tx={tx} refused: {error}"
+                            );
+                            None
+                        },
+                    );
+                    log::info!(
+                        "event=soter path=local stage=service uid={uid} tx={tx} reply={} elapsed_ms={}",
+                        reply.as_ref().map_or(0, Vec::len),
+                        started.elapsed().as_millis()
+                    );
+                    ReplyFrame::Service { reply }
+                }
             };
-            log::info!(
-                "event=soter path=local uid={uid} tx={tx} result={code} elapsed_ms={}",
-                started.elapsed().as_millis()
-            );
-            if write_frame(&mut calls, &outcome).is_err() {
+            if write_frame(&mut calls, &reply).is_err() {
                 break;
             }
         }

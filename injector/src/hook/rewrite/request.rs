@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::android::system::keystore2::Domain::Domain;
+
 #[cfg(test)]
 mod tests;
 
@@ -17,6 +19,66 @@ fn route_for_service_request(
     intercept: &config::InterceptConfig,
 ) -> RouteTarget {
     if allowed && identify::is_omk_service_route_enabled(request.method(), intercept) {
+        RouteTarget::Omk
+    } else {
+        RouteTarget::System
+    }
+}
+
+/// A `GRANT` descriptor names a key through an authorization that exists only in the backend
+/// that accepted the `Grant` call. `Grant` from system_server stays on System because the
+/// core-caller filter rejects uid 1000, while a scooped app that grants its own key records the
+/// authorization in OMK. Asking OMK whether it owns the descriptor keeps each request on the
+/// owning backend instead of answering `KEY_NOT_FOUND` from the wrong database.
+fn grant_descriptor_route(
+    request: &ParsedServiceRequest,
+    probe: impl FnOnce(&KeyDescriptor) -> anyhow::Result<bool>,
+) -> Option<RouteTarget> {
+    let key = match request {
+        ParsedServiceRequest::GetKeyEntry { key }
+        | ParsedServiceRequest::UpdateSubcomponent { key, .. }
+        | ParsedServiceRequest::DeleteKey { key }
+        | ParsedServiceRequest::Grant { key, .. }
+        | ParsedServiceRequest::Ungrant { key, .. } => key,
+        _ => return None,
+    };
+    if key.domain != Domain::GRANT {
+        return None;
+    }
+    match probe(key) {
+        Ok(true) => Some(RouteTarget::Omk),
+        Ok(false) => Some(RouteTarget::System),
+        Err(error) => {
+            warn!(
+                "event=route OMK grant-ownership probe failed for nspace={}: {error:#}; routing the grant descriptor to System",
+                key.nspace
+            );
+            Some(RouteTarget::System)
+        }
+    }
+}
+
+fn route_grant_descriptor(
+    request: &ParsedServiceRequest,
+    caller: &CallerInfo,
+) -> Option<RouteTarget> {
+    let route = grant_descriptor_route(request, |grant| {
+        ipc::with_omk_once(|omk| Ok(omk.r#isOmkGrant(Some(caller), grant)?))
+    });
+    if let Some(route) = route {
+        info!(
+            "event=route grant_descriptor uid={} pid={} route={:?}",
+            caller.uid, caller.pid, route
+        );
+    }
+    route
+}
+
+/// A security-level carrier only resolves the key identities of the backend that produced it, so
+/// an allowed caller keeps using OMK only on the synthetic carriers OMK handed out. Every real
+/// carrier belongs to System.
+fn security_level_route(allowed: bool, omk_carrier: bool) -> RouteTarget {
+    if allowed && omk_carrier {
         RouteTarget::Omk
     } else {
         RouteTarget::System
@@ -349,11 +411,8 @@ unsafe fn handle_keystore_transaction(
         let original_code = tr.code;
         let decision = identify::is_omk_service_route_enabled(method, &cfg.intercept)
             .then(|| evaluate_caller(&caller, cfg));
-        let route = route_for_service_request(
-            &request,
-            decision.as_ref().is_some_and(|decision| decision.allowed),
-            &cfg.intercept,
-        );
+        let allowed = decision.as_ref().is_some_and(|decision| decision.allowed);
+        let route = route_for_service_request(&request, allowed, &cfg.intercept);
 
         if !interface_ready {
             return if decision.as_ref().is_some_and(|decision| {
@@ -364,6 +423,15 @@ unsafe fn handle_keystore_transaction(
                 false
             };
         }
+
+        // Only a caller the filter already allowed can reach OMK, and only then does the owning
+        // backend of a grant descriptor matter.
+        let route = match route {
+            RouteTarget::Omk => {
+                route_grant_descriptor(&request, &caller).unwrap_or(RouteTarget::Omk)
+            }
+            RouteTarget::System => RouteTarget::System,
+        };
 
         let mut precomputed_service_reply = if route == RouteTarget::Omk
             && matches!(
@@ -468,11 +536,12 @@ unsafe fn handle_keystore_transaction(
         // Keystore2 shares each security-level Binder between getSecurityLevel and getKeyEntry.
         let scoop_enabled = security_level_scoop_enabled(&cfg.intercept);
         let decision = scoop_enabled.then(|| evaluate_caller(&caller, cfg));
-        let route = if decision.as_ref().is_some_and(|decision| decision.allowed) {
-            RouteTarget::Omk
-        } else {
-            RouteTarget::System
-        };
+        let omk_carrier =
+            lookup_synthetic_target(target) == Some(SyntheticTargetKind::SecurityLevel);
+        let route = security_level_route(
+            decision.as_ref().is_some_and(|decision| decision.allowed),
+            omk_carrier,
+        );
         if let Some(decision) = decision.as_ref().filter(|decision| !decision.allowed) {
             info!(
                 "event=decision command={} security_level_method={:?} code=0x{:x} uid={} pid={} sid='{}' packages={:?} allowed=false reason={:?} target=ptr:0x{:x}/cookie:0x{:x} security_level={:?}; routing request to System",
@@ -507,8 +576,8 @@ unsafe fn handle_keystore_transaction(
             scoop_enabled,
         );
         info!(
-            "event=route security_level_method={:?} uid={} pid={} route={:?} security_level={:?}",
-            method, caller.uid, caller.pid, route, target_info.security_level
+            "event=route security_level_method={:?} uid={} pid={} route={:?} security_level={:?} omk_carrier={}",
+            method, caller.uid, caller.pid, route, target_info.security_level, omk_carrier
         );
 
         let pending = PendingSecurityLevelCall {

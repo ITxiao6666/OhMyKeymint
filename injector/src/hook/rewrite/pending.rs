@@ -54,7 +54,7 @@ pub(super) enum PrecomputedMaintenanceReply {
     Error(Status),
 }
 
-pub(super) enum PendingCall {
+pub(in crate::hook) enum PendingCall {
     InterfaceBoundaryFailure(CallerInfo),
     Authorization(PendingAuthorizationCall),
     Maintenance(PendingMaintenanceCall),
@@ -64,6 +64,12 @@ pub(super) enum PendingCall {
     SecurityLevel(PendingSecurityLevelCall),
     PrecomputedSecurityLevel(PendingSecurityLevelCall, Box<Option<OutboundReply>>),
     Operation(PendingOperationCall),
+    /// A local SOTER service reply prepared before the Java layer answers.
+    SoterService {
+        uid: i64,
+        pid: i64,
+        reply: Box<Option<OutboundReply>>,
+    },
 }
 
 struct PendingReplyFrame {
@@ -108,6 +114,7 @@ impl PendingCall {
                 call.caller.uid,
                 call.caller.pid,
             ),
+            Self::SoterService { uid, pid, .. } => ("soter", "service".to_owned(), *uid, *pid),
         }
     }
 }
@@ -198,6 +205,13 @@ pub(in crate::hook) unsafe fn handle_bc_reply(
                 call.request.method(), call.route, call.caller.uid, call.caller.pid, call.packages, call.security_level
             );
             build_security_level_reply_rewrite(tr, call)
+        }
+        PendingCall::SoterService { uid, pid, reply } => {
+            debug!("event=reply handling local SOTER service reply uid={uid} pid={pid}");
+            reply
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("precomputed SOTER service reply already consumed"))
+                .map(Some)
         }
         PendingCall::PrecomputedSecurityLevel(call, reply) => {
             debug!(
@@ -301,6 +315,8 @@ fn pending_preserves_system_on_rewrite_failure(pending: &PendingCall) -> bool {
         PendingCall::SecurityLevel(call) => call.route != RouteTarget::Omk,
         PendingCall::PrecomputedSecurityLevel(_, _) => false,
         PendingCall::Operation(call) => call.route == RouteTarget::System,
+        // A local SOTER answer is authoritative for a selected caller.
+        PendingCall::SoterService { .. } => false,
     }
 }
 
@@ -411,7 +427,7 @@ pub(in crate::hook) fn pending_reply_requires_payload(
     })
 }
 
-pub(super) fn replace_top_pending(connection: BinderStateKey, pending: PendingCall) {
+pub(in crate::hook) fn replace_top_pending(connection: BinderStateKey, pending: PendingCall) {
     PENDING_REPLY_QUEUE.with(|slot| {
         if let Some(frame) = slot
             .borrow_mut()

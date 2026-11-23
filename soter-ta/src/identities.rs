@@ -357,6 +357,66 @@ pub fn answer(uid: u32, tx: u32, request: Request) -> Result<Outcome, String> {
     )
 }
 
+/// Answer one `ISoterService` transaction at the service boundary.
+///
+/// Uses the same policy, ledger and CPU-ID override rules as the HAL path so both
+/// boundaries report one identity. `Ok(None)` means this transaction has no local
+/// answer and must keep its normal route.
+pub fn answer_service(uid: u32, tx: u32, request: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    answer_service_at(
+        Path::new(ROOT),
+        uid,
+        tx,
+        request,
+        &fs::read_to_string("/data/system/packages.list").map_err(|e| e.to_string())?,
+    )
+}
+
+fn answer_service_at(
+    root: &Path,
+    uid: u32,
+    tx: u32,
+    request: &[u8],
+    packages: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    if !crate::service::handles(tx) {
+        return Ok(None);
+    }
+    let _guard = private_directory(root)?;
+    let config = config_at(root)?;
+    let app = config.selected(uid, packages)?.ok_or("SOTER caller is not selected")?;
+    let identity = config
+        .identities
+        .iter()
+        .find(|item| item.id == app.identity)
+        .ok_or("Missing SOTER identity")?;
+    let path: PathBuf = root.join(format!("{}.json", identity.id));
+    let raw = read(&path)?.ok_or("Missing local identity material")?;
+    let mut state = TaState::from_json(&raw).ok_or("Invalid local identity material")?;
+    if state.cpu_id != identity.cpu_id || state.attk.private().is_none() {
+        return Err("Local SOTER identity material does not match its policy".into());
+    }
+    let effective_cpu = if app.cpu_id.is_empty() { &identity.cpu_id } else { &app.cpu_id };
+    if state.cpu_overrides.get(&uid).is_some_and(|previous| previous != effective_cpu) {
+        if let Some(entry) = state.uids.get_mut(&uid) {
+            entry.ask = None;
+            entry.auth.clear();
+        }
+        state.sessions.retain(|_, session| session.uid != uid);
+    }
+    state.cpu_overrides.insert(uid, effective_cpu.clone());
+    let cpu = state.cpu_id.clone();
+    if !app.cpu_id.is_empty() {
+        state.cpu_id.clone_from(&app.cpu_id);
+    }
+    let reply = crate::service::reply(&mut state, uid, tx, request)
+        .transpose()
+        .map_err(|()| "Malformed local SOTER service request".to_string())?;
+    state.cpu_id = cpu;
+    write(&path, &state.to_json())?;
+    Ok(reply)
+}
+
 fn answer_at(
     root: &Path,
     uid: u32,

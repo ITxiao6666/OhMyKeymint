@@ -10,6 +10,42 @@ use std::mem::size_of;
 
 mod interface_boundary;
 
+fn grant_descriptor() -> KeyDescriptor {
+    KeyDescriptor { domain: Domain::GRANT, nspace: 42, alias: None, blob: None }
+}
+
+#[test]
+fn grant_descriptor_route_probes_omk_ownership() {
+    let grant = ParsedServiceRequest::GetKeyEntry { key: grant_descriptor() };
+    assert_eq!(grant_descriptor_route(&grant, |_| Ok(true)), Some(RouteTarget::Omk));
+    assert_eq!(grant_descriptor_route(&grant, |_| Ok(false)), Some(RouteTarget::System));
+    assert_eq!(
+        grant_descriptor_route(&grant, |_| Err(anyhow::anyhow!("omk unavailable"))),
+        Some(RouteTarget::System)
+    );
+
+    let app = ParsedServiceRequest::GetKeyEntry { key: sample_key_descriptor() };
+    let mut probed = false;
+    assert_eq!(
+        grant_descriptor_route(&app, |_| {
+            probed = true;
+            Ok(true)
+        }),
+        None
+    );
+    assert!(!probed, "APP descriptors must not reach the OMK probe");
+
+    let list = ParsedServiceRequest::ListEntries { domain: Domain::GRANT, nspace: 0 };
+    assert_eq!(grant_descriptor_route(&list, |_| Ok(true)), None);
+}
+
+#[test]
+fn security_level_route_follows_the_carrier_backend() {
+    assert_eq!(security_level_route(true, true), RouteTarget::Omk);
+    assert_eq!(security_level_route(true, false), RouteTarget::System);
+    assert_eq!(security_level_route(false, true), RouteTarget::System);
+}
+
 #[test]
 fn omk_grant_blocker_preserves_inbound_binder_buffer() {
     let mut tr: binder_transaction_data = unsafe { std::mem::zeroed() };

@@ -23,15 +23,16 @@ start_daemon() {
     rm -f "$pidfile"
   fi
 
+  # The daemon records its own pid after it takes the single-instance lock, so a
+  # duplicate start leaves the pid file pointing at the daemon that owns the role.
   sh "$script" &
-  pid=$!
-  echo $pid > "$pidfile"
-  sleep 1
-  if ! kill -0 "$pid" 2>/dev/null || ! pid_matches_script "$pid" "$script"; then
-    rm -f "$pidfile"
-    return 1
+  sleep 2
+  pid=$(cat "$pidfile" 2>/dev/null)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && pid_matches_script "$pid" "$script"; then
+    return 0
   fi
-  return 0
+  rm -f "$pidfile"
+  return 1
 }
 
 start_daemon "$MODDIR/daemon" "$STATE_DIR/keymint-daemon.pid"
