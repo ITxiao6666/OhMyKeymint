@@ -1,4 +1,4 @@
-"""Build pinned app-local LSPlant glue and its in-memory Java callback DEX."""
+"""Build pinned LSPlant glue and in-memory Java callbacks for the Zygisk payload."""
 from __future__ import annotations
 
 import argparse
@@ -91,11 +91,20 @@ def build(target: str, sdk: Path, ndk: Path) -> Path:
     javac = java_root / f"bin/javac{suffix}" if java_root else Path(shutil.which("javac") or "javac")
     classes = out / "classes"
     classes.mkdir(exist_ok=True)
-    run([javac, "--release", "8", "-d", classes, ROOT / "runtime/engineer/EngineerDisplay.java"])
+    run([
+        javac,
+        "--release",
+        "8",
+        "-d",
+        classes,
+        ROOT / "runtime/engineer/EngineerDisplay.java",
+        ROOT / "runtime/engineer/StrongBoxFeatureMask.java",
+    ])
     d8 = sdk / "build-tools/35.0.0/lib/d8.jar"
     jar = out / "engineer.jar"
     run([java, "-cp", d8, "com.android.tools.r8.D8", "--release", "--no-desugaring", "--min-api", "26",
-         "--output", jar, classes / "omk/engineer/EngineerDisplay.class"])
+         "--output", jar, classes / "omk/engineer/EngineerDisplay.class",
+         classes / "omk/strongbox/StrongBoxFeatureMask.class"])
     with zipfile.ZipFile(jar) as archive:
         (out / "classes.dex").write_bytes(archive.read("classes.dex"))
     data = (out / "classes.dex").read_bytes()

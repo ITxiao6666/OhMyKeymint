@@ -121,7 +121,7 @@ impl KeystoreService {
                 }
             };
         } else {
-            log::info!("StrongBox KeyMint HAL is not present; skipping optional security level.");
+            log::info!("StrongBox KeyMint is unavailable or disabled by configuration.");
         }
 
         Ok(result)

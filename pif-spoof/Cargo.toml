@@ -11,4 +11,6 @@ crate-type = ["cdylib"]
 jni = "0.21"
 libc = { version = "0.2", default-features = false }
 pif-common = { path = "../pif-common", version = "0.1.0" }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
 zygisk-api = { path = "../third_party/zygisk-api", version = "0.0.2" }

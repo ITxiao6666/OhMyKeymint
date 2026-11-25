@@ -1022,7 +1022,7 @@ impl KeyMintWrapper {
             && !crate::plat::keymint_profile::strongbox_keymint_present()
         {
             return Err(Error::Km(ErrorCode::HARDWARE_TYPE_UNAVAILABLE))
-                .context(err!("StrongBox KeyMint HAL is not present"));
+                .context(err!("StrongBox KeyMint is unavailable or disabled by configuration"));
         }
 
         Ok(KeyMintWrapper {

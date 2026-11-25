@@ -20,6 +20,7 @@ Zygisk 相关功能需另行安装并启用 Zygisk Next。
 - 应用包名、多用户及应用独立安全补丁配置。
 - RSA / EC Keybox 导入与证书链信息查看。
 - 安全补丁同步与恢复、Pixel PIF 配置及本机 RKP Keybox 签发
+- WebUI 可选的系统级 StrongBox 功能掩码。
 - 运行状态诊断、主题与语言设置。
 - SOTER 本地随机身份、按应用选择与 32/36 位 CPU-ID 覆盖。
 

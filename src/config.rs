@@ -23,6 +23,8 @@ static CONFIG_WATCHER_STARTED: OnceLock<()> = OnceLock::new();
 static CONFIG_FILE_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 const CONFIG_PATH: &str = "/data/misc/keystore/omk/config.toml";
+/// Consumed by the module daemon, which restarts KeyMint and the injector.
+const KEYMINT_RESTART_MARKER: &str = "/data/adb/omk/restart.keymint";
 const CONFIG_VERSION_V1: u32 = 1;
 const CONFIG_VERSION_V2: u32 = 2;
 const CURRENT_CONFIG_VERSION: u32 = 3;
@@ -829,6 +831,58 @@ pub fn app_patch_levels_json() -> Result<String> {
         .context("failed to encode app patch-level profiles")
 }
 
+pub fn strongbox_feature_mask_state_json() -> Result<String> {
+    let config_file = load_config_file()?;
+    serde_json::to_string(&serde_json::json!({
+        "enabled": config_file.main.mask_strongbox_feature
+    }))
+    .context("failed to encode StrongBox feature-mask state")
+}
+
+pub fn set_strongbox_feature_mask(enabled: bool) -> Result<()> {
+    if unsafe { libc::geteuid() } != 0 {
+        bail!("saving StrongBox feature-mask settings requires root");
+    }
+    if set_strongbox_feature_mask_to_path(Path::new(CONFIG_PATH), enabled)? {
+        request_keymint_restart();
+    }
+    Ok(())
+}
+
+/// Ask the module daemon to restart KeyMint and the injector so the new mask
+/// profile is served without rebooting. App processes pick the mask up from
+/// their own start, so no system restart is involved.
+fn request_keymint_restart() {
+    match fs::write(KEYMINT_RESTART_MARKER, b"") {
+        Ok(()) => log::info!("requested a KeyMint restart for the StrongBox feature mask"),
+        Err(error) => {
+            log::warn!(
+                "failed to request a KeyMint restart for the StrongBox feature mask: {error}"
+            )
+        }
+    }
+}
+
+fn set_strongbox_feature_mask_to_path(path: &Path, enabled: bool) -> Result<bool> {
+    let _write_guard =
+        CONFIG_FILE_WRITE_LOCK.lock().map_err(|_| anyhow!("config file write lock poisoned"))?;
+    let existing = fs::read_to_string(path).context("failed to read config.toml")?;
+    let mut parsed = parse_config_file(&existing, false)?;
+    let main = parsed
+        .table
+        .get_mut("main")
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| anyhow!("config is missing a valid [main] table"))?;
+    main.insert("mask_strongbox_feature".to_string(), toml::Value::Boolean(enabled));
+    let contents = toml::to_string_pretty(&parsed.table)?;
+    parse_config_file(&contents, false).context("refusing to write an invalid config.toml")?;
+    if existing == contents {
+        return Ok(false);
+    }
+    persist_config_contents_unlocked(path, &contents)?;
+    Ok(true)
+}
+
 pub fn save_app_patch_levels_base64(payload: &str) -> Result<()> {
     if unsafe { libc::geteuid() } != 0 {
         bail!("saving app patch-level profiles requires root");
@@ -944,6 +998,9 @@ pub struct MainConfig {
     /// Retire dedicated ATTEST_KEY entries bound to a previous keybox identity.
     /// Ordinary application keys and passkeys remain usable after a keybox change.
     pub retire_stale_keybox_bound_keys: bool,
+    /// Hide the StrongBox system feature for newly started processes and disable OMK's
+    /// StrongBox level once KeyMint restarts.
+    pub mask_strongbox_feature: bool,
 }
 
 fn deserialize_ta_delay_range<'de, D>(deserializer: D) -> Result<[u16; 2], D::Error>
@@ -965,6 +1022,7 @@ impl Default for MainConfig {
             ta_control_delay_ms: [1, 4],
             force_skip_system_biometric_hat_verification: true,
             retire_stale_keybox_bound_keys: true,
+            mask_strongbox_feature: false,
         }
     }
 }
@@ -1515,6 +1573,27 @@ force_skip_system_biometric_hat_verification = true"#,
         let explicit_false: MainConfig =
             toml::from_str("force_skip_system_biometric_hat_verification = false").unwrap();
         assert!(!explicit_false.force_skip_system_biometric_hat_verification);
+    }
+
+    #[test]
+    fn strongbox_feature_mask_defaults_off_and_round_trips() {
+        assert!(!MainConfig::default().mask_strongbox_feature);
+        let omitted: MainConfig = toml::from_str(r#"backend = "injector""#).unwrap();
+        assert!(!omitted.mask_strongbox_feature);
+        let enabled: MainConfig = toml::from_str("mask_strongbox_feature = true").unwrap();
+        assert!(enabled.mask_strongbox_feature);
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let original = ConfigFile::default();
+        fs::write(&path, toml::to_string_pretty(&original).unwrap()).unwrap();
+        set_strongbox_feature_mask_to_path(&path, true).unwrap();
+
+        let saved = fs::read_to_string(&path).unwrap();
+        let parsed = parse_config_file(&saved, false).unwrap().config_file;
+        assert!(parsed.main.mask_strongbox_feature);
+        assert_eq!(parsed.main.backend, original.main.backend);
+        assert_eq!(parsed.crypto.root_kek_seed, original.crypto.root_kek_seed);
     }
 
     #[test]

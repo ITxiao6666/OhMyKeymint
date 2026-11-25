@@ -539,6 +539,9 @@ ta_generation_delay_ms = [6, 16]
 ta_control_delay_ms = [1, 4]
 # Retire dedicated ATTEST_KEY entries bound to a previous keybox identity.
 retire_stale_keybox_bound_keys = true
+# Hide StrongBox from Android's system feature list (applies after a userspace
+# restart) and from OMK (applies when keymint restarts).
+mask_strongbox_feature = false
 
 [crypto]
 # Redacted placeholders only. Keep the generated 64-character values.
@@ -1034,6 +1037,7 @@ empty value is valid. Its absence does not invalidate an available IMEI.
 | Fields | Required action |
 | --- | --- |
 | `[main].log_level` | Restart keymint. |
+| `[main].mask_strongbox_feature` | Restart keymint from the WebUI toggle for the OMK StrongBox level, and soft reboot the userspace before the hidden feature disappears from the system feature list. |
 | `[main].force_skip_system_biometric_hat_verification` | Applies to new checks after a valid save. |
 | `[main].ta_operation_delay_ms`, `ta_generation_delay_ms`, `ta_control_delay_ms` | Apply to new TA calls after a valid save; invalid ranges retain the previous configuration. |
 | All `[crypto]` fields | Restart keymint; changing values can make keys unusable. |
@@ -1043,6 +1047,24 @@ empty value is valid. Its absence does not invalidate an available IMEI.
 | All `[device]` fields | Restart keymint to rebuild the cached ID snapshot. |
 | `vb_key` from `"random"` to `"auto"` | Restart keymint to reuse its saved auto snapshot; reboot the device if none exists. |
 | `vb_hash` from `"random"` to `"auto"` | Reboot the whole device. |
+
+### StrongBox feature mask
+
+The Tools page can hide `android.hardware.strongbox_keystore` from the feature map
+published by Android. This requires Zygisk Next to be installed and enabled. The
+OMK Zygisk payload removes the entry from `SystemConfig.getAvailableFeatures`,
+the map `system_server` builds while it boots, so the system feature list only
+changes after the userspace restarts; the WebUI offers a soft reboot for that.
+
+OMK also withholds its StrongBox security level while the setting is enabled.
+Saving the toggle restarts keymint through the module daemon, so the OMK side
+applies immediately; newly started app processes observe the new level right away
+and already-running apps must be restarted.
+
+The vendor StrongBox HAL remains active. Apps outside OMK's scoop can still reach
+the system Keystore service if they request StrongBox directly. OMK-managed
+StrongBox keys cannot be used while the mask is enabled. Disable the setting and
+soft reboot the userspace to restore the hidden system feature.
 
 ## `injector.toml`
 

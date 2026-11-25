@@ -3,6 +3,8 @@ use std::{env, path::PathBuf, process::Command};
 fn main() {
     println!("cargo:rerun-if-changed=../runtime/engineer");
     println!("cargo:rerun-if-changed=../scripts/build_engineer_bridge.py");
+    println!("cargo:rerun-if-changed=../runtime/engineer/StrongBoxFeatureMask.java");
+    println!("cargo:rerun-if-changed=../runtime/engineer/bridge.cpp");
     for name in
         ["JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_NDK_ROOT", "LOCALAPPDATA"]
     {

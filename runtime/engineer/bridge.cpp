@@ -89,49 +89,66 @@ jobject hook(JNIEnv* env, jclass, jobject target, jobject owner, jobject callbac
 jboolean deoptimize(JNIEnv* env, jclass, jobject method) {
     return lsplant::Deoptimize(env, method);
 }
-} // namespace
 
-extern "C" __attribute__((visibility("default"))) bool omk_engineer_install(
-        JNIEnv* env, const uint8_t* dex, size_t length, void* selected) {
-    dex = omk_engineer_dex;
-    length = sizeof(omk_engineer_dex);
-    static ArtSymbols symbols;
-    if (!symbols.load()) return false;
+ArtSymbols art_symbols;
+
+bool init_lsplant(JNIEnv* env, std::string_view generated_class_name,
+        std::string_view generated_source_name) {
+    if (!art_symbols.base && !art_symbols.load()) return false;
     const lsplant::InitInfo info {
         .inline_hooker = [](void* target, void* replacement) -> void* {
             void* original = nullptr;
             return DobbyHook(target, replacement, &original) == 0 ? original : nullptr;
         },
         .inline_unhooker = [](void* target) { return DobbyDestroy(target) == 0; },
-        .art_symbol_resolver = [](std::string_view name) { return symbols.find(name, false); },
-        .art_symbol_prefix_resolver = [](std::string_view name) { return symbols.find(name, true); },
-        .generated_class_name = "OmkEngineerDisplay_",
-        .generated_source_name = "OMK EngineerMode display",
+        .art_symbol_resolver = [](std::string_view name) { return art_symbols.find(name, false); },
+        .art_symbol_prefix_resolver = [](std::string_view name) {
+            return art_symbols.find(name, true);
+        },
+        .generated_class_name = generated_class_name,
+        .generated_source_name = generated_source_name,
         .generated_field_name = "hooker",
         .generated_method_name = "{target}",
         .executable_memory_allocator = {},
         .executable_memory_recycler = {}
     };
-    if (!lsplant::Init(env, info)) return false;
-    jobject buffer = env->NewDirectByteBuffer(const_cast<uint8_t*>(dex), length);
-    if (env->ExceptionCheck() || !buffer) return false;
+    return lsplant::Init(env, info);
+}
+
+jclass load_bridge_class(JNIEnv* env, const char* class_name) {
+    jobject buffer = env->NewDirectByteBuffer(
+            const_cast<uint8_t*>(omk_engineer_dex), sizeof(omk_engineer_dex));
+    if (env->ExceptionCheck() || !buffer) return nullptr;
     jclass loader_class = env->FindClass("java/lang/ClassLoader");
-    if (env->ExceptionCheck() || !loader_class) return false;
-    jmethodID system_loader = env->GetStaticMethodID(loader_class, "getSystemClassLoader", "()Ljava/lang/ClassLoader;");
-    if (env->ExceptionCheck() || !system_loader) return false;
+    if (env->ExceptionCheck() || !loader_class) return nullptr;
+    jmethodID system_loader = env->GetStaticMethodID(
+            loader_class, "getSystemClassLoader", "()Ljava/lang/ClassLoader;");
+    if (env->ExceptionCheck() || !system_loader) return nullptr;
     jobject parent = env->CallStaticObjectMethod(loader_class, system_loader);
-    if (env->ExceptionCheck() || !parent) return false;
+    if (env->ExceptionCheck() || !parent) return nullptr;
     jclass memory_loader = env->FindClass("dalvik/system/InMemoryDexClassLoader");
-    if (env->ExceptionCheck() || !memory_loader) return false;
-    jmethodID ctor = env->GetMethodID(memory_loader, "<init>", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V");
-    if (env->ExceptionCheck() || !ctor) return false;
-    jobject loader = env->NewObject(memory_loader, ctor, buffer, parent);
-    if (env->ExceptionCheck() || !loader) return false;
-    jmethodID load_class = env->GetMethodID(loader_class, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
-    if (env->ExceptionCheck() || !load_class) return false;
-    jstring name = env->NewStringUTF("omk.engineer.EngineerDisplay");
-    if (env->ExceptionCheck() || !name) return false;
+    if (env->ExceptionCheck() || !memory_loader) return nullptr;
+    jmethodID constructor = env->GetMethodID(
+            memory_loader, "<init>", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V");
+    if (env->ExceptionCheck() || !constructor) return nullptr;
+    jobject loader = env->NewObject(memory_loader, constructor, buffer, parent);
+    if (env->ExceptionCheck() || !loader) return nullptr;
+    jmethodID load_class = env->GetMethodID(
+            loader_class, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    if (env->ExceptionCheck() || !load_class) return nullptr;
+    jstring name = env->NewStringUTF(class_name);
+    if (env->ExceptionCheck() || !name) return nullptr;
     auto bridge = static_cast<jclass>(env->CallObjectMethod(loader, load_class, name));
+    return env->ExceptionCheck() ? nullptr : bridge;
+}
+} // namespace
+
+extern "C" __attribute__((visibility("default"))) bool omk_engineer_install(
+        JNIEnv* env, const uint8_t* dex, size_t length, void* selected) {
+    static_cast<void>(dex);
+    static_cast<void>(length);
+    if (!init_lsplant(env, "OmkEngineerDisplay_", "OMK EngineerMode display")) return false;
+    jclass bridge = load_bridge_class(env, "omk.engineer.EngineerDisplay");
     if (env->ExceptionCheck() || !bridge) return false;
     JNINativeMethod methods[] = {
         {const_cast<char*>("hook"), const_cast<char*>("(Ljava/lang/reflect/Method;Ljava/lang/Object;Ljava/lang/reflect/Method;)Ljava/lang/reflect/Method;"), reinterpret_cast<void*>(hook)},
@@ -139,6 +156,25 @@ extern "C" __attribute__((visibility("default"))) bool omk_engineer_install(
         {const_cast<char*>("selected"), const_cast<char*>("()Z"), selected}
     };
     if (env->RegisterNatives(bridge, methods, 3) != 0) return false;
+    jmethodID install = env->GetStaticMethodID(bridge, "install", "()V");
+    if (!install) return false;
+    env->CallStaticVoidMethod(bridge, install);
+    return !env->ExceptionCheck();
+}
+
+extern "C" __attribute__((visibility("default"))) bool omk_strongbox_mask_install(
+        JNIEnv* env) {
+    if (!init_lsplant(env, "OmkStrongBoxFeatureMask_", "OMK StrongBox feature mask")) {
+        return false;
+    }
+    jclass bridge = load_bridge_class(env, "omk.strongbox.StrongBoxFeatureMask");
+    if (env->ExceptionCheck() || !bridge) return false;
+    JNINativeMethod methods[] = {
+        {const_cast<char*>("hook"),
+         const_cast<char*>("(Ljava/lang/reflect/Method;Ljava/lang/Object;Ljava/lang/reflect/Method;)Ljava/lang/reflect/Method;"),
+         reinterpret_cast<void*>(hook)}
+    };
+    if (env->RegisterNatives(bridge, methods, 1) != 0) return false;
     jmethodID install = env->GetStaticMethodID(bridge, "install", "()V");
     if (!install) return false;
     env->CallStaticVoidMethod(bridge, install);

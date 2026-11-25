@@ -31,7 +31,18 @@ pub(crate) struct KeyMintHardwareProfile {
 
 pub(crate) fn strongbox_keymint_present() -> bool {
     static STRONGBOX_PRESENT: OnceLock<bool> = OnceLock::new();
-    *STRONGBOX_PRESENT.get_or_init(detect_strongbox_keymint_present)
+    *STRONGBOX_PRESENT.get_or_init(|| {
+        let mask_enabled = crate::config::config()
+            .read()
+            .map(|config| config.main.mask_strongbox_feature)
+            .unwrap_or(false);
+        if mask_enabled {
+            log::info!("StrongBox feature mask is enabled; skipping optional StrongBox KeyMint");
+            false
+        } else {
+            detect_strongbox_keymint_present()
+        }
+    })
 }
 
 pub(crate) fn resolve_hardware_profile(security_level: SecurityLevel) -> KeyMintHardwareProfile {

@@ -581,6 +581,45 @@ export class Cli {
     return parseAppPatchProfiles(output)
   }
 
+  async getStrongboxFeatureMask(): Promise<boolean> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(keymint, ['--webui-get-strongbox-feature-mask'], 256)
+    const state = parseCanonicalJson(output, 'StrongBox feature mask')
+    if (!isRecord(state) || !hasOnlyKeys(state, ['enabled']) || typeof state.enabled !== 'boolean') {
+      throw new Error('OMK returned an invalid StrongBox feature-mask state')
+    }
+    return state.enabled
+  }
+
+  async setStrongboxFeatureMask(enabled: boolean): Promise<void> {
+    const { keymint } = await this.#getHelperPaths()
+    const output = await this.#run(
+      keymint,
+      ['--webui-set-strongbox-feature-mask', enabled ? '1' : '0'],
+      256,
+    )
+    if (output !== 'strongbox_feature_mask_saved') {
+      throw new Error('OMK returned an unexpected StrongBox feature-mask result')
+    }
+    if (await this.getStrongboxFeatureMask() !== enabled) {
+      throw new Error('StrongBox feature-mask state did not match the saved value')
+    }
+  }
+
+  /**
+   * Restart the Android userspace so `SystemConfig` rebuilds its feature map.
+   *
+   * The StrongBox mask is applied to that boot-time map, so the system feature
+   * list only changes after a userspace restart. A soft reboot is enough and
+   * keeps the kernel and module state intact.
+   */
+  async softReboot(): Promise<void> {
+    const { errno, stderr } = await exec('/data/adb/ksu/bin/ksud soft-reboot')
+    if (errno !== 0) {
+      throw new Error(stderr.trim() || `ksud soft-reboot exited with ${errno}`)
+    }
+  }
+
   async setAppPatchLevels(target: string, levels: AppPatchLevels): Promise<void> {
     const selector = parseScoopTarget(target)
     if (!selector || selector.kind === 'uid'

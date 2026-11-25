@@ -179,6 +179,11 @@
     <string name="tools_restore_patch_desc">恢复设备默认安全补丁</string>
 <string name="settings_general">通用</string>
 <string name="settings_maintenance">维护</string>
+<string name="tools_system_features">系统功能</string>
+<string name="tools_strongbox_mask">隐藏 StrongBox 能力</string>
+<string name="tools_strongbox_mask_desc">对所有应用隐藏 StrongBox 系统特性，需 Zygisk Next。保存即生效，运行中的应用需重启。</string>
+<string name="tools_strongbox_mask_saved">已应用，软重启后系统特性列表才会更新。</string>
+<string name="tools_strongbox_mask_reboot_action">立即软重启</string>
 <string name="settings_export_logs">导出日志</string>
 <string name="settings_export_logs_desc">将 OMK 日志打包保存到共享存储，便于反馈问题</string>
 <string name="prompt_logs_exported">日志已导出至 %s</string>

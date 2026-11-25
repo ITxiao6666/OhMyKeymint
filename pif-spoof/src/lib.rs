@@ -29,6 +29,7 @@ use libc::{c_char, c_void};
 mod engineer;
 #[cfg(target_arch = "aarch64")]
 mod property_area;
+mod strongbox_mask;
 
 const PROFILE_PATH: &str = "/data/misc/keystore/omk/data/pif_fingerprint.json";
 const GMS_PROCESS: &str = "com.google.android.gms.unstable";
@@ -113,6 +114,7 @@ impl PifTarget {
 #[derive(Default)]
 struct PifSpoofModule {
     profile: Mutex<Option<(PifProfile, PifTarget)>>,
+    system_server_mask_enabled: std::sync::atomic::AtomicBool,
 }
 
 impl ZygiskModule for PifSpoofModule {
@@ -256,7 +258,45 @@ impl ZygiskModule for PifSpoofModule {
         _env: JNIEnv<'a>,
         _args: &'a mut ServerSpecializeArgs<'_>,
     ) {
-        api.set_option(ZygiskOption::DlCloseModuleLibrary);
+        let enabled = match api.with_companion(strongbox_mask::request_enabled) {
+            Ok(Ok(enabled)) => enabled,
+            Ok(Err(error)) => {
+                log_android(&format!("StrongBox feature mask state read failed: {error}"));
+                false
+            }
+            Err(error) => {
+                log_android(&format!("StrongBox feature mask companion failed: {error}"));
+                false
+            }
+        };
+        if !enabled {
+            api.set_option(ZygiskOption::DlCloseModuleLibrary);
+            return;
+        }
+        if !strongbox_mask::prepare(&mut api) {
+            api.set_option(ZygiskOption::DlCloseModuleLibrary);
+            return;
+        }
+        self.system_server_mask_enabled.store(true, Ordering::Release);
+        log_android("StrongBox feature mask enabled for system_server");
+    }
+
+    fn post_server_specialize<'a>(
+        &self,
+        _api: ZygiskApi<'a, V4>,
+        mut env: JNIEnv<'a>,
+        _args: &'a ServerSpecializeArgs<'_>,
+    ) {
+        if !self.system_server_mask_enabled.load(Ordering::Acquire) {
+            return;
+        }
+        if strongbox_mask::install(&mut env) {
+            log_android("StrongBox system feature hook installed");
+        } else {
+            let _ = env.exception_describe();
+            let _ = env.exception_clear();
+            log_android("StrongBox system feature hook failed; original feature list retained");
+        }
     }
 }
 
@@ -1489,6 +1529,10 @@ fn companion(stream: &mut std::os::unix::net::UnixStream) {
     }
     if operation == [2] {
         engineer::serve_selection(stream);
+        return;
+    }
+    if operation == [3] {
+        strongbox_mask::serve_companion(stream);
         return;
     }
     if operation != [1] {

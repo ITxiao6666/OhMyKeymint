@@ -569,6 +569,10 @@ mod tests {
                 "asb-overview?hl=zh-cn",
                 "https://source.android.com/docs/security/bulletin/asb-overview?hl=zh-cn",
             ),
+            (
+                "/docs/security/bulletin/../bulletin/asb-overview",
+                "https://source.android.com/docs/security/bulletin/asb-overview",
+            ),
         ];
 
         for (location, expected) in cases {
@@ -590,7 +594,7 @@ mod tests {
             "   ",
             "https://source.android.com.evil.example/docs/security/bulletin/asb-overview",
             "//source.android.com.evil.example/docs/security/bulletin/asb-overview",
-            "/docs/security/bulletin/../bulletin/asb-overview",
+            "/docs/security/bulletin/../../outside/asb-overview",
         ] {
             let resolved =
                 crate::webui_http::resolve_redirect(&base, location, "Android Security Bulletin");

@@ -179,6 +179,11 @@
     <string name="tools_restore_patch_desc">Restore the device's default security patch</string>
 <string name="settings_general">General</string>
 <string name="settings_maintenance">Maintenance</string>
+<string name="tools_system_features">System features</string>
+<string name="tools_strongbox_mask">Hide StrongBox capability</string>
+<string name="tools_strongbox_mask_desc">Hides the system StrongBox feature. Requires Zygisk Next. Applies on save; restart running apps.</string>
+<string name="tools_strongbox_mask_saved">Applied. The system feature list updates after a soft reboot.</string>
+<string name="tools_strongbox_mask_reboot_action">Soft reboot</string>
 <string name="settings_export_logs">Export logs</string>
 <string name="settings_export_logs_desc">Collect OMK logs into a support archive on shared storage</string>
 <string name="prompt_logs_exported">Logs exported to %s</string>

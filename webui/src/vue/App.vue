@@ -871,6 +871,7 @@ watch(rkpImportConfirmOpen, open => {
       <Transition name="page-switch">
         <ToolsView
           v-show="pageIndex === 1"
+          :cli="cli"
           :security-patch-busy="securityPatchBusy"
           :maintenance-busy="maintenanceBusy"
           ref="toolsView"

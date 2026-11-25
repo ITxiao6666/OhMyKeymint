@@ -628,6 +628,35 @@ fn handle_webui_app_patch_command(
                     .map_err(|error| format!("{error:#}")),
             )
         }
+        "--webui-get-strongbox-feature-mask" => {
+            if args.next().is_some() {
+                return Some(Err(
+                    "--webui-get-strongbox-feature-mask does not accept arguments".to_string()
+                ));
+            }
+            Some(config::strongbox_feature_mask_state_json().map_err(|error| format!("{error:#}")))
+        }
+        "--webui-set-strongbox-feature-mask" => {
+            let enabled = match args.next().as_deref() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Some(Err(
+                        "--webui-set-strongbox-feature-mask expects 0 or 1".to_string()
+                    ));
+                }
+            };
+            if args.next().is_some() {
+                return Some(Err(
+                    "--webui-set-strongbox-feature-mask accepts exactly one value".to_string()
+                ));
+            }
+            Some(
+                config::set_strongbox_feature_mask(enabled)
+                    .map(|()| "strongbox_feature_mask_saved".to_string())
+                    .map_err(|error| format!("{error:#}")),
+            )
+        }
         _ => None,
     }
 }
