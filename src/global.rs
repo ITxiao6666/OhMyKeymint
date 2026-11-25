@@ -39,9 +39,22 @@ static GC: LazyLock<Arc<Gc>> = LazyLock::new(|| {
     Arc::new(Gc::new_init_with(ASYNC_TASK.clone(), || {
         (
             Box::new(|uuid, blob| {
-                let security_level = uuid.to_security_level().unwrap();
+                let security_level = uuid
+                    .to_security_level()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid security level in key blob UUID"))?;
 
-                let km_dev = get_keymint_wrapper(security_level).unwrap();
+                // A disabled or absent security level cannot delete its blobs. Drop the
+                // record instead of panicking the garbage-collector worker, which would
+                // stop all later collection passes.
+                let km_dev = match get_keymint_wrapper(security_level) {
+                    Ok(device) => device,
+                    Err(error) => {
+                        log::info!(
+                            "skipping blob invalidation for unavailable {security_level:?}: {error:#}"
+                        );
+                        return Ok(());
+                    }
+                };
                 let _wp = wd::watch("invalidate key closure: calling IKeyMintDevice::deleteKey");
                 km_dev
                     .delete_Key(blob)
