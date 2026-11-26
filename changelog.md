@@ -1,7 +1,7 @@
-## 1.4.6 (271-0c66114)
+## 1.4.6 (272-1099b9b)
 
-修复开启隐藏 StrongBox 后 keymint 在开机 GC 阶段 panic 的问题。
+WebUI 重构：应用页与底栏对齐 KernelSU。
 
-- 开启掩码时 get_keymint_wrapper(STRONGBOX) 返回 Km(HARDWARE_TYPE_UNAVAILABLE)，GC 失效回调原本直接 unwrap，遇到残留 StrongBox blob 就 panic 并打死 GC 线程。
-- 回调改为容错：安全级别不可用时记录 info 并跳过；to_security_level() 改为返回错误。
-- 日志区分「HAL 缺失」与「配置禁用」。
+- 应用列表/详情页重写为 ApplicationsView：图标、名称、版本、包名与 UID 横排，开关压缩为单行，SOTER 身份保留为独立入口。
+- 底栏改为停靠式：通栏、不透明、覆盖手势区，页面内容不再透到栏下或被栏遮住。
+- 移除「悬浮底栏」「液态玻璃」两个外观选项及相关样式与文案。
