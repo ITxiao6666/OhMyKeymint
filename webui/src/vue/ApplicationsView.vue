@@ -426,7 +426,7 @@ defineExpose({ dismissOverlay, hasOverlay })
         >
           <span class="application-row__icon-frame">
             <img :src="`ksu://icon/${entry.packageName}`" :alt="entry.appName" loading="lazy" decoding="async" @load="showApplicationIcon">
-            <MiuixIcon :icon="All" :size="24" />
+            <MiuixIcon :icon="All" :size="18" />
           </span>
           <span class="application-row__body">
             <span class="application-row__name">{{ entry.appName }}</span>
@@ -488,7 +488,7 @@ defineExpose({ dismissOverlay, hasOverlay })
         <div class="application-profile__identity-row">
           <span class="application-profile__icon-frame">
             <img :src="`ksu://icon/${activeApp.packageName}`" :alt="activeApp.appName" decoding="async" @load="showApplicationIcon">
-            <MiuixIcon :icon="All" :size="32" />
+            <MiuixIcon :icon="All" :size="22" />
           </span>
           <span class="application-profile__identity-text">
             <strong>{{ activeApp.appName }}</strong>
@@ -548,32 +548,32 @@ defineExpose({ dismissOverlay, hasOverlay })
 .applications-menu__divider { height: 1px; margin: 5px 10px; background: var(--m-color-outline-variant); }
 .applications-list { display: grid; gap: 12px; padding: 10px 18px 28px; }
 .applications-list__loading { display: grid; justify-items: center; padding: 14px; }
-.application-row { display: flex; width: 100%; min-height: 84px; align-items: center; gap: 14px; padding: 13px 14px; border: 0; border-radius: 22px; background: var(--m-color-surface-container-low, var(--m-color-surface-container)); color: var(--m-color-on-surface); text-align: start; font: inherit; -webkit-tap-highlight-color: transparent; }
+.application-row { display: flex; width: 100%; min-height: 60px; align-items: center; gap: 12px; padding: 9px 12px; border: 0; border-radius: 16px; background: var(--m-color-surface-container-low, var(--m-color-surface-container)); color: var(--m-color-on-surface); text-align: start; font: inherit; -webkit-tap-highlight-color: transparent; }
 .application-row:active { background: var(--m-color-surface-container-high); }
 .application-row__icon-frame, .application-profile__icon-frame { position: relative; display: grid; flex: none; place-items: center; overflow: hidden; color: var(--m-color-on-tertiary-container); background: var(--m-color-tertiary-container); }
-.application-row__icon-frame { width: 58px; height: 58px; border-radius: 18px; }
+.application-row__icon-frame { width: 40px; height: 40px; border-radius: 12px; }
 .application-row__icon-frame img, .application-profile__icon-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
 .application-row__body { display: grid; flex: 1; min-width: 0; gap: 4px; }
 .application-row__name, .application-row__package { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.application-row__name { font-size: 17px; font-weight: 600; }
-.application-row__package { color: var(--m-color-on-surface-variant-summary); font-size: 13px; }
-.application-row__state { flex: none; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.application-row__name { font-size: 15px; font-weight: 600; }
+.application-row__package { color: var(--m-color-on-surface-variant-summary); font-size: 11.5px; }
+.application-row__state { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
 .application-row__state--enabled { color: var(--m-color-primary); background: color-mix(in srgb, var(--m-color-primary) 12%, transparent); }
 .application-row__state--disabled { color: var(--m-color-on-surface-variant-summary); background: color-mix(in srgb, var(--m-color-on-surface) 10%, transparent); }
 .application-row__arrow { flex: none; color: var(--m-color-on-surface-variant-summary); }
 .applications-empty { display: grid; min-height: 210px; place-content: center; justify-items: center; gap: 12px; color: var(--m-color-on-surface-variant-summary); }
 .applications-state { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 18px; color: var(--m-color-on-surface-variant-summary); }
 .application-profile :deep(.m-top-app-bar) { padding-top: calc(var(--omk-top-inset) / var(--omk-ui-scale)); }
-.application-profile__identity { margin: 14px 18px 20px; padding: 16px 20px; border-radius: 24px; background: var(--m-color-surface-container-low, var(--m-color-surface-container)); }
-.application-profile__identity-row { display: flex; align-items: center; gap: 16px; width: 100%; min-width: 0; }
+.application-profile__identity { margin: 12px 16px 14px; padding: 12px 16px; border-radius: 20px; background: var(--m-color-surface-container-low, var(--m-color-surface-container)); }
+.application-profile__identity-row { display: flex; align-items: center; gap: 14px; width: 100%; min-width: 0; }
 .application-profile__menu { top: calc(100% + 4px); }
-.application-profile__icon-frame { width: 74px; height: 74px; border-radius: 21px; }
+.application-profile__icon-frame { width: 52px; height: 52px; border-radius: 16px; }
 .application-profile__identity-text { display: grid; flex: 1; min-width: 0; gap: 4px; }
-.application-profile__identity-text strong { font-size: 20px; font-weight: 650; }
-.application-profile__identity-text span { overflow: hidden; color: var(--m-color-on-surface-variant-summary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.application-profile__uid { flex: none; padding: 5px 10px; border-radius: 999px; color: var(--m-color-primary); background: color-mix(in srgb, var(--m-color-primary) 12%, transparent); font-size: 12px; font-weight: 700; }
-.application-profile__section { margin: 0 18px 14px; overflow: hidden; border-radius: 22px; background: var(--m-color-surface-container-low, var(--m-color-surface-container)); }
-.application-profile__action { display: flex; width: 100%; min-height: 78px; align-items: center; gap: 14px; padding: 12px 18px; border: 0; background: transparent; color: var(--m-color-on-surface); text-align: start; font: inherit; }
+.application-profile__identity-text strong { font-size: 17px; font-weight: 650; }
+.application-profile__identity-text span { overflow: hidden; color: var(--m-color-on-surface-variant-summary); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.application-profile__uid { flex: none; padding: 3px 9px; border-radius: 999px; color: var(--m-color-primary); background: color-mix(in srgb, var(--m-color-primary) 12%, transparent); font-size: 11px; font-weight: 700; }
+.application-profile__section { margin: 0 16px 10px; overflow: hidden; border-radius: 18px; background: var(--m-color-surface-container-low, var(--m-color-surface-container)); }
+.application-profile__action { display: flex; width: 100%; min-height: 56px; align-items: center; gap: 12px; padding: 8px 14px; border: 0; background: transparent; color: var(--m-color-on-surface); text-align: start; font: inherit; }
 .application-profile__action:disabled { opacity: .5; }
 .application-profile__action-icon { display: grid; width: 30px; place-items: center; color: var(--m-color-on-surface-variant-summary); }
 .application-profile__action-copy { display: grid; flex: 1; gap: 4px; }
