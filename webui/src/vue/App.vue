@@ -666,8 +666,30 @@ function onTool(event: ToolEvent): void {
   }
 }
 
+// The dock is fixed to the viewport bottom; when the soft keyboard opens it
+// would sit right above the keyboard and cover the list, so hide it instead.
+// The dock stays pinned to the bottom of the screen. When the soft keyboard
+// opens the layout viewport shrinks above it, so offset the dock by the
+// keyboard height to keep it at the physical bottom instead of floating above
+// the keyboard.
+const keyboardInset = ref(0)
+let baseViewportHeight = window.innerHeight
+function updateKeyboardInset(): void {
+  const viewport = window.visualViewport
+  if (!viewport) return
+  const covered = baseViewportHeight - (viewport.height + viewport.offsetTop)
+  if (covered > 120) {
+    keyboardInset.value = covered
+  } else {
+    keyboardInset.value = 0
+    baseViewportHeight = window.innerHeight
+  }
+}
+
 onMounted(async () => {
   pageScroller.addEventListener('scroll', onPageScroll, { passive: true })
+  window.visualViewport?.addEventListener('resize', updateKeyboardInset)
+  window.visualViewport?.addEventListener('scroll', updateKeyboardInset)
   updateTitleCollapse()
   navigationElement = document.querySelector<HTMLElement>('.main-navigation')
   navigationElement?.style.setProperty('--omk-liquid-nav-index', String(pageIndex.value))
@@ -702,6 +724,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   pageScroller.removeEventListener('scroll', onPageScroll)
+  window.visualViewport?.removeEventListener('resize', updateKeyboardInset)
+  window.visualViewport?.removeEventListener('scroll', updateKeyboardInset)
   if (titleCollapseFrame !== 0) cancelAnimationFrame(titleCollapseFrame)
   if (navigationFrame !== null) window.cancelAnimationFrame(navigationFrame)
   navigationFrame = null
@@ -900,7 +924,11 @@ watch(rkpImportConfirmOpen, open => {
     </main>
 
     <Teleport to="body">
-      <div v-show="pageIndex !== 2 || !applicationProfileOpen" class="navigation-dock">
+      <div
+        v-show="pageIndex !== 2 || !applicationProfileOpen"
+        class="navigation-dock"
+        :style="keyboardInset > 0 ? { transform: `translateY(${keyboardInset}px)` } : undefined"
+      >
         <MiuixNavigationBar
           :model-value="pageIndex"
           :items="navItems"

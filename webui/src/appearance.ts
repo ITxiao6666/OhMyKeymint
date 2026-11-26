@@ -25,7 +25,7 @@ export const ACCENT_COLORS = [
 ] as const
 export type AccentColor = typeof ACCENT_COLORS[number]
 
-export const APPEARANCE_OPTIONS = ['monet', 'barBlur'] as const
+export const APPEARANCE_OPTIONS = ['monet'] as const
 export type AppearanceOption = typeof APPEARANCE_OPTIONS[number]
 
 // Keep the same palette families and color specification names exposed by
@@ -53,7 +53,6 @@ const DEFAULT_PALETTE_STYLE: PaletteStyle = 'TonalSpot'
 const DEFAULT_COLOR_SPEC: ColorSpec = 'SPEC_2025'
 const DEFAULT_OPTIONS: Readonly<Record<AppearanceOption, boolean>> = {
   monet: true,
-  barBlur: false,
 }
 const THEME_QUERY = 'theme'
 const ACCENT_QUERY = 'accent'
@@ -448,7 +447,7 @@ export class AppearanceController {
     root.dataset.themeResolved = resolved
     root.dataset.themeAccent = this.#accent
     root.dataset.monet = String(this.#options.monet)
-    root.dataset.barBlur = String(this.#options.barBlur)
+    root.dataset.barBlur = 'false'
     // The floating and liquid-glass navigation variants were removed: the dock
     // always renders as a docked bar. Keep the attributes for the stylesheet.
     root.dataset.floatingBottomBar = 'false'

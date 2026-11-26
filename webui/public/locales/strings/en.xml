@@ -162,8 +162,11 @@
     <string name="app_sort_descending">Descending</string>
     <string name="app_show_system_apps">Show system apps</string>
     <string name="app_profile_title">App Profile</string>
-    <string name="app_omk_enabled">OMK</string>
+    <string name="app_omk_enabled">Managed</string>
     <string name="app_omk_disabled">Not added</string>
+<string name="app_pull_pull">Pull to refresh</string>
+<string name="app_pull_release">Release to refresh</string>
+<string name="app_pull_refreshing">Refreshing…</string>
     <string name="app_omk_scope_title">Add to OMK</string>
     <string name="app_omk_scope_desc">Route supported Keystore requests from this app through Oh My Keymint.</string>
     <string name="app_action_start">Start</string>
@@ -194,8 +197,8 @@
 <string name="settings_general">General</string>
 <string name="settings_maintenance">Maintenance</string>
 <string name="settings_system_features">System features</string>
-<string name="settings_strongbox_mask">Hide StrongBox capability</string>
-<string name="settings_strongbox_mask_desc">Hide StrongBox from system feature checks for all apps. Requires Zygisk Next. OMK-managed StrongBox keys are unavailable while this is enabled. Reboot the device to apply changes.</string>
+<string name="settings_strongbox_mask">Hide StrongBox support</string>
+<string name="settings_strongbox_mask_desc">Hides the device StrongBox capability. Requires Zygisk Next; the key-attestation security module reporting unavailable is expected.</string>
 <string name="settings_strongbox_mask_saved">Saved. Reboot to apply the StrongBox feature mask.</string>
 <string name="settings_strongbox_mask_reboot_action">Reboot device</string>
 <string name="settings_export_logs">Export logs</string>
@@ -247,8 +250,6 @@
     <string name="settings_effects">Visual effects</string>
     <string name="settings_monet">Enable Monet colors</string>
     <string name="settings_monet_desc">Generate dynamic colors from the system wallpaper</string>
-    <string name="settings_bar_blur">Top and bottom bar blur</string>
-    <string name="settings_bar_blur_desc">Blur the background behind the app and navigation bars</string>
     <string name="tools_diagnostics_desc">Check OMK runtime services</string>
     <string name="tools_diagnostics_refresh">Refresh</string>
     <string name="app_targets_pull_refresh">Pull down to refresh apps</string>

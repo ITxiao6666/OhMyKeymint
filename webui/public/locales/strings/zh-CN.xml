@@ -162,8 +162,11 @@
     <string name="app_sort_descending">倒序</string>
     <string name="app_show_system_apps">显示系统应用</string>
     <string name="app_profile_title">应用详情</string>
-    <string name="app_omk_enabled">OMK</string>
+    <string name="app_omk_enabled">已接管</string>
     <string name="app_omk_disabled">未接管</string>
+<string name="app_pull_pull">下拉刷新</string>
+<string name="app_pull_release">松开刷新</string>
+<string name="app_pull_refreshing">正在刷新…</string>
     <string name="app_omk_scope_title">添加到 OMK</string>
     <string name="app_omk_scope_desc">将该应用支持的 Keystore 请求路由到 Oh My Keymint。</string>
     <string name="app_action_start">启动</string>
@@ -194,8 +197,8 @@
 <string name="settings_general">通用</string>
 <string name="settings_maintenance">维护</string>
 <string name="settings_system_features">系统功能</string>
-<string name="settings_strongbox_mask">隐藏 StrongBox 能力</string>
-<string name="settings_strongbox_mask_desc">对所有应用隐藏系统公布的 StrongBox 功能，需要启用 Zygisk Next。启用期间，OMK 管理的 StrongBox 密钥不可用。更改后需要重启设备生效。</string>
+<string name="settings_strongbox_mask">隐藏 StrongBox 支持</string>
+<string name="settings_strongbox_mask_desc">隐藏设备 StrongBox 功能支持，需要启用 Zygisk Next 使用，启用后密钥认证安全模块显示不可用是正常情况。</string>
 <string name="settings_strongbox_mask_saved">已保存。重启设备后 StrongBox 功能掩码生效。</string>
 <string name="settings_strongbox_mask_reboot_action">重启设备</string>
 <string name="settings_export_logs">导出日志</string>
@@ -247,8 +250,6 @@
     <string name="settings_effects">视觉效果</string>
     <string name="settings_monet">启用 Monet 颜色</string>
     <string name="settings_monet_desc">使用系统壁纸生成动态配色</string>
-    <string name="settings_bar_blur">顶栏与底栏模糊</string>
-    <string name="settings_bar_blur_desc">模糊应用栏和导航栏后的背景</string>
     <string name="tools_diagnostics_desc">检查 OMK 运行服务</string>
     <string name="tools_diagnostics_refresh">刷新</string>
     <string name="app_targets_pull_refresh">下拉刷新</string>

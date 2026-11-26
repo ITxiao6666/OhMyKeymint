@@ -207,7 +207,7 @@ defineExpose({ dismissOverlay: () => { languageSheetOpen.value = false } })
 function readOptions(): Record<AppearanceOption, boolean> {
   return {
     monet: appearance.getOption('monet'),
-    barBlur: appearance.getOption('barBlur'),
+
   }
 }
 
@@ -451,28 +451,6 @@ onBeforeUnmount(() => {
         </MiuixCard>
       </section>
 
-      <section class="settings-section" aria-labelledby="effects-title">
-        <MiuixSmallTitle
-          id="effects-title"
-          :text="translate('settings_effects', 'Visual effects')"
-        />
-        <MiuixCard class="settings-card" press-feedback="none">
-          <MiuixSwitchPreference
-            :model-value="options.barBlur"
-            :title="translate('settings_bar_blur', 'Top and bottom bar blur')"
-            :summary="translate(
-              'settings_bar_blur_desc',
-              'Blur the background behind the app and navigation bars',
-            )"
-            @update:model-value="setOption('barBlur', $event)"
-          >
-            <template #start>
-              <span class="settings-preference-icon"><MiuixIcon :icon="Layers" :size="22" /></span>
-            </template>
-          </MiuixSwitchPreference>
-
-        </MiuixCard>
-      </section>
 
 
       <section class="settings-section" aria-labelledby="system-features-title">
@@ -484,10 +462,10 @@ onBeforeUnmount(() => {
           <MiuixSwitchPreference
             :model-value="strongboxFeatureMask ?? false"
             :disabled="strongboxFeatureMask === null || strongboxFeatureMaskBusy"
-            :title="translate('settings_strongbox_mask', 'Hide StrongBox capability')"
+            :title="translate('settings_strongbox_mask', 'Hide StrongBox support')"
             :summary="translate(
               'settings_strongbox_mask_desc',
-              'Hide StrongBox from the system feature list for all apps. Requires Zygisk Next. OMK StrongBox keys are unavailable while enabled. Reboot after changing.',
+              'Hides the device StrongBox capability. Requires Zygisk Next; the key-attestation security module reporting unavailable is expected.',
             )"
             @update:model-value="setStrongboxFeatureMask"
           >

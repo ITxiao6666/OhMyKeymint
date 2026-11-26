@@ -610,10 +610,21 @@ export class Cli {
     if (!isValidPackageName(packageName) || !Number.isSafeInteger(userId) || userId < 0) {
       throw new Error('Invalid application launch target')
     }
-    const result = await exec(
-      `/system/bin/am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p ${shellQuote(packageName)}`,
+    // `am start -p <package>` does not resolve a launcher activity on every
+    // Android release, so resolve the component first and start it explicitly.
+    const resolved = await exec(
+      `/system/bin/cmd package resolve-activity --brief --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`,
     )
-    if (result.errno !== 0 || /error:|exception|no activity found/i.test(`${result.stdout}\n${result.stderr}`)) {
+    const component = resolved.stdout
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.includes('/'))
+      .pop()
+    if (resolved.errno !== 0 || !component || /no activity found/i.test(`${resolved.stdout}${resolved.stderr}`)) {
+      throw new Error(`No launcher activity found for ${packageName}`)
+    }
+    const result = await exec(`/system/bin/am start --user ${userId} -n ${shellQuote(component)}`)
+    if (result.errno !== 0 || /error:|exception/i.test(`${result.stdout}\n${result.stderr}`)) {
       throw new Error(result.stderr.trim() || result.stdout.trim() || 'Unable to launch application')
     }
   }

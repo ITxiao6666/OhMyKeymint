@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   MiuixButton,
   MiuixCard,
@@ -16,13 +16,14 @@ import {
   Back,
   ChevronForward,
   Clear,
+  Layers,
   More,
   Play,
-  Refresh,
   Reset,
   SelectAll,
   Sort,
   Tune,
+  Update,
 } from 'miuix-vue/icons'
 import type { AppEntry, AppList } from '../app_list/app_list'
 import type { Cli } from '../cli'
@@ -66,6 +67,99 @@ const descending = ref(false)
 const menuOpen = ref(false)
 const sortOpen = ref(false)
 const profileMenuOpen = ref(false)
+
+// Pull-to-refresh mirrors KernelSU: a capsule stretches as the list is dragged
+// from the top and releases into refresh(). The pull is written straight to the
+// DOM so a long app list is never re-rendered per touch frame.
+const PULL_THRESHOLD = 96
+const PULL_MAX = 150
+const PULL_RESTING_HEIGHT = 132
+const PULL_CAPSULE_MAX = 96
+const pullActive = ref(false)
+const pullPastThreshold = ref(false)
+const pullIndicator = ref<HTMLElement | null>(null)
+const pullCapsule = ref<HTMLElement | null>(null)
+let pullStartY = 0
+let pullDistance = 0
+
+const pullLabel = computed(() => {
+  if (props.refreshing) return translate('app_pull_refreshing', 'Refreshing…')
+  if (pullPastThreshold.value) return translate('app_pull_release', 'Release to refresh')
+  return translate('app_pull_pull', 'Pull to refresh')
+})
+
+function pullScroller(): HTMLElement | null {
+  return document.getElementById('app')
+}
+
+function applyPullHeight(height: number): void {
+  if (pullIndicator.value) pullIndicator.value.style.height = `${height}px`
+  // Keep the label inside the stretched area: reserve its height and padding.
+  const capsuleHeight = height <= 0 ? 0 : Math.max(8, Math.min(PULL_CAPSULE_MAX, height - 34))
+  if (pullCapsule.value) pullCapsule.value.style.height = `${capsuleHeight}px`
+}
+
+function syncPullIndicator(): void {
+  applyPullHeight(props.refreshing ? PULL_RESTING_HEIGHT : 0)
+}
+
+function onPullStart(event: TouchEvent): void {
+  if (!props.active || selectedApp.value || props.refreshing || props.loading) return
+  const scroller = pullScroller()
+  if (scroller && scroller.scrollTop > 0) return
+  pullStartY = event.touches[0]?.clientY ?? 0
+  pullActive.value = true
+  pullDistance = 0
+}
+
+function onPullMove(event: TouchEvent): void {
+  if (!pullActive.value) return
+  const scroller = pullScroller()
+  if (scroller && scroller.scrollTop > 0) {
+    pullActive.value = false
+    pullDistance = 0
+    applyPullHeight(0)
+    pullPastThreshold.value = false
+    return
+  }
+  const delta = (event.touches[0]?.clientY ?? 0) - pullStartY
+  if (delta <= 0) {
+    pullDistance = 0
+    applyPullHeight(0)
+    pullPastThreshold.value = false
+    return
+  }
+  pullDistance = Math.min(PULL_MAX, delta * 0.5)
+  applyPullHeight(pullDistance)
+  const past = pullDistance >= PULL_THRESHOLD
+  if (past !== pullPastThreshold.value) pullPastThreshold.value = past
+}
+
+function onPullEnd(): void {
+  if (!pullActive.value) return
+  const triggered = pullDistance >= PULL_THRESHOLD
+  pullActive.value = false
+  pullDistance = 0
+  pullPastThreshold.value = false
+  if (triggered) {
+    applyPullHeight(PULL_RESTING_HEIGHT)
+    props.refresh()
+  } else {
+    applyPullHeight(0)
+  }
+}
+
+watch(() => props.refreshing, syncPullIndicator)
+
+// The page scroll lives on the app shell, so the gesture is observed at the
+// window level and only acts while this view is the active page. The move
+// listener stays passive so native scrolling keeps its momentum.
+onMounted(() => {
+  window.addEventListener('touchstart', onPullStart, { passive: true })
+  window.addEventListener('touchmove', onPullMove, { passive: true })
+  window.addEventListener('touchend', onPullEnd)
+  window.addEventListener('touchcancel', onPullEnd)
+})
 const appActionBusy = ref(false)
 const selectedApp = ref<AppEntry | null>(null)
 const renderedCount = ref(32)
@@ -95,7 +189,15 @@ const entries = computed(() => {
     .filter(entry => !query
       || entry.appName.toLocaleLowerCase().includes(query)
       || entry.packageName.toLocaleLowerCase().includes(query))
+    .map(entry => ({
+      ...entry,
+      selected: selected.has(entry.packageName) || selected.has(entry.targetKey),
+    }))
+    // Apps that are already routed through OMK come first so the configured
+    // set is visible without scrolling; the chosen field only orders within
+    // each group.
     .sort((left, right) => {
+      if (left.selected !== right.selected) return left.selected ? -1 : 1
       const compared = sortField.value === 'name'
         ? left.appName.localeCompare(right.appName, i18n.lang)
           || left.packageName.localeCompare(right.packageName)
@@ -105,10 +207,7 @@ const entries = computed(() => {
       return descending.value ? -ordered : ordered
     })
 
-  return result.map(entry => ({
-    ...entry,
-    selected: selected.has(entry.packageName) || selected.has(entry.targetKey),
-  }))
+  return result
 })
 const renderedEntries = computed(() => entries.value.slice(0, renderedCount.value))
 const initialLoading = computed(() => props.loading && props.appList.getEntries().length === 0)
@@ -168,6 +267,10 @@ watch([entries, () => props.active], ([items, active]) => {
   appendBatch()
 }, { immediate: true })
 onBeforeUnmount(() => {
+  window.removeEventListener('touchstart', onPullStart)
+  window.removeEventListener('touchmove', onPullMove)
+  window.removeEventListener('touchend', onPullEnd)
+  window.removeEventListener('touchcancel', onPullEnd)
   window.clearTimeout(searchTimer)
   unsubscribe()
   renderGeneration++
@@ -330,7 +433,12 @@ defineExpose({ dismissOverlay, hasOverlay })
 </script>
 
 <template>
-  <section class="applications-view" :class="{ 'applications-view--profile': selectedApp !== null }" :aria-busy="loading">
+  <section
+    class="applications-view"
+    :class="{ 'applications-view--profile': selectedApp !== null }"
+    :aria-busy="loading"
+  >
+
     <div v-if="menuOpen || sortOpen || profileMenuOpen" class="applications-menu-scrim" @click="menuOpen = false; sortOpen = false; profileMenuOpen = false" />
 
     <div v-if="!selectedApp" class="applications-page">
@@ -372,14 +480,16 @@ defineExpose({ dismissOverlay, hasOverlay })
           <Transition name="applications-menu">
             <MiuixCard v-if="menuOpen" class="applications-menu" role="menu">
               <button class="applications-menu__item" type="button" role="menuitemcheckbox" :aria-checked="showSystemApps" @click="showSystemApps = !showSystemApps">
-                {{ translate('app_show_system_apps', 'Show system apps') }}
+                <MiuixIcon :icon="Layers" :size="20" />
+                <span>{{ translate('app_show_system_apps', 'Show system apps') }}</span>
                 <span v-if="showSystemApps" class="applications-menu__check">✓</span>
               </button>
-              <div class="applications-menu__divider" />
               <button class="applications-menu__item" type="button" role="menuitemcheckbox" :aria-checked="autoAddEnabled" :disabled="loading || saving || autoAddLoading || autoAddBusy" @click="setAutoAdd(!autoAddEnabled)">
+                <MiuixIcon :icon="Update" :size="20" />
                 <span>{{ translate('app_targets_auto_title', 'Automatically add new apps') }}</span>
                 <span class="applications-menu__check" :class="{ 'applications-menu__check--off': !autoAddEnabled }">{{ autoAddLoading ? '…' : autoAddEnabled ? '✓' : '○' }}</span>
               </button>
+              <div class="applications-menu__divider" />
               <button class="applications-menu__item" type="button" role="menuitem" :disabled="loading || saving" @click="selectRecommended">
                 <MiuixIcon :icon="SelectAll" :size="20" />
                 {{ translate('menu_select_all', 'Select recommended apps') }}
@@ -391,10 +501,6 @@ defineExpose({ dismissOverlay, hasOverlay })
               <button class="applications-menu__item" type="button" role="menuitem" :disabled="loading || saving || !applyEnabled" @click="openBulkIdentity">
                 <MiuixIcon :icon="Tune" :size="20" />
                 {{ translate('soter_bulk_title', 'Assign local identity to selected apps') }}
-              </button>
-              <button class="applications-menu__item" type="button" role="menuitem" :disabled="loading || refreshing || saving" @click="menuOpen = false; refresh()">
-                <MiuixIcon :icon="Refresh" :size="20" />
-                {{ translate('menu_refresh', 'Refresh') }}
               </button>
             </MiuixCard>
           </Transition>
@@ -417,6 +523,17 @@ defineExpose({ dismissOverlay, hasOverlay })
         <MiuixProgressIndicator type="circular" :size="32" />
       </div>
       <div v-else-if="entries.length" class="applications-list">
+        <div
+          ref="pullIndicator"
+          class="applications-pull"
+          :class="{ 'applications-pull--dragging': pullActive, 'applications-pull--refreshing': refreshing }"
+          aria-hidden="true"
+        >
+          <div class="applications-pull__inner">
+            <span ref="pullCapsule" class="applications-pull__capsule" />
+            <span class="applications-pull__label">{{ pullLabel }}</span>
+          </div>
+        </div>
         <button
           v-for="entry in renderedEntries"
           :key="entry.targetKey"
@@ -438,7 +555,7 @@ defineExpose({ dismissOverlay, hasOverlay })
             </span>
           </span>
           <span class="application-row__state" :class="entry.selected ? 'application-row__state--enabled' : 'application-row__state--disabled'">
-            {{ entry.selected ? translate('app_omk_enabled', 'OMK') : translate('app_omk_disabled', 'Not added') }}
+            {{ entry.selected ? translate('app_omk_enabled', 'Managed') : translate('app_omk_disabled', 'Not added') }}
           </span>
           <MiuixIcon class="application-row__arrow" :icon="ChevronForward" :size="20" />
         </button>
@@ -538,7 +655,9 @@ defineExpose({ dismissOverlay, hasOverlay })
 .applications-header { position: sticky; z-index: 20; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 70px; padding: calc(var(--omk-top-inset) / var(--omk-ui-scale)) 20px 0; background: var(--m-color-surface); }
 .applications-header__title { min-width: 0; color: var(--m-color-on-background); font-size: clamp(27px, 7vw, 34px); font-weight: 650; letter-spacing: -0.04em; }
 .applications-header__actions { position: relative; display: flex; flex: none; align-items: center; }
-.applications-menu-scrim { position: fixed; z-index: 40; inset: 0; }
+/* Keep the scrim below the sticky header: the header creates its own stacking
+ * context, so a higher scrim would swallow taps meant for the open menu. */
+.applications-menu-scrim { position: fixed; z-index: 10; inset: 0; }
 .applications-menu { position: absolute; z-index: 50; top: calc(100% + 8px); inset-inline-end: 0; width: min(300px, calc(100vw - 28px)); min-width: min(300px, calc(100vw - 28px)); max-height: min(70dvh, 620px); overflow: auto; padding: 6px; border: 1px solid color-mix(in srgb, var(--m-color-on-surface) 8%, transparent); border-radius: 20px; background: var(--m-color-surface-container); box-shadow: 0 14px 36px rgb(0 0 0 / 16%); }
 .applications-menu__item { display: flex; width: 100%; min-height: 46px; align-items: center; gap: 12px; padding: 8px 12px; border: 0; border-radius: 13px; background: transparent; color: var(--m-color-on-surface); text-align: start; font: inherit; }
 .applications-menu__item:active { background: color-mix(in srgb, var(--m-color-on-surface) 8%, transparent); }
@@ -546,11 +665,19 @@ defineExpose({ dismissOverlay, hasOverlay })
 .applications-menu__check { margin-inline-start: auto; color: var(--m-color-primary); font-weight: 700; }
 .applications-menu__check--off { color: var(--m-color-on-surface-variant-summary); }
 .applications-menu__divider { height: 1px; margin: 5px 10px; background: var(--m-color-outline-variant); }
+.applications-pull { display: flex; height: 0; align-items: center; justify-content: center; overflow: hidden; transition: height 160ms ease; contain: layout paint; }
+.applications-pull__inner { display: grid; justify-items: center; gap: 8px; padding-top: 8px; }
+.applications-pull__capsule { width: 24px; border: 2px solid var(--m-color-outline-variant, var(--m-color-on-surface-variant-summary)); border-radius: 12px; opacity: .75; transition: background-color 160ms ease; }
+.applications-pull--dragging { transition: none; }
+.applications-pull--refreshing .applications-pull__capsule { animation: applications-pull-pulse 1.1s ease-in-out infinite; }
+@keyframes applications-pull-pulse { 0%, 100% { transform: scaleY(1); opacity: .75; } 50% { transform: scaleY(.72); opacity: .45; } }
+:root[data-theme-resolved='dark'] .applications-pull__capsule, :root.m-theme-dark .applications-pull__capsule { border-color: var(--m-color-outline); }
+.applications-pull__label { color: var(--m-color-on-surface-variant-summary); font-size: 12px; }
 .applications-list { display: grid; gap: 12px; padding: 10px 18px 28px; }
 .applications-list__loading { display: grid; justify-items: center; padding: 14px; }
 .application-row { display: flex; width: 100%; min-height: 60px; align-items: center; gap: 12px; padding: 9px 12px; border: 0; border-radius: 16px; background: var(--m-color-surface-container-low, var(--m-color-surface-container)); color: var(--m-color-on-surface); text-align: start; font: inherit; -webkit-tap-highlight-color: transparent; }
 .application-row:active { background: var(--m-color-surface-container-high); }
-.application-row__icon-frame, .application-profile__icon-frame { position: relative; display: grid; flex: none; place-items: center; overflow: hidden; color: var(--m-color-on-tertiary-container); background: var(--m-color-tertiary-container); }
+.application-row__icon-frame, .application-profile__icon-frame { position: relative; display: grid; flex: none; place-items: center; overflow: hidden; color: var(--m-color-on-surface-variant-summary); background: transparent; }
 .application-row__icon-frame { width: 40px; height: 40px; border-radius: 12px; }
 .application-row__icon-frame img, .application-profile__icon-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
 .application-row__body { display: grid; flex: 1; min-width: 0; gap: 4px; }
