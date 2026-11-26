@@ -26,7 +26,8 @@ function harness(writer = async () => {}) {
   const snapshot = { value: null }
   const config = { isWritable: true }
   const appList = {
-    setTargetSelected(entry, enabled) { enabled ? selected.add(entry.packageName) : selected.delete(entry.packageName) },
+    setSelected(packageName, enabled) { enabled ? selected.add(packageName) : selected.delete(packageName) },
+    getSelectedIdentityTargets() { return [...selected] },
     async selectRecommended() { selected.add('com.example.recommended') },
     deselectAll() { selected.clear() },
     async save() { writes++; await writer([...selected]) },
@@ -39,17 +40,19 @@ function harness(writer = async () => {}) {
     i18n: { t: value => value }, console: { error() {} },
   }, 'let targetsSavePromise = null; let targetsSaveRequested = false;')
   const globals = {
-    props: { appList, saveSelection, loading: false, applyEnabled: true },
-    menuOpen: { value: false }, selectingRecommended: { value: false },
-    systemSheetOpen: { value: true }, console: { error() {} },
+    props: { appList, saveSelection, loading: false, saving: false, applyEnabled: true },
+    activeApp: { value: null },
+    menuOpen: { value: false }, console: { error() {} },
   }
   return {
     ...globals, config, selected, messages, snapshot, targetsLoading, targetsSaving, targetsSaveError,
     saveSelection,
-    toggle: handler('TargetsView.vue', 'setSelected', globals),
-    recommended: handler('TargetsView.vue', 'selectRecommended', globals),
-    deselect: handler('TargetsView.vue', 'deselectAll', globals),
-    close: handler('TargetsView.vue', 'closeSystemApps', globals),
+    toggle(entry, enabled) {
+      globals.activeApp.value = entry
+      return handler('ApplicationsView.vue', 'setApplicationEnabled', globals)(enabled)
+    },
+    recommended: handler('ApplicationsView.vue', 'selectRecommended', globals),
+    deselect: handler('ApplicationsView.vue', 'deselectAll', globals),
     get writes() { return writes },
   }
 }
@@ -66,7 +69,7 @@ test('ordinary and system app toggles automatically request persistence', async 
   assert.deepEqual([...state.snapshot.value.selected], ['com.example.app'])
 })
 
-test('rapid toggles are serialized, retain latest intent and finish after sheet closes', async () => {
+test('rapid toggles are serialized, retain latest intent while the app page stays open', async () => {
   const waiting = []
   const saved = []
   let active = 0
@@ -79,8 +82,6 @@ test('rapid toggles are serialized, retain latest intent and finish after sheet 
   await new Promise(resolve => setImmediate(resolve))
   state.toggle({ packageName: 'com.example.second' }, true)
   state.toggle({ packageName: 'com.example.first' }, false)
-  state.close()
-  assert.equal(state.systemSheetOpen.value, false)
   assert.equal(state.targetsSaving.value, true)
   waiting.shift()()
   await new Promise(resolve => setImmediate(resolve))
@@ -111,8 +112,8 @@ test('recommended selection and deselect all automatically save', async () => {
   await state.recommended()
   assert.equal(state.writes, 1)
   assert.deepEqual([...state.snapshot.value.selected], ['com.example.recommended'])
-  state.deselect()
-  await state.saveSelection()
+  await state.deselect()
+  assert.equal(state.writes, 2)
   assert.deepEqual([...state.snapshot.value.selected], [])
 })
 

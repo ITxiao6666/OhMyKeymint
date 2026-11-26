@@ -11,6 +11,7 @@ const RECOMMENDED_SYSTEM_APPS = [
 ] as const
 
 const PACKAGE_INFO_BATCH_SIZE = 32
+const ANDROID_USER_ID_OFFSET = 100_000
 
 // Exact identifiers only: a name containing "root" is not evidence that an app
 // is a root tool. Permission/category discovery below covers additional apps.
@@ -146,6 +147,9 @@ export interface AppEntry extends PackageUserTarget {
   currentUser: boolean
   appName: string
   isSystem: boolean
+  versionName: string | null
+  versionCode: number | null
+  uid: number | null
 }
 
 export interface SelectableAppEntry extends AppEntry {
@@ -395,6 +399,13 @@ export class AppList {
           appName: typeof info?.appLabel === 'string' && info.appLabel
             ? info.appLabel
             : packageName,
+          versionName: typeof info?.versionName === 'string' && info.versionName
+            ? info.versionName
+            : null,
+          versionCode: typeof info?.versionCode === 'number' ? info.versionCode : null,
+          uid: typeof info?.uid === 'number'
+            ? user.userId * ANDROID_USER_ID_OFFSET + (info.uid % ANDROID_USER_ID_OFFSET)
+            : null,
           // The bridge cannot address a particular Android user. Labels can
           // be reused, but installed state and classification come from the
           // explicit per-user PackageManager query only.
@@ -446,6 +457,9 @@ export class AppList {
       const previous = previousEntries.get(entry.targetKey)
       return previous?.appName !== entry.appName || previous.isSystem !== entry.isSystem
         || previous.currentUser !== entry.currentUser
+        || previous.versionName !== entry.versionName
+        || previous.versionCode !== entry.versionCode
+        || previous.uid !== entry.uid
     })
     if (!changed) return false
 
@@ -487,13 +501,13 @@ export class AppList {
 
   #getDevEntries(): AppEntry[] {
     return [
-      { packageName: 'io.github.vvb2060.keyattestation', userId: 0, currentUser: true, targetKey: 'io.github.vvb2060.keyattestation@0', appName: 'Key Attestation', isSystem: false },
-      { packageName: 'com.example.app', userId: 0, currentUser: true, targetKey: 'com.example.app@0', appName: 'Example App', isSystem: false },
-      { packageName: 'com.example.banking', userId: 0, currentUser: true, targetKey: 'com.example.banking@0', appName: 'Banking App', isSystem: false },
-      { packageName: 'com.google.android.gms', userId: 0, currentUser: true, targetKey: 'com.google.android.gms@0', appName: 'Google Play services', isSystem: true },
-      { packageName: 'com.android.vending', userId: 0, currentUser: true, targetKey: 'com.android.vending@0', appName: 'Google Play Store', isSystem: true },
-      { packageName: 'com.google.android.gsf', userId: 0, currentUser: true, targetKey: 'com.google.android.gsf@0', appName: 'Google Services Framework', isSystem: true },
-      { packageName: 'com.example.app', userId: 10, currentUser: false, targetKey: 'com.example.app@10', appName: 'Example App', isSystem: false },
+      { packageName: 'io.github.vvb2060.keyattestation', userId: 0, currentUser: true, targetKey: 'io.github.vvb2060.keyattestation@0', appName: 'Key Attestation', isSystem: false, versionName: '1.0', versionCode: 1, uid: 10123 },
+      { packageName: 'com.example.app', userId: 0, currentUser: true, targetKey: 'com.example.app@0', appName: 'Example App', isSystem: false, versionName: '1.0.0', versionCode: 1, uid: 10124 },
+      { packageName: 'com.example.banking', userId: 0, currentUser: true, targetKey: 'com.example.banking@0', appName: 'Banking App', isSystem: false, versionName: '2.4.0', versionCode: 24, uid: 10125 },
+      { packageName: 'com.google.android.gms', userId: 0, currentUser: true, targetKey: 'com.google.android.gms@0', appName: 'Google Play services', isSystem: true, versionName: null, versionCode: null, uid: 10016 },
+      { packageName: 'com.android.vending', userId: 0, currentUser: true, targetKey: 'com.android.vending@0', appName: 'Google Play Store', isSystem: true, versionName: null, versionCode: null, uid: 10032 },
+      { packageName: 'com.google.android.gsf', userId: 0, currentUser: true, targetKey: 'com.google.android.gsf@0', appName: 'Google Services Framework', isSystem: true, versionName: null, versionCode: null, uid: 10018 },
+      { packageName: 'com.example.app', userId: 10, currentUser: false, targetKey: 'com.example.app@10', appName: 'Example App', isSystem: false, versionName: '1.0.0', versionCode: 1, uid: 1010124 },
     ]
   }
 }

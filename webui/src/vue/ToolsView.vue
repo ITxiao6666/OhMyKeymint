@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   MiuixArrowPreference,
   MiuixButton,
@@ -8,18 +8,15 @@ import {
   MiuixIconButton,
   MiuixProgressIndicator,
   MiuixSmallTitle,
-  MiuixSwitchPreference,
   MiuixTopAppBar,
-  showSnackbar,
 } from 'miuix-vue'
-import { AddCircle, BankCards, Close, Edit, Lock, Replace, Reset, Tune, Update } from 'miuix-vue/icons'
+import { BankCards, Close, Edit, Lock, Replace, Reset, Update } from 'miuix-vue/icons'
 import type { Cli } from '../cli'
 import MiuixBottomSheet from './StableBottomSheet.vue'
 import { i18n } from '../i18n'
 import { isSecurityPatchDate } from '../security_patch'
 
 export type ToolEvent =
-  | 'openAppTargets'
   | 'installKeybox'
   | 'syncSecurityPatch'
   | 'restoreSecurityPatch'
@@ -32,7 +29,7 @@ export type ToolEvent =
 
 type BusyPatch = 'sync' | 'restore' | null
 type SheetId = 'rkp' | 'patch'
-type IconValue = typeof AddCircle | null
+type IconValue = typeof BankCards | null
 
 interface ToolAction {
   event: ToolEvent
@@ -58,63 +55,7 @@ const props = defineProps<{
   securityPatch: string | null
 }>()
 
-const strongboxFeatureMask = ref<boolean | null>(null)
-const strongboxFeatureMaskBusy = ref(false)
-
-onMounted(() => {
-  void loadStrongboxFeatureMask()
-})
-
-async function loadStrongboxFeatureMask(): Promise<void> {
-  try {
-    strongboxFeatureMask.value = await props.cli.getStrongboxFeatureMask()
-  } catch (error) {
-    void showSnackbar({
-      message: error instanceof Error ? error.message : String(error),
-      duration: 6000,
-    })
-  }
-}
-
-async function softReboot(): Promise<void> {
-  try {
-    await props.cli.softReboot()
-  } catch (error) {
-    void showSnackbar({
-      message: error instanceof Error ? error.message : String(error),
-      duration: 6000,
-    })
-  }
-}
-
-async function setStrongboxFeatureMask(enabled: boolean): Promise<void> {
-  if (strongboxFeatureMaskBusy.value || strongboxFeatureMask.value === null) return
-  strongboxFeatureMaskBusy.value = true
-  try {
-    await props.cli.setStrongboxFeatureMask(enabled)
-    strongboxFeatureMask.value = enabled
-    void showSnackbar({
-      message: tr(
-        'tools_strongbox_mask_saved',
-        'Applied. The system feature list updates after a soft reboot.',
-      ),
-      actionLabel: tr('tools_strongbox_mask_reboot_action', 'Soft reboot'),
-      duration: 'long',
-    }).then((result) => {
-      if (result === 'action') void softReboot()
-    })
-  } catch (error) {
-    void showSnackbar({
-      message: error instanceof Error ? error.message : String(error),
-      duration: 6000,
-    })
-  } finally {
-    strongboxFeatureMaskBusy.value = false
-  }
-}
-
 const emit = defineEmits<{
-  openAppTargets: []
   installKeybox: []
   syncSecurityPatch: []
   restoreSecurityPatch: []
@@ -130,7 +71,6 @@ const emit = defineEmits<{
 
 function runTool(event: ToolEvent): void {
   switch (event) {
-    case 'openAppTargets': emit('openAppTargets'); break
     case 'installKeybox': emit('installKeybox'); break
     case 'syncSecurityPatch': emit('syncSecurityPatch'); break
     case 'restoreSecurityPatch': emit('restoreSecurityPatch'); break
@@ -207,16 +147,6 @@ const sheets: Record<SheetId, { title: string, actions: ToolAction[] }> = {
 }
 
 const groups = computed<{ title: string, rows: ToolRow[] }[]>(() => [
-  {
-    title: tr('tools_app_management', 'App management'),
-    rows: [{
-      key: 'targets',
-      event: 'openAppTargets',
-      icon: AddCircle,
-      title: tr('app_targets_title', 'Add package names'),
-      summary: tr('tools_app_targets_desc', 'Choose which installed apps are routed through Oh My Keymint.'),
-    }],
-  },
   {
     title: tr('tools_keybox_attestation', 'Keybox & attestation'),
     rows: [
@@ -364,29 +294,6 @@ function onSheetAction(action: ToolAction): void {
             </span>
           </template>
         </MiuixArrowPreference>
-      </MiuixCard>
-    </section>
-
-    <section class="preference-section" aria-labelledby="tools-system-features-title">
-      <MiuixSmallTitle
-        id="tools-system-features-title"
-        :text="tr('tools_system_features', 'System features')"
-      />
-      <MiuixCard class="preference-card" press-feedback="none">
-        <MiuixSwitchPreference
-          :model-value="strongboxFeatureMask ?? false"
-          :disabled="strongboxFeatureMask === null || strongboxFeatureMaskBusy"
-          :title="tr('tools_strongbox_mask', 'Hide StrongBox capability')"
-          :summary="tr(
-            'tools_strongbox_mask_desc',
-            'Hides the system StrongBox feature. Requires Zygisk Next. Applies on save; restart running apps.',
-          )"
-          @update:model-value="setStrongboxFeatureMask"
-        >
-          <template #start>
-            <span class="preference-icon"><MiuixIcon :icon="Tune" :size="23" /></span>
-          </template>
-        </MiuixSwitchPreference>
       </MiuixCard>
     </section>
 

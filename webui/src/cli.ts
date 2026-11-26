@@ -1,5 +1,5 @@
 import { exec, spawn } from 'kernelsu-alt'
-import { normalizeScoopTargets, parseScoopTarget } from './package_name'
+import { isValidPackageName, normalizeScoopTargets, parseScoopTarget } from './package_name'
 import {
   ANDROID_SECURITY_BULLETIN_MIRROR_URL,
   ANDROID_SECURITY_BULLETIN_URL,
@@ -603,6 +603,28 @@ export class Cli {
     }
     if (await this.getStrongboxFeatureMask() !== enabled) {
       throw new Error('StrongBox feature-mask state did not match the saved value')
+    }
+  }
+
+  async startApplication(packageName: string, userId: number): Promise<void> {
+    if (!isValidPackageName(packageName) || !Number.isSafeInteger(userId) || userId < 0) {
+      throw new Error('Invalid application launch target')
+    }
+    const result = await exec(
+      `/system/bin/am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p ${shellQuote(packageName)}`,
+    )
+    if (result.errno !== 0 || /error:|exception|no activity found/i.test(`${result.stdout}\n${result.stderr}`)) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || 'Unable to launch application')
+    }
+  }
+
+  async forceStopApplication(packageName: string, userId: number): Promise<void> {
+    if (!isValidPackageName(packageName) || !Number.isSafeInteger(userId) || userId < 0) {
+      throw new Error('Invalid application stop target')
+    }
+    const result = await exec(`/system/bin/am force-stop --user ${userId} ${shellQuote(packageName)}`)
+    if (result.errno !== 0 || result.stderr.trim()) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || 'Unable to stop application')
     }
   }
 

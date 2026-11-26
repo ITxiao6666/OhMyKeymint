@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   MiuixArrowPreference,
   MiuixCard,
@@ -18,7 +18,7 @@ import {
   type MiuixDropdownItem,
 } from 'miuix-vue'
 import MiuixBottomSheet from './StableBottomSheet.vue'
-import { Background, Close, Download, Layers, Photos, Sidebar, Tasks, Theme, Translate, Tune } from 'miuix-vue/icons'
+import { Background, Close, Download, Layers, Photos, Tasks, Theme, Translate, Tune } from 'miuix-vue/icons'
 import {
   ACCENT_COLORS,
   ACCENT_SEEDS,
@@ -116,6 +116,58 @@ const emit = defineEmits<{
 }>()
 
 const logExportBusy = ref(false)
+const strongboxFeatureMask = ref<boolean | null>(null)
+const strongboxFeatureMaskBusy = ref(false)
+
+onMounted(() => { void loadStrongboxFeatureMask() })
+
+async function loadStrongboxFeatureMask(): Promise<void> {
+  try {
+    strongboxFeatureMask.value = await props.cli.getStrongboxFeatureMask()
+  } catch (error) {
+    void showSnackbar({
+      message: error instanceof Error ? error.message : String(error),
+      duration: 6000,
+    })
+  }
+}
+
+async function setStrongboxFeatureMask(enabled: boolean): Promise<void> {
+  if (strongboxFeatureMaskBusy.value || strongboxFeatureMask.value === null) return
+  strongboxFeatureMaskBusy.value = true
+  try {
+    await props.cli.setStrongboxFeatureMask(enabled)
+    strongboxFeatureMask.value = enabled
+    void showSnackbar({
+      message: translate(
+        'settings_strongbox_mask_saved',
+        'Applied. The system feature list updates after a soft reboot.',
+      ),
+      actionLabel: translate('settings_strongbox_mask_reboot_action', 'Reboot device'),
+      duration: 'long',
+    }).then(result => {
+      if (result === 'action') void rebootDevice()
+    })
+  } catch (error) {
+    void showSnackbar({
+      message: error instanceof Error ? error.message : String(error),
+      duration: 6000,
+    })
+  } finally {
+    strongboxFeatureMaskBusy.value = false
+  }
+}
+
+async function rebootDevice(): Promise<void> {
+  try {
+    await props.cli.softReboot()
+  } catch (error) {
+    void showSnackbar({
+      message: error instanceof Error ? error.message : String(error),
+      duration: 6000,
+    })
+  }
+}
 
 async function exportLogs(): Promise<void> {
   if (logExportBusy.value) return
@@ -156,8 +208,6 @@ function readOptions(): Record<AppearanceOption, boolean> {
   return {
     monet: appearance.getOption('monet'),
     barBlur: appearance.getOption('barBlur'),
-    floatingBottomBar: appearance.getOption('floatingBottomBar'),
-    liquidGlass: appearance.getOption('liquidGlass'),
   }
 }
 
@@ -421,41 +471,32 @@ onBeforeUnmount(() => {
             </template>
           </MiuixSwitchPreference>
 
-          <div class="settings-divider"><MiuixDivider /></div>
-
-          <MiuixSwitchPreference
-            :model-value="options.floatingBottomBar"
-            :title="translate('settings_floating_bottom_bar', 'Floating bottom bar')"
-            :summary="translate(
-              'settings_floating_bottom_bar_desc',
-              'Show navigation as a floating panel',
-            )"
-            @update:model-value="setOption('floatingBottomBar', $event)"
-          >
-            <template #start>
-              <span class="settings-preference-icon"><MiuixIcon :icon="Sidebar" :size="22" /></span>
-            </template>
-          </MiuixSwitchPreference>
-
-          <template v-if="options.floatingBottomBar">
-            <div class="settings-divider"><MiuixDivider /></div>
-            <MiuixSwitchPreference
-              :model-value="options.liquidGlass"
-              :title="translate('settings_liquid_glass', 'Liquid glass')"
-              :summary="translate(
-                'settings_liquid_glass_desc',
-                'Add translucent glass depth to surfaces',
-              )"
-              @update:model-value="setOption('liquidGlass', $event)"
-            >
-              <template #start>
-                <span class="settings-preference-icon"><MiuixIcon :icon="Theme" :size="22" /></span>
-              </template>
-            </MiuixSwitchPreference>
-          </template>
         </MiuixCard>
       </section>
 
+
+      <section class="settings-section" aria-labelledby="system-features-title">
+        <MiuixSmallTitle
+          id="system-features-title"
+          :text="translate('settings_system_features', 'System features')"
+        />
+        <MiuixCard class="settings-card" press-feedback="none">
+          <MiuixSwitchPreference
+            :model-value="strongboxFeatureMask ?? false"
+            :disabled="strongboxFeatureMask === null || strongboxFeatureMaskBusy"
+            :title="translate('settings_strongbox_mask', 'Hide StrongBox capability')"
+            :summary="translate(
+              'settings_strongbox_mask_desc',
+              'Hide StrongBox from the system feature list for all apps. Requires Zygisk Next. OMK StrongBox keys are unavailable while enabled. Reboot after changing.',
+            )"
+            @update:model-value="setStrongboxFeatureMask"
+          >
+            <template #start>
+              <span class="settings-preference-icon"><MiuixIcon :icon="Tune" :size="22" /></span>
+            </template>
+          </MiuixSwitchPreference>
+        </MiuixCard>
+      </section>
 
       <section class="settings-section" aria-labelledby="maintenance-title">
         <MiuixSmallTitle

@@ -412,6 +412,8 @@ button { touch-action: manipulation; }
   overflow-x: clip;
   padding-bottom: var(--omk-bottom-inset);
   pointer-events: none;
+  /* Paint the gesture strip so page content never shows below the bar. */
+  background: var(--m-color-surface);
 }
 .main-navigation {
   --omk-nav-indicator-fill: var(--m-color-primary-container);
@@ -423,6 +425,16 @@ button { touch-action: manipulation; }
   pointer-events: auto;
   background: var(--m-color-surface);
 }
+/* The navigation dock always paints an opaque surface, matching KernelSU.
+ * The bar-blur treatment stays limited to the top app bar so page content can
+ * never show through the tab strip. */
+.main-navigation,
+:root[data-bar-blur='true'] .main-navigation {
+  background: var(--m-color-surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 .main-navigation .m-navigation-bar__row { position: relative; max-width: 720px; margin-inline: auto; }
 .main-navigation .m-navigation-bar__item { position: relative; min-width: 0; transition: color 180ms ease, opacity 180ms ease, transform 180ms cubic-bezier(.2, .8, .2, 1); }
 .main-navigation .m-navigation-bar__item:active { transform: scale(.94); }

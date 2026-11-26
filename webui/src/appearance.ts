@@ -25,12 +25,7 @@ export const ACCENT_COLORS = [
 ] as const
 export type AccentColor = typeof ACCENT_COLORS[number]
 
-export const APPEARANCE_OPTIONS = [
-  'monet',
-  'barBlur',
-  'floatingBottomBar',
-  'liquidGlass',
-] as const
+export const APPEARANCE_OPTIONS = ['monet', 'barBlur'] as const
 export type AppearanceOption = typeof APPEARANCE_OPTIONS[number]
 
 // Keep the same palette families and color specification names exposed by
@@ -59,8 +54,6 @@ const DEFAULT_COLOR_SPEC: ColorSpec = 'SPEC_2025'
 const DEFAULT_OPTIONS: Readonly<Record<AppearanceOption, boolean>> = {
   monet: true,
   barBlur: false,
-  floatingBottomBar: false,
-  liquidGlass: false,
 }
 const THEME_QUERY = 'theme'
 const ACCENT_QUERY = 'accent'
@@ -456,8 +449,10 @@ export class AppearanceController {
     root.dataset.themeAccent = this.#accent
     root.dataset.monet = String(this.#options.monet)
     root.dataset.barBlur = String(this.#options.barBlur)
-    root.dataset.floatingBottomBar = String(this.#options.floatingBottomBar)
-    root.dataset.liquidGlass = String(this.#options.liquidGlass)
+    // The floating and liquid-glass navigation variants were removed: the dock
+    // always renders as a docked bar. Keep the attributes for the stylesheet.
+    root.dataset.floatingBottomBar = 'false'
+    root.dataset.liquidGlass = 'false'
     // KernelSU disables its RenderEffect blur when the platform cannot
     // provide it. Keep the same explicit capability state for the WebView
     // fallback instead of painting a solid bar that looks like blur.

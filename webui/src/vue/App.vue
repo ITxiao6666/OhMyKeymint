@@ -11,7 +11,7 @@ import {
   MiuixSnackbarHost,
   showSnackbar,
 } from 'miuix-vue'
-import { All, Settings, Tune } from 'miuix-vue/icons'
+import { All, GridView, Settings, Tune } from 'miuix-vue/icons'
 import { afterPaint, AppList, type AppListSnapshot } from '../app_list/app_list'
 import {
   Cli,
@@ -30,7 +30,7 @@ import HomeView, { type KeyboxStatus, type ModuleStatus, type TeeStatus } from '
 import PifFingerprintDialog from './PifFingerprintDialog.vue'
 import SettingsView from './SettingsView.vue'
 import SoterIdentityDialog from './SoterIdentityDialog.vue'
-import TargetsView from './TargetsView.vue'
+import ApplicationsView from './ApplicationsView.vue'
 import ToolsView, { type ToolEvent } from './ToolsView.vue'
 import FileBrowserSheet from './FileBrowserSheet.vue'
 import './app.scss'
@@ -44,14 +44,14 @@ const pageScroller = document.getElementById('app')!
 
 const pageIndex = ref(0)
 const pageDirection = ref(1)
-const pageScrollPositions = [0, 0, 0]
-const targetsOpen = ref(false)
+const pageScrollPositions = [0, 0, 0, 0]
 const targetsLoading = ref(false)
 const targetsSaving = ref(false)
 const targetsSaveError = ref(false)
 let targetsSavePromise: Promise<boolean> | null = null
 let targetsSaveRequested = false
 const targetsRefreshing = ref(false)
+const applicationProfileOpen = ref(false)
 const snapshot = shallowRef<AppListSnapshot>(appList.getSnapshot())
 const moduleStatus = ref<ModuleStatus>('loading')
 const keyboxStatus = ref<KeyboxStatus>('loading')
@@ -87,15 +87,16 @@ const soterLocalDialog = ref<InstanceType<typeof SoterIdentityDialog> | null>(nu
 const keyboxOpen = ref(false)
 const selectedKeybox = ref<{ name: string, contents: Uint8Array } | null>(null)
 const keyboxBusy = ref(false)
-const targetsView = ref<InstanceType<typeof TargetsView> | null>(null)
+const applicationsView = ref<InstanceType<typeof ApplicationsView> | null>(null)
 const settingsView = ref<InstanceType<typeof SettingsView> | null>(null)
 const toolsView = ref<InstanceType<typeof ToolsView> | null>(null)
 const pifDialog = ref<InstanceType<typeof PifFingerprintDialog> | null>(null)
 
-const pageIds = ['home', 'tools', 'settings'] as const
+const pageIds = ['home', 'tools', 'apps', 'settings'] as const
 const navItems = computed(() => [
   { label: i18n.t('nav_home') === 'nav_home' ? 'Home' : i18n.t('nav_home') },
   { label: i18n.t('nav_tools') === 'nav_tools' ? 'Tools' : i18n.t('nav_tools') },
+  { label: i18n.t('nav_apps') === 'nav_apps' ? 'Apps' : i18n.t('nav_apps') },
   { label: i18n.t('nav_settings') === 'nav_settings' ? 'Settings' : i18n.t('nav_settings') },
 ])
 
@@ -252,37 +253,19 @@ function setPage(index: number): void {
   }
 }
 
-function openTargets(): void {
-  if (targetsOpen.value) return
-  targetsOpen.value = true
-  history.push('app-targets', () => { targetsOpen.value = false })
-  window.setTimeout(() => { if (targetsOpen.value) void reloadApps() }, 220)
-}
-
-function closeTargets(): void {
-  if (!targetsOpen.value) return
-  targetsOpen.value = false
-  if (targetsRefreshTimer !== null) {
-    window.clearTimeout(targetsRefreshTimer)
-    targetsRefreshTimer = null
-  }
-  history.consume('app-targets')
-}
-
 // Package installation happens outside the WebUI.  Refresh when Android
 // brings the WebView back to the foreground so a newly installed app appears
-// without requiring the user to close and reopen the selector.  The short
-// debounce lets the overlay/focus animation paint before crossing the
-// synchronous KernelSU package bridge.
+// without requiring the user to close and reopen the app page. The short
+// debounce lets the page paint before crossing the synchronous package bridge.
 function scheduleTargetsRefresh(): void {
-  if (!targetsOpen.value
+  if (pageIndex.value !== 2
       || document.visibilityState !== 'visible'
       || targetsLoading.value
       || targetsSaving.value
       || targetsRefreshTimer !== null) return
   targetsRefreshTimer = window.setTimeout(() => {
     targetsRefreshTimer = null
-    if (targetsOpen.value && document.visibilityState === 'visible' && !targetsLoading.value && !targetsSaving.value) {
+    if (pageIndex.value === 2 && document.visibilityState === 'visible' && !targetsLoading.value && !targetsSaving.value) {
       void reloadApps()
     }
   }, 180)
@@ -292,11 +275,15 @@ function refreshTargetsWhenForegrounded(): void {
   if (document.visibilityState === 'visible') scheduleTargetsRefresh()
 }
 
-function onTargetsOverlayOpen(): void {
-  const key = 'targets-overlay'
+function onApplicationsOverlayOpen(): void {
+  const key = 'applications-overlay'
   if (overlayHistory.has(key)) return
   overlayHistory.add(key)
-  history.push(key, () => { targetsView.value?.dismissOverlay() })
+  history.push(key, () => {
+    overlayHistory.delete(key)
+    applicationsView.value?.dismissOverlay()
+    if (applicationsView.value?.hasOverlay()) void nextTick(onApplicationsOverlayOpen)
+  })
 }
 
 function onSettingsOverlayOpen(): void {
@@ -329,15 +316,15 @@ function onSettingsOverlayClose(): void {
   if (overlayHistory.delete(key)) history.consume(key)
 }
 
-function onTargetsOverlayClose(): void {
-  const key = 'targets-overlay'
+function onApplicationsOverlayClose(): void {
+  const key = 'applications-overlay'
   if (overlayHistory.delete(key)) history.consume(key)
 }
 
 function handleEscape(): void {
   if (soterLocalOpen.value) { soterLocalDialog.value?.requestClose(); return }
   if (rkpIssueOpen.value && rkpIssueBusy.value) return
-  if (targetsOpen.value && targetsView.value?.dismissOverlay()) return
+  if (pageIndex.value === 2 && applicationsView.value?.dismissOverlay()) return
   if (history.size > 0) history.back()
 }
 
@@ -668,7 +655,6 @@ function formatRkpCreatedAt(timestamp: number): string {
 
 function onTool(event: ToolEvent): void {
   switch (event) {
-    case 'openAppTargets': openTargets(); break
     case 'installKeybox': void chooseKeybox(); break
     case 'syncSecurityPatch': void syncPatch(false); break
     case 'restoreSecurityPatch': void syncPatch(true); break
@@ -709,8 +695,8 @@ onMounted(async () => {
       history.consume('file-selector')
     }
   })
-  // Package enumeration is only needed when the picker opens. In particular,
-  // do not call the synchronous Android package bridge during home startup.
+  // Enumerate installed packages only when the Applications tab opens. Avoid
+  // calling the synchronous Android package bridge during home startup.
   await Promise.all([refreshIdentity(), refreshDiagnostics()])
 })
 
@@ -758,24 +744,17 @@ function onPageScroll(): void {
 watch(pageIndex, (index, previousIndex) => {
   pageScrollPositions[previousIndex] = pageScroller.scrollTop
   void nextTick(() => {
-    if (pageIndex.value === index && !targetsOpen.value) {
+    if (pageIndex.value === index) {
       pageScroller.scrollTo(0, pageScrollPositions[index] ?? 0)
       updateTitleCollapse()
     }
   })
+  if (index === 2 && appList.getEntries().length === 0) {
+    window.setTimeout(() => { if (pageIndex.value === 2) void reloadApps() }, 180)
+  }
   if (navigationPointerId === null) {
     navigationElement?.style.setProperty('--omk-liquid-nav-index', String(index))
   }
-})
-
-watch(targetsOpen, open => {
-  if (open) pageScrollPositions[pageIndex.value] = pageScroller.scrollTop
-  void nextTick(() => {
-    if (targetsOpen.value === open) {
-      pageScroller.scrollTo(0, open ? 0 : pageScrollPositions[pageIndex.value] ?? 0)
-      updateTitleCollapse()
-    }
-  })
 })
 
 watch(pifOpen, open => {
@@ -852,7 +831,7 @@ watch(rkpImportConfirmOpen, open => {
 
 <template>
   <div class="omk-app">
-    <main v-show="!targetsOpen" class="page-host" :style="{ '--omk-page-direction': pageDirection }">
+    <main class="page-host" :style="{ '--omk-page-direction': pageDirection }">
       <Transition name="page-switch">
         <HomeView
           v-show="pageIndex === 0"
@@ -879,7 +858,6 @@ watch(rkpImportConfirmOpen, open => {
           :security-patch="securityPatch"
           @overlay-open="onToolsOverlayOpen"
           @overlay-close="onToolsOverlayClose"
-          @open-app-targets="onTool('openAppTargets')"
           @install-keybox="onTool('installKeybox')"
           @sync-security-patch="onTool('syncSecurityPatch')"
           @restore-security-patch="onTool('restoreSecurityPatch')"
@@ -892,8 +870,27 @@ watch(rkpImportConfirmOpen, open => {
         />
       </Transition>
       <Transition name="page-switch">
-        <SettingsView
+        <ApplicationsView
           v-show="pageIndex === 2"
+          ref="applicationsView"
+          :app-list="appList"
+          :cli="cli"
+          :loading="targetsLoading"
+          :refreshing="targetsRefreshing"
+          :saving="targetsSaving"
+          :save-error="targetsSaveError"
+          :apply-enabled="snapshot.isWritable"
+          :active="pageIndex === 2"
+          :save-selection="saveTargets"
+          :refresh="reloadApps"
+          @overlay-open="onApplicationsOverlayOpen"
+          @overlay-close="onApplicationsOverlayClose"
+          @profile-change="applicationProfileOpen = $event"
+        />
+      </Transition>
+      <Transition name="page-switch">
+        <SettingsView
+          v-show="pageIndex === 3"
           ref="settingsView"
           :cli="cli"
           @overlay-open="onSettingsOverlayOpen"
@@ -903,7 +900,7 @@ watch(rkpImportConfirmOpen, open => {
     </main>
 
     <Teleport to="body">
-      <div v-show="!targetsOpen" class="navigation-dock">
+      <div v-show="pageIndex !== 2 || !applicationProfileOpen" class="navigation-dock">
         <MiuixNavigationBar
           :model-value="pageIndex"
           :items="navItems"
@@ -912,30 +909,11 @@ watch(rkpImportConfirmOpen, open => {
           @update:model-value="setPage"
         >
           <template #icon="{ index }">
-            <MiuixIcon :icon="index === 0 ? All : index === 1 ? Tune : Settings" :size="24" />
+            <MiuixIcon :icon="index === 0 ? All : index === 1 ? Tune : index === 2 ? GridView : Settings" :size="24" />
           </template>
         </MiuixNavigationBar>
       </div>
     </Teleport>
-
-    <Transition name="targets-page">
-      <TargetsView
-        v-if="targetsOpen"
-        ref="targetsView"
-        :app-list="appList"
-        :cli="cli"
-        :loading="targetsLoading"
-        :saving="targetsSaving"
-        :save-error="targetsSaveError"
-        :refreshing="targetsRefreshing"
-        :apply-enabled="snapshot.isWritable"
-        :save-selection="saveTargets"
-        @close="closeTargets"
-        @refresh="reloadApps"
-        @overlay-open="onTargetsOverlayOpen"
-        @overlay-close="onTargetsOverlayClose"
-      />
-    </Transition>
 
     <FileBrowserSheet :selector="fileSelector" />
 
